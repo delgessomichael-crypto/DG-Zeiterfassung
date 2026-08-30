@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="de">
 <head>
@@ -7,19 +8,23 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="dg_icon_192.png">
   <link rel="apple-touch-icon" href="dg_icon_192.png">
-  <title>DG Zeiterfassung</title>
+  <title>DG Zeiterfassung – API Test</title>
   <style>
     *{box-sizing:border-box}
     body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#f3f4f6;color:#111827}
     main{max-width:560px;margin:auto;padding:20px}
-    .card{margin-top:12vh;background:#fff;border-radius:20px;padding:24px;box-shadow:0 8px 30px rgba(0,0,0,.08)}
+    .card{margin-top:8vh;background:#fff;border-radius:20px;padding:24px;box-shadow:0 8px 30px rgba(0,0,0,.08)}
     img{display:block;width:82%;max-width:340px;margin:0 auto 20px}
     h1{text-align:center;font-size:24px}
     p{line-height:1.5}
+    button{width:100%;border:0;border-radius:12px;padding:15px;font-size:18px;font-weight:700;background:#111827;color:#fff;cursor:pointer}
     .status{padding:12px;border-radius:12px;font-weight:700;margin:14px 0}
     .online{background:#dcfce7;color:#166534}
     .offline{background:#ffedd5;color:#9a3412}
-    .note{font-size:14px;color:#6b7280}
+    .ok{background:#dcfce7;color:#166534}
+    .err{background:#fee2e2;color:#991b1b}
+    .info{background:#e0f2fe;color:#075985}
+    .note{font-size:14px;color:#6b7280;word-break:break-word}
   </style>
 </head>
 <body>
@@ -27,25 +32,76 @@
   <div class="card">
     <img src="dg_icon_512.png" alt="Del Gesso">
     <h1>DG Zeiterfassung</h1>
-    <div id="status" class="status"></div>
-    <p>Die installierbare PWA-Hülle ist eingerichtet und kann auch ohne Internet gestartet werden.</p>
-    <p class="note">Nächster Schritt: Die bestehende Zeiterfassungsmaske und die Offline-Warteschlange werden in diese PWA übernommen und mit dem Büro-Backend synchronisiert.</p>
+
+    <div id="netStatus" class="status"></div>
+
+    <button onclick="testBackend()">Backend-Verbindung testen</button>
+
+    <div id="apiStatus" class="status info">Noch nicht getestet.</div>
+
+    <p class="note">Endpoint:<br>https://script.google.com/macros/s/AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc/exec</p>
   </div>
 </main>
+
 <script>
-  function updateStatus(){
-    const el=document.getElementById('status');
+  const API_URL = 'https://script.google.com/macros/s/AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc/exec';
+
+  function updateNetStatus(){
+    const el=document.getElementById('netStatus');
     if(navigator.onLine){
       el.className='status online';
       el.textContent='🟢 Online';
     }else{
       el.className='status offline';
-      el.textContent='🟠 Offline – App bleibt verfügbar';
+      el.textContent='🟠 Offline – Test nicht möglich';
     }
   }
-  window.addEventListener('online',updateStatus);
-  window.addEventListener('offline',updateStatus);
-  updateStatus();
+
+  async function testBackend(){
+    const out=document.getElementById('apiStatus');
+
+    if(!navigator.onLine){
+      out.className='status err';
+      out.textContent='Keine Internetverbindung.';
+      return;
+    }
+
+    out.className='status info';
+    out.textContent='Verbindung wird getestet ...';
+
+    try{
+      const response = await fetch(API_URL, {
+        method:'POST',
+        redirect:'follow',
+        headers:{
+          'Content-Type':'text/plain;charset=utf-8'
+        },
+        body:JSON.stringify({
+          action:'ping',
+          source:'DG-PWA'
+        })
+      });
+
+      const text = await response.text();
+      let data = null;
+      try{ data = JSON.parse(text); }catch(e){}
+
+      if(response.ok && data && data.ok){
+        out.className='status ok';
+        out.textContent='✅ '+(data.message || 'Backend erreichbar');
+      }else{
+        out.className='status err';
+        out.textContent='Antwort erhalten, aber nicht wie erwartet: '+text.slice(0,240);
+      }
+    }catch(err){
+      out.className='status err';
+      out.textContent='Verbindung fehlgeschlagen: '+(err && err.message ? err.message : String(err));
+    }
+  }
+
+  window.addEventListener('online',updateNetStatus);
+  window.addEventListener('offline',updateNetStatus);
+  updateNetStatus();
 
   if('serviceWorker' in navigator){
     window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));
