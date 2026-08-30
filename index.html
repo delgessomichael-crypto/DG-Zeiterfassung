@@ -8,14 +8,15 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="dg_icon_192.png">
   <link rel="apple-touch-icon" href="dg_icon_192.png">
-  <title>DG Zeiterfassung – Login Test</title>
+  <title>DG Zeiterfassung – Tagesdaten Test</title>
   <style>
     *{box-sizing:border-box}
     body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#f3f4f6;color:#111827}
-    main{max-width:560px;margin:auto;padding:20px}
-    .card{margin-top:6vh;background:#fff;border-radius:20px;padding:24px;box-shadow:0 8px 30px rgba(0,0,0,.08)}
-    img{display:block;width:82%;max-width:340px;margin:0 auto 20px}
+    main{max-width:620px;margin:auto;padding:20px}
+    .card{margin-top:4vh;background:#fff;border-radius:20px;padding:24px;box-shadow:0 8px 30px rgba(0,0,0,.08)}
+    img{display:block;width:78%;max-width:320px;margin:0 auto 18px}
     h1{text-align:center;font-size:24px}
+    h2{font-size:21px;margin-top:22px}
     label{display:block;margin:14px 0 6px;font-weight:700}
     select,input,button{width:100%;font:inherit}
     select,input{padding:13px;border:1px solid #d1d5db;border-radius:12px;background:#fff}
@@ -27,37 +28,79 @@
     .err{background:#fee2e2;color:#991b1b}
     .info{background:#e0f2fe;color:#075985}
     .hidden{display:none}
+    .entry{padding:12px 0;border-top:1px solid #e5e7eb}
+    .entry:first-child{border-top:0}
+    .muted{color:#6b7280}
+    .total{font-size:20px;font-weight:800;margin-top:14px}
   </style>
 </head>
 <body>
 <main>
   <div class="card">
     <img src="dg_icon_512.png" alt="Del Gesso">
-    <h1>Mitarbeiter-Anmeldung</h1>
+    <h1>DG Zeiterfassung</h1>
 
     <div id="netStatus" class="status"></div>
 
-    <label for="employee">Mitarbeiter</label>
-    <select id="employee">
-      <option value="">Bitte auswählen</option>
-      <option>Del Gesso Michael</option>
-      <option>Del Gesso Marco</option>
-      <option>Del Gesso Katia</option>
-      <option>Del Gesso Aurora</option>
-      <option>Sharifi Habibullah</option>
-    </select>
+    <div id="loginArea">
+      <h2>Mitarbeiter-Anmeldung</h2>
 
-    <label for="pin">PIN</label>
-    <input id="pin" type="password" inputmode="numeric" maxlength="10" placeholder="PIN">
+      <label for="employee">Mitarbeiter</label>
+      <select id="employee">
+        <option value="">Bitte auswählen</option>
+        <option>Del Gesso Michael</option>
+        <option>Del Gesso Marco</option>
+        <option>Del Gesso Katia</option>
+        <option>Del Gesso Aurora</option>
+        <option>Sharifi Habibullah</option>
+      </select>
 
-    <button onclick="login()">Anmelden</button>
+      <label for="pin">PIN</label>
+      <input id="pin" type="password" inputmode="numeric" maxlength="10" placeholder="PIN">
 
-    <div id="loginStatus" class="status info">Noch nicht angemeldet.</div>
+      <button onclick="login()">Anmelden</button>
+      <div id="loginStatus" class="status info">Noch nicht angemeldet.</div>
+    </div>
+
+    <div id="dayArea" class="hidden">
+      <h2>Tagesdaten</h2>
+      <div id="employeeLabel" class="status ok"></div>
+
+      <label for="date">Datum</label>
+      <input id="date" type="date" onchange="loadDayData()">
+
+      <button onclick="loadDayData()">Tag aktualisieren</button>
+
+      <div id="dayStatus" class="status info">Tagesdaten werden geladen ...</div>
+      <div id="entries"></div>
+      <div id="total" class="total"></div>
+    </div>
   </div>
 </main>
 
 <script>
   const API_URL = 'https://script.google.com/macros/s/AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc/exec';
+
+  function todayValue(){
+    const d=new Date();
+    const y=d.getFullYear();
+    const m=String(d.getMonth()+1).padStart(2,'0');
+    const day=String(d.getDate()).padStart(2,'0');
+    return y+'-'+m+'-'+day;
+  }
+
+  function formatHours(v){
+    return Number(v||0).toFixed(2).replace('.',',');
+  }
+
+  function escapeHtml(v){
+    return String(v==null?'':v)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;')
+      .replace(/'/g,'&#39;');
+  }
 
   function updateNetStatus(){
     const el=document.getElementById('netStatus');
@@ -66,8 +109,27 @@
       el.textContent='🟢 Online';
     }else{
       el.className='status offline';
-      el.textContent='🟠 Offline – Anmeldung derzeit nicht möglich';
+      el.textContent='🟠 Offline';
     }
+  }
+
+  async function apiCall(payload){
+    const response=await fetch(API_URL,{
+      method:'POST',
+      redirect:'follow',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify(payload)
+    });
+
+    const text=await response.text();
+    let data=null;
+    try{data=JSON.parse(text);}catch(e){}
+
+    if(!response.ok || !data){
+      throw new Error('Ungültige Antwort vom Backend.');
+    }
+
+    return data;
   }
 
   async function login(){
@@ -89,7 +151,7 @@
 
     if(!navigator.onLine){
       out.className='status err';
-      out.textContent='Keine Internetverbindung. Erste Anmeldung muss online erfolgen.';
+      out.textContent='Für diesen Test bitte online anmelden.';
       return;
     }
 
@@ -97,33 +159,92 @@
     out.textContent='Anmeldung wird geprüft ...';
 
     try{
-      const response=await fetch(API_URL,{
-        method:'POST',
-        redirect:'follow',
-        headers:{'Content-Type':'text/plain;charset=utf-8'},
-        body:JSON.stringify({
-          action:'employeeLogin',
-          employee:employee,
-          pin:pin
-        })
+      const data=await apiCall({
+        action:'employeeLogin',
+        employee:employee,
+        pin:pin
       });
 
-      const text=await response.text();
-      let data=null;
-      try{data=JSON.parse(text);}catch(e){}
+      if(!data.ok) throw new Error(data.error||'Anmeldung fehlgeschlagen.');
 
-      if(response.ok && data && data.ok){
-        localStorage.setItem('dg_employee',data.employee);
-        localStorage.setItem('dg_employee_pin',pin);
-        out.className='status ok';
-        out.textContent='✅ Anmeldung erfolgreich: '+data.employee;
-      }else{
-        out.className='status err';
-        out.textContent=(data&&data.error)?data.error:'Anmeldung fehlgeschlagen.';
-      }
+      localStorage.setItem('dg_employee',data.employee);
+      localStorage.setItem('dg_employee_pin',pin);
+
+      document.getElementById('loginArea').classList.add('hidden');
+      document.getElementById('dayArea').classList.remove('hidden');
+      document.getElementById('employeeLabel').textContent='✅ Angemeldet: '+data.employee;
+      document.getElementById('date').value=todayValue();
+
+      await loadDayData();
+
     }catch(err){
       out.className='status err';
-      out.textContent='Verbindung fehlgeschlagen: '+(err&&err.message?err.message:String(err));
+      out.textContent=err.message||String(err);
+    }
+  }
+
+  async function loadDayData(){
+    const employee=localStorage.getItem('dg_employee')||'';
+    const pin=localStorage.getItem('dg_employee_pin')||'';
+    const date=document.getElementById('date').value;
+    const status=document.getElementById('dayStatus');
+
+    if(!employee||!pin){
+      status.className='status err';
+      status.textContent='Keine Mitarbeiter-Anmeldung gefunden.';
+      return;
+    }
+
+    if(!date){
+      status.className='status err';
+      status.textContent='Bitte Datum auswählen.';
+      return;
+    }
+
+    if(!navigator.onLine){
+      status.className='status offline';
+      status.textContent='Offline: Tagesdaten können momentan nicht vom Büro geladen werden.';
+      return;
+    }
+
+    status.className='status info';
+    status.textContent='Tagesdaten werden geladen ...';
+
+    try{
+      const result=await apiCall({
+        action:'getDayData',
+        employee:employee,
+        pin:pin,
+        date:date
+      });
+
+      if(!result.ok) throw new Error(result.error||'Tagesdaten konnten nicht geladen werden.');
+
+      const data=result.data||{entries:[],total:0,closed:false};
+      const entries=data.entries||[];
+
+      if(!entries.length){
+        document.getElementById('entries').innerHTML='<div class="muted">Keine Einträge für diesen Tag vorhanden.</div>';
+      }else{
+        document.getElementById('entries').innerHTML=entries.map(function(entry){
+          return '<div class="entry">'+
+            '<strong>'+escapeHtml(entry.customer||'')+'</strong><br>'+
+            escapeHtml(entry.start||'')+' - '+escapeHtml(entry.end||'')+
+            ' · '+formatHours(entry.hours||0)+' Std.<br>'+
+            '<span class="muted">'+escapeHtml(entry.activity||'')+'</span>'+
+            '</div>';
+        }).join('');
+      }
+
+      document.getElementById('total').textContent='Gesamt: '+formatHours(data.total||0)+' Std.';
+      status.className='status ok';
+      status.textContent=data.closed
+        ?'✅ Tagesdaten geladen – Tag abgeschlossen.'
+        :'✅ Tagesdaten geladen.';
+
+    }catch(err){
+      status.className='status err';
+      status.textContent=err.message||String(err);
     }
   }
 
