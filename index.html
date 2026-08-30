@@ -70,6 +70,18 @@
 
     <section id="employeeView">
       <div class="card">
+        <div class="head-row">
+          <div>
+            <h2 style="margin-bottom:4px">Meine Termine</h2>
+            <div class="muted small">Heute und die nächsten 7 Tage aus deinem zugeordneten DG-Kalender.</div>
+          </div>
+          <button class="btn secondary" onclick="loadCalendarEvents()">Aktualisieren</button>
+        </div>
+        <div id="calendarStatus"></div>
+        <div id="calendarEvents" class="muted">Termine werden geladen ...</div>
+      </div>
+
+      <div class="card">
         <h2>Arbeitszeit erfassen</h2>
         <div class="grid2"><div><label for="date">Datum</label><input id="date" type="date" onchange="loadDay()"></div><div><label for="customer">Kunde / Baustelle</label><input id="customer" placeholder="z.B. Müller, Fürth"></div></div>
         <div class="grid2"><div><label for="start">Von</label><input id="start" type="time" onchange="calculateHours()"></div><div><label for="end">Bis</label><input id="end" type="time" onchange="calculateHours()"></div></div>
@@ -159,7 +171,7 @@ function setMessage(id,text,type='info'){const el=$(id);el.className='status '+t
 function clearMessage(id){const el=$(id);el.className='';el.textContent=''}
 
 function updateConnection(){const online=navigator.onLine;setMessage('connectionBar',online?'🟢 Online':'🟠 Offline – Eingaben werden auf diesem Gerät gespeichert.',online?'ok':'warn');if($('loginNet'))setMessage('loginNet',online?'🟢 Online':'🟠 Offline',online?'ok':'warn');refreshQueueCount()}
-window.addEventListener('online',()=>{updateConnection();syncQueue()});window.addEventListener('offline',updateConnection);
+window.addEventListener('online',()=>{updateConnection();syncQueue();loadCalendarEvents()});window.addEventListener('offline',updateConnection);
 
 async function api(payload){
   const response=await fetch(API_URL,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)});
@@ -169,9 +181,101 @@ async function api(payload){
 
 async function loginEmployee(){const employee=$('loginEmployee').value,pin=$('loginPin').value;if(!employee){setMessage('loginStatus','Bitte Mitarbeiter auswählen.','error');return}if(!pin){setMessage('loginStatus','Bitte PIN eingeben.','error');return}if(!navigator.onLine){setMessage('loginStatus','Die erste Anmeldung muss online erfolgen.','error');return}try{setMessage('loginStatus','Anmeldung wird geprüft ...','info');const res=await api({action:'employeeLogin',employee,pin});localStorage.setItem('dg_employee',res.employee||employee);localStorage.setItem('dg_employee_pin',pin);openMain()}catch(e){setMessage('loginStatus',e.message,'error')}}
 function logout(){localStorage.removeItem('dg_employee');localStorage.removeItem('dg_employee_pin');$('mainScreen').classList.add('hidden');$('loginScreen').classList.remove('hidden');$('loginPin').value=''}
-function openMain(){const a=auth();$('loginScreen').classList.add('hidden');$('mainScreen').classList.remove('hidden');$('employeeLabel').textContent='Angemeldet: '+a.employee;$('date').value=localDate();updateAdditionalEmployeeOptions();requestAnimationFrame(()=>{customerPad.resize();employeePad.resize()});updateConnection();loadDay()}
+function openMain(){const a=auth();$('loginScreen').classList.add('hidden');$('mainScreen').classList.remove('hidden');$('employeeLabel').textContent='Angemeldet: '+a.employee;$('date').value=localDate();updateAdditionalEmployeeOptions();requestAnimationFrame(()=>{customerPad.resize();employeePad.resize()});updateConnection();loadDay();loadCalendarEvents()}
 function showEmployee(){$('employeeView').classList.remove('hidden');$('bossView').classList.add('hidden');$('employeeTab').classList.add('active');$('bossTab').classList.remove('active')}
 function showBoss(){$('employeeView').classList.add('hidden');$('bossView').classList.remove('hidden');$('employeeTab').classList.remove('active');$('bossTab').classList.add('active')}
+
+function formatDateDE(value){
+  const p=String(value||'').split('-');
+  return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:String(value||'');
+}
+
+async function loadCalendarEvents(){
+  const a=auth();
+  if(!a.employee||!a.pin)return;
+
+  if(!navigator.onLine){
+    const cached=localStorage.getItem('dg_calendar_'+a.employee);
+    if(cached){
+      renderCalendarEvents(JSON.parse(cached));
+      setMessage('calendarStatus','🟠 Offline – zuletzt geladene Termine werden angezeigt.','warn');
+    }else{
+      setMessage('calendarStatus','🟠 Offline – Termine wurden auf diesem Gerät noch nicht geladen.','warn');
+      $('calendarEvents').innerHTML='<div class="muted">Keine zwischengespeicherten Termine vorhanden.</div>';
+    }
+    return;
+  }
+
+  try{
+    setMessage('calendarStatus','Termine werden geladen ...','info');
+    const events=await api({
+      action:'getEmployeeCalendarEvents',
+      employee:a.employee,
+      pin:a.pin,
+      startDate:localDate(),
+      days:7
+    });
+    localStorage.setItem('dg_calendar_'+a.employee,JSON.stringify(events||[]));
+    renderCalendarEvents(events||[]);
+    clearMessage('calendarStatus');
+  }catch(e){
+    setMessage('calendarStatus',e.message,'error');
+  }
+}
+
+function renderCalendarEvents(events){
+  if(!events.length){
+    $('calendarEvents').innerHTML='<div class="muted">Keine Termine in den nächsten 7 Tagen.</div>';
+    return;
+  }
+
+  $('calendarEvents').innerHTML=events.map((event,index)=>{
+    const location=event.location?'<br><span class="muted">📍 '+esc(event.location)+'</span>':'';
+    const description=event.description?'<br><span class="muted">'+esc(event.description)+'</span>':'';
+    const time=event.allDay?'Ganztägig':esc(event.startTime)+' - '+esc(event.endTime);
+
+    return `<div class="entry">
+      <strong>${formatDateDE(event.startDate)} · ${time}</strong><br>
+      <strong>${esc(event.title||'Termin')}</strong>
+      ${location}
+      ${description}
+      <div class="button-row" style="margin-top:8px">
+        <button class="btn primary" data-index="${index}" onclick="takeCalendarEvent(Number(this.dataset.index))">Auftrag übernehmen</button>
+        ${event.location?`<button class="btn secondary" data-location="${esc(event.location)}" onclick="openNavigation(this.dataset.location)">Navigation</button>`:''}
+      </div>
+    </div>`;
+  }).join('');
+
+  window.__dgCalendarEvents=events;
+}
+
+function takeCalendarEvent(index){
+  const events=window.__dgCalendarEvents||[];
+  const event=events[index];
+  if(!event)return;
+
+  $('date').value=event.startDate||localDate();
+
+  let customer=event.title||'';
+  if(event.location){
+    customer+=(customer?' - ':'')+event.location;
+  }
+  $('customer').value=customer;
+
+  if(!$('activity').value.trim()&&event.description){
+    $('activity').value=event.description;
+  }
+
+  showEmployee();
+  $('customer').scrollIntoView({behavior:'smooth',block:'center'});
+  setMessage('entryStatus','✅ Termin übernommen. Tatsächliche Von/Bis-Zeit bitte beim Einsatz eintragen.','ok');
+  loadDay();
+}
+
+function openNavigation(location){
+  if(!location)return;
+  window.open('https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(location),'_blank');
+}
 
 function calculateHours(){const s=$('start').value,e=$('end').value;if(!s||!e){$('hours').value='';return}const a=s.split(':').map(Number),b=e.split(':').map(Number);let sm=a[0]*60+a[1],em=b[0]*60+b[1];if(em<sm)em+=1440;const mins=em-sm;$('hours').value=mins>0?(mins/60).toFixed(2):''}
 function toggleMaterial(){const yes=document.querySelector('input[name="materialUsed"]:checked').value==='yes';$('materialBox').classList.toggle('hidden',!yes);if(!yes)$('material').value=''}
