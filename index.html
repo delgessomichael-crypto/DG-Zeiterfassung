@@ -8,38 +8,51 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="dg_icon_192.png">
   <link rel="apple-touch-icon" href="dg_icon_192.png">
-  <title>DG Zeiterfassung – API Test</title>
+  <title>DG Zeiterfassung – Login Test</title>
   <style>
     *{box-sizing:border-box}
     body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#f3f4f6;color:#111827}
     main{max-width:560px;margin:auto;padding:20px}
-    .card{margin-top:8vh;background:#fff;border-radius:20px;padding:24px;box-shadow:0 8px 30px rgba(0,0,0,.08)}
+    .card{margin-top:6vh;background:#fff;border-radius:20px;padding:24px;box-shadow:0 8px 30px rgba(0,0,0,.08)}
     img{display:block;width:82%;max-width:340px;margin:0 auto 20px}
     h1{text-align:center;font-size:24px}
-    p{line-height:1.5}
-    button{width:100%;border:0;border-radius:12px;padding:15px;font-size:18px;font-weight:700;background:#111827;color:#fff;cursor:pointer}
-    .status{padding:12px;border-radius:12px;font-weight:700;margin:14px 0}
+    label{display:block;margin:14px 0 6px;font-weight:700}
+    select,input,button{width:100%;font:inherit}
+    select,input{padding:13px;border:1px solid #d1d5db;border-radius:12px;background:#fff}
+    button{border:0;border-radius:12px;padding:15px;font-size:18px;font-weight:700;background:#111827;color:#fff;cursor:pointer;margin-top:16px}
+    .status{padding:12px;border-radius:12px;font-weight:700;margin-top:14px}
     .online{background:#dcfce7;color:#166534}
     .offline{background:#ffedd5;color:#9a3412}
     .ok{background:#dcfce7;color:#166534}
     .err{background:#fee2e2;color:#991b1b}
     .info{background:#e0f2fe;color:#075985}
-    .note{font-size:14px;color:#6b7280;word-break:break-word}
+    .hidden{display:none}
   </style>
 </head>
 <body>
 <main>
   <div class="card">
     <img src="dg_icon_512.png" alt="Del Gesso">
-    <h1>DG Zeiterfassung</h1>
+    <h1>Mitarbeiter-Anmeldung</h1>
 
     <div id="netStatus" class="status"></div>
 
-    <button onclick="testBackend()">Backend-Verbindung testen</button>
+    <label for="employee">Mitarbeiter</label>
+    <select id="employee">
+      <option value="">Bitte auswählen</option>
+      <option>Del Gesso Michael</option>
+      <option>Del Gesso Marco</option>
+      <option>Del Gesso Katia</option>
+      <option>Del Gesso Aurora</option>
+      <option>Sharifi Habibullah</option>
+    </select>
 
-    <div id="apiStatus" class="status info">Noch nicht getestet.</div>
+    <label for="pin">PIN</label>
+    <input id="pin" type="password" inputmode="numeric" maxlength="10" placeholder="PIN">
 
-    <p class="note">Endpoint:<br>https://script.google.com/macros/s/AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc/exec</p>
+    <button onclick="login()">Anmelden</button>
+
+    <div id="loginStatus" class="status info">Noch nicht angemeldet.</div>
   </div>
 </main>
 
@@ -53,49 +66,64 @@
       el.textContent='🟢 Online';
     }else{
       el.className='status offline';
-      el.textContent='🟠 Offline – Test nicht möglich';
+      el.textContent='🟠 Offline – Anmeldung derzeit nicht möglich';
     }
   }
 
-  async function testBackend(){
-    const out=document.getElementById('apiStatus');
+  async function login(){
+    const employee=document.getElementById('employee').value;
+    const pin=document.getElementById('pin').value;
+    const out=document.getElementById('loginStatus');
+
+    if(!employee){
+      out.className='status err';
+      out.textContent='Bitte Mitarbeiter auswählen.';
+      return;
+    }
+
+    if(!pin){
+      out.className='status err';
+      out.textContent='Bitte PIN eingeben.';
+      return;
+    }
 
     if(!navigator.onLine){
       out.className='status err';
-      out.textContent='Keine Internetverbindung.';
+      out.textContent='Keine Internetverbindung. Erste Anmeldung muss online erfolgen.';
       return;
     }
 
     out.className='status info';
-    out.textContent='Verbindung wird getestet ...';
+    out.textContent='Anmeldung wird geprüft ...';
 
     try{
-      const response = await fetch(API_URL, {
+      const response=await fetch(API_URL,{
         method:'POST',
         redirect:'follow',
-        headers:{
-          'Content-Type':'text/plain;charset=utf-8'
-        },
+        headers:{'Content-Type':'text/plain;charset=utf-8'},
         body:JSON.stringify({
-          action:'ping',
-          source:'DG-PWA'
+          action:'employeeLogin',
+          employee:employee,
+          pin:pin
         })
       });
 
-      const text = await response.text();
-      let data = null;
-      try{ data = JSON.parse(text); }catch(e){}
+      const text=await response.text();
+      let data=null;
+      try{data=JSON.parse(text);}catch(e){}
 
       if(response.ok && data && data.ok){
+        localStorage.setItem('dg_employee',data.employee);
+        localStorage.setItem('dg_employee_pin',pin);
         out.className='status ok';
-        out.textContent='✅ '+(data.message || 'Backend erreichbar');
+        out.textContent='✅ Anmeldung erfolgreich: '+data.employee;
       }else{
         out.className='status err';
-        out.textContent='Antwort erhalten, aber nicht wie erwartet: '+text.slice(0,240);
+        out.textContent=(data&&data.error)?data.error:'Anmeldung fehlgeschlagen.';
       }
     }catch(err){
       out.className='status err';
-      out.textContent='Verbindung fehlgeschlagen: '+(err && err.message ? err.message : String(err));
+      out.textContent='Verbindung fehlgeschlagen: '+(err&&err.message?err.message:String(err));
     }
   }
 
