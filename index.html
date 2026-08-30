@@ -29,7 +29,10 @@
     .error{background:var(--errbg);color:var(--err)}.info{background:#e0f2fe;color:#075985}.muted{color:var(--muted)}.small{font-size:13px}
     .total{font-size:20px;font-weight:800;margin:12px 0}.entry{padding:13px 0;border-top:1px solid #e5e7eb}.entry:first-child{border-top:0}
     canvas{width:100%;height:180px;border:2px solid #9ca3af;border-radius:12px;background:#fff;display:block;touch-action:none}.offlinebar{position:sticky;top:0;z-index:20;margin-bottom:12px}
-    .queue{display:flex;justify-content:space-between;align-items:center;gap:10px}.queue button{width:auto}details{margin-top:8px}summary{font-weight:700;cursor:pointer}
+    .queue{display:flex;justify-content:space-between;align-items:center;gap:10px}.queue button{width:auto}
+    .multi-dropdown{position:relative;margin-top:8px}.multi-menu{border:1px solid var(--line);border-radius:12px;padding:8px;background:#fff;margin-top:6px}
+    .multi-menu label{display:flex;align-items:center;gap:9px;padding:9px;margin:0;border-radius:8px}.multi-menu label:hover{background:#f3f4f6}.multi-menu input{width:auto}
+    details{margin-top:8px}summary{font-weight:700;cursor:pointer}
     @media(max-width:700px){.grid2,.button-row,.tabs{grid-template-columns:1fr}.screen{padding:9px}.head-row{align-items:flex-start;flex-direction:column}.head-row button{width:100%}}
   </style>
 </head>
@@ -83,6 +86,26 @@
 
         <div class="radio-row"><strong>Material verbaut?</strong><label><input type="radio" name="materialUsed" value="no" checked onchange="toggleMaterial()">Nein</label><label><input type="radio" name="materialUsed" value="yes" onchange="toggleMaterial()">Ja</label></div>
         <div id="materialBox" class="hidden"><label for="material">Verbautes Material</label><textarea id="material" placeholder="Menge und Bezeichnung"></textarea></div>
+
+        <div class="radio-row">
+          <strong>Weitere Mitarbeiter anwesend?</strong>
+          <label><input type="radio" name="additionalEmployeesUsed" value="no" checked onchange="toggleAdditionalEmployees()">Nein</label>
+          <label><input type="radio" name="additionalEmployeesUsed" value="yes" onchange="toggleAdditionalEmployees()">Ja</label>
+        </div>
+        <div id="additionalEmployeesBox" class="hidden">
+          <label>Weitere Mitarbeiter auswählen</label>
+          <div class="multi-dropdown">
+            <button id="additionalEmployeesButton" type="button" class="btn secondary" style="width:100%" onclick="toggleAdditionalEmployeesMenu()">Mitarbeiter auswählen</button>
+            <div id="additionalEmployeesMenu" class="multi-menu hidden">
+              <label data-employee="Del Gesso Michael"><input type="checkbox" name="additionalEmployee" value="Del Gesso Michael" onchange="updateAdditionalEmployeesButton()">Del Gesso Michael</label>
+              <label data-employee="Del Gesso Marco"><input type="checkbox" name="additionalEmployee" value="Del Gesso Marco" onchange="updateAdditionalEmployeesButton()">Del Gesso Marco</label>
+              <label data-employee="Del Gesso Katia"><input type="checkbox" name="additionalEmployee" value="Del Gesso Katia" onchange="updateAdditionalEmployeesButton()">Del Gesso Katia</label>
+              <label data-employee="Del Gesso Aurora"><input type="checkbox" name="additionalEmployee" value="Del Gesso Aurora" onchange="updateAdditionalEmployeesButton()">Del Gesso Aurora</label>
+              <label data-employee="Sharifi Habibullah"><input type="checkbox" name="additionalEmployee" value="Sharifi Habibullah" onchange="updateAdditionalEmployeesButton()">Sharifi Habibullah</label>
+            </div>
+          </div>
+          <div class="muted small">Mehrfachauswahl möglich. Der angemeldete Mitarbeiter wird nicht nochmals berechnet.</div>
+        </div>
 
         <h3 style="margin-top:20px">Kundenunterschrift</h3><div class="muted small">Bei vorhandener Unterschrift wird der Auftrag nach der Übertragung automatisch ans Büro gesendet.</div>
         <canvas id="customerSignature"></canvas>
@@ -146,12 +169,42 @@ async function api(payload){
 
 async function loginEmployee(){const employee=$('loginEmployee').value,pin=$('loginPin').value;if(!employee){setMessage('loginStatus','Bitte Mitarbeiter auswählen.','error');return}if(!pin){setMessage('loginStatus','Bitte PIN eingeben.','error');return}if(!navigator.onLine){setMessage('loginStatus','Die erste Anmeldung muss online erfolgen.','error');return}try{setMessage('loginStatus','Anmeldung wird geprüft ...','info');const res=await api({action:'employeeLogin',employee,pin});localStorage.setItem('dg_employee',res.employee||employee);localStorage.setItem('dg_employee_pin',pin);openMain()}catch(e){setMessage('loginStatus',e.message,'error')}}
 function logout(){localStorage.removeItem('dg_employee');localStorage.removeItem('dg_employee_pin');$('mainScreen').classList.add('hidden');$('loginScreen').classList.remove('hidden');$('loginPin').value=''}
-function openMain(){const a=auth();$('loginScreen').classList.add('hidden');$('mainScreen').classList.remove('hidden');$('employeeLabel').textContent='Angemeldet: '+a.employee;$('date').value=localDate();requestAnimationFrame(()=>{customerPad.resize();employeePad.resize()});updateConnection();loadDay()}
+function openMain(){const a=auth();$('loginScreen').classList.add('hidden');$('mainScreen').classList.remove('hidden');$('employeeLabel').textContent='Angemeldet: '+a.employee;$('date').value=localDate();updateAdditionalEmployeeOptions();requestAnimationFrame(()=>{customerPad.resize();employeePad.resize()});updateConnection();loadDay()}
 function showEmployee(){$('employeeView').classList.remove('hidden');$('bossView').classList.add('hidden');$('employeeTab').classList.add('active');$('bossTab').classList.remove('active')}
 function showBoss(){$('employeeView').classList.add('hidden');$('bossView').classList.remove('hidden');$('employeeTab').classList.remove('active');$('bossTab').classList.add('active')}
 
 function calculateHours(){const s=$('start').value,e=$('end').value;if(!s||!e){$('hours').value='';return}const a=s.split(':').map(Number),b=e.split(':').map(Number);let sm=a[0]*60+a[1],em=b[0]*60+b[1];if(em<sm)em+=1440;const mins=em-sm;$('hours').value=mins>0?(mins/60).toFixed(2):''}
 function toggleMaterial(){const yes=document.querySelector('input[name="materialUsed"]:checked').value==='yes';$('materialBox').classList.toggle('hidden',!yes);if(!yes)$('material').value=''}
+
+function selectedAdditionalEmployees(){return Array.from(document.querySelectorAll('input[name="additionalEmployee"]:checked')).map(x=>x.value)}
+function toggleAdditionalEmployees(){
+  const yes=document.querySelector('input[name="additionalEmployeesUsed"]:checked').value==='yes';
+  $('additionalEmployeesBox').classList.toggle('hidden',!yes);
+  if(!yes) clearAdditionalEmployees();
+}
+function toggleAdditionalEmployeesMenu(){$('additionalEmployeesMenu').classList.toggle('hidden')}
+function clearAdditionalEmployees(){
+  document.querySelectorAll('input[name="additionalEmployee"]').forEach(x=>x.checked=false);
+  $('additionalEmployeesMenu').classList.add('hidden');
+  updateAdditionalEmployeesButton();
+}
+function updateAdditionalEmployeesButton(){
+  const selected=selectedAdditionalEmployees();
+  $('additionalEmployeesButton').textContent=selected.length
+    ? selected.length+' Mitarbeiter ausgewählt: '+selected.join(', ')
+    : 'Mitarbeiter auswählen';
+}
+function updateAdditionalEmployeeOptions(){
+  const current=auth().employee;
+  document.querySelectorAll('#additionalEmployeesMenu label[data-employee]').forEach(label=>{
+    const input=label.querySelector('input');
+    const isCurrent=label.dataset.employee===current;
+    input.disabled=isCurrent;
+    if(isCurrent) input.checked=false;
+    label.style.display=isCurrent?'none':'flex';
+  });
+  updateAdditionalEmployeesButton();
+}
 function togglePhotos(){const yes=document.querySelector('input[name="photosUsed"]:checked').value==='yes';$('photoBox').classList.toggle('hidden',!yes);if(!yes)clearPhotos()}
 function updatePhotoStatus(){$('photoStatus').textContent=preparedPhotos.length?preparedPhotos.length+' von 6 Bild(ern) bereit.':'Noch keine Bilder hinzugefügt.';$('clearPhotosBtn').classList.toggle('hidden',preparedPhotos.length===0)}
 function clearPhotos(){preparedPhotos=[];$('cameraPhoto').value='';$('galleryPhotos').value='';updatePhotoStatus()}
@@ -163,14 +216,14 @@ function clearCustomerSignature(){customerPad.clear();noCustomerPresent=false}
 function markNoCustomer(){customerPad.clear();noCustomerPresent=true;setMessage('entryStatus','Kundenunterschrift wird ausgelassen.','info')}
 
 async function saveEntry(){
-  const a=auth(),date=$('date').value,customer=$('customer').value.trim(),activity=$('activity').value.trim(),hours=Number($('hours').value),materialUsed=document.querySelector('input[name="materialUsed"]:checked').value==='yes',material=$('material').value.trim();
-  if(!customer){setMessage('entryStatus','Bitte Kunde / Baustelle eintragen.','error');return}if(!$('start').value||!$('end').value){setMessage('entryStatus','Von und Bis müssen ausgefüllt werden.','error');return}if(!(hours>0)){setMessage('entryStatus','Arbeitszeit konnte nicht berechnet werden.','error');return}if(!activity){setMessage('entryStatus','Bitte die ausgeführte Tätigkeit eintragen.','error');return}if(materialUsed&&!material){setMessage('entryStatus','Bitte Material eintragen.','error');return}
-  const entry={clientId:uid(),employee:a.employee,employeePin:a.pin,date,customer,start:$('start').value,end:$('end').value,hours,activity,syncCalendar:$('syncCalendar').checked,materialUsed,material,photos:preparedPhotos.slice(),customerSignature:noCustomerPresent?'':customerPad.dataUrl()};
+  const a=auth(),date=$('date').value,customer=$('customer').value.trim(),activity=$('activity').value.trim(),hours=Number($('hours').value),materialUsed=document.querySelector('input[name="materialUsed"]:checked').value==='yes',material=$('material').value.trim(),additionalEmployeesUsed=document.querySelector('input[name="additionalEmployeesUsed"]:checked').value==='yes',additionalEmployees=selectedAdditionalEmployees();
+  if(!customer){setMessage('entryStatus','Bitte Kunde / Baustelle eintragen.','error');return}if(!$('start').value||!$('end').value){setMessage('entryStatus','Von und Bis müssen ausgefüllt werden.','error');return}if(!(hours>0)){setMessage('entryStatus','Arbeitszeit konnte nicht berechnet werden.','error');return}if(!activity){setMessage('entryStatus','Bitte die ausgeführte Tätigkeit eintragen.','error');return}if(materialUsed&&!material){setMessage('entryStatus','Bitte Material eintragen.','error');return}if(additionalEmployeesUsed&&!additionalEmployees.length){setMessage('entryStatus','Bitte mindestens einen weiteren Mitarbeiter auswählen.','error');return}
+  const entry={clientId:uid(),employee:a.employee,employeePin:a.pin,date,customer,start:$('start').value,end:$('end').value,hours,activity,syncCalendar:$('syncCalendar').checked,materialUsed,material,additionalEmployeesUsed,additionalEmployees,photos:preparedPhotos.slice(),customerSignature:noCustomerPresent?'':customerPad.dataUrl()};
   const item={type:'saveEntry',createdAt:Date.now(),payload:{action:'saveEntry',employee:a.employee,pin:a.pin,entry}};
   if(!navigator.onLine){await queuePut(item);setMessage('entryStatus','🟠 Offline gespeichert. Automatische Übertragung folgt bei Internetverbindung.','warn');resetEntry();await refreshQueueCount();return}
   try{setMessage('entryStatus','Eintrag wird übertragen ...','info');const day=await api(item.payload);lastDayData=day;renderDay();resetEntry();setMessage('entryStatus','✅ Eintrag gespeichert und ans Büro-System übertragen.','ok')}catch(e){await queuePut(item);setMessage('entryStatus','🟠 Verbindung fehlgeschlagen. Auftrag wurde sicher offline vorgemerkt.','warn');resetEntry();await refreshQueueCount()}
 }
-function resetEntry(){$('customer').value='';$('start').value='';$('end').value='';$('hours').value='';$('activity').value='';$('syncCalendar').checked=false;document.querySelector('input[name="materialUsed"][value="no"]').checked=true;toggleMaterial();document.querySelector('input[name="photosUsed"][value="no"]').checked=true;togglePhotos();clearCustomerSignature();noCustomerPresent=false}
+function resetEntry(){$('customer').value='';$('start').value='';$('end').value='';$('hours').value='';$('activity').value='';$('syncCalendar').checked=false;document.querySelector('input[name="materialUsed"][value="no"]').checked=true;toggleMaterial();document.querySelector('input[name="additionalEmployeesUsed"][value="no"]').checked=true;toggleAdditionalEmployees();document.querySelector('input[name="photosUsed"][value="no"]').checked=true;togglePhotos();clearCustomerSignature();noCustomerPresent=false}
 
 async function loadDay(){const a=auth(),date=$('date').value;if(!a.employee||!date)return;if(!navigator.onLine){const cached=localStorage.getItem('dg_day_'+a.employee+'_'+date);if(cached){lastDayData=JSON.parse(cached);renderDay()}return}try{lastDayData=await api({action:'getDayData',employee:a.employee,pin:a.pin,date});localStorage.setItem('dg_day_'+a.employee+'_'+date,JSON.stringify(lastDayData));renderDay()}catch(e){setMessage('entryStatus',e.message,'error')}}
 function renderDay(){
@@ -181,7 +234,8 @@ function renderDay(){
       <strong>${esc(e.customer)}</strong><br>
       ${esc(e.start)} - ${esc(e.end)} · <strong>${formatHours(e.hours)} Std.</strong><br>
       <span class="muted">${esc(e.activity)}</span><br>
-      <span class="muted">Material: ${e.materialUsed?esc(e.material||'Ja'):'Nein'} · Bilder: ${Number(e.photoCount||0)}</span>
+      <span class="muted">Material: ${e.materialUsed?esc(e.material||'Ja'):'Nein'} · Bilder: ${Number(e.photoCount||0)}</span><br>
+      <span class="muted">Weitere Mitarbeiter: ${(e.additionalEmployees||[]).length?esc((e.additionalEmployees||[]).join(', ')):'Keine'}</span>
       ${lastDayData.closed?'':`<br><button class="btn danger" style="margin-top:8px" data-id="${esc(e.id)}" onclick="deleteEntry(this.dataset.id)">Eintrag löschen</button>`}
     </div>`).join('');
   }
@@ -194,7 +248,7 @@ async function closeDay(){const a=auth(),date=$('date').value;if(!employeePad.ha
 
 async function loadMonth(){const a=auth();if(!navigator.onLine){setMessage('monthStatus','Monatsübersicht benötigt Internet.','warn');return}try{const data=await api({action:'getMonthData',employee:a.employee,pin:a.pin,year:Number($('empYear').value),month:Number($('empMonth').value)});$('monthResult').innerHTML='<div class="total">Gesamt: '+formatHours(data.total)+' Std.</div>'+(data.rows||[]).map(r=>'<div class="entry"><strong>'+esc(r.date)+'</strong> · '+esc(r.customer)+' · '+formatHours(r.hours)+' Std. '+(r.closed?'✓':'(offen)')+'</div>').join('');clearMessage('monthStatus')}catch(e){setMessage('monthStatus',e.message,'error')}}
 async function sendMonth(){const a=auth();if(!navigator.onLine){setMessage('monthStatus','Versand benötigt Internet.','warn');return}try{const r=await api({action:'sendMonthReport',employee:a.employee,pin:a.pin,year:Number($('empYear').value),month:Number($('empMonth').value)});setMessage('monthStatus','✅ Monatsbericht gesendet. Gesamt: '+formatHours(r.total)+' Std.','ok')}catch(e){setMessage('monthStatus',e.message,'error')}}
-async function loadBossMonth(){if(!navigator.onLine){setMessage('bossStatus','Chefansicht benötigt Internet.','warn');return}try{const rows=await api({action:'getBossMonthData',pin:$('chefPin').value,year:Number($('bossYear').value),month:Number($('bossMonth').value)});let grand=0;$('bossResult').innerHTML=(rows||[]).map(x=>{grand+=Number(x.total||0);return '<div class="entry"><h3>'+esc(x.employee)+'</h3><strong>'+formatHours(x.total)+' Std.</strong><div class="muted">'+x.days+' Arbeitstage · '+x.closedDays+' abgeschlossen · '+x.openDays+' offen</div><details><summary>Einträge</summary>'+(x.entries||[]).map(e=>'<div class="entry">'+esc(e.date)+' · '+esc(e.customer)+' · '+formatHours(e.hours)+' Std.<br><span class="muted">'+esc(e.activity)+'</span></div>').join('')+'</details></div>'}).join('')+'<div class="total">Gesamtsumme: '+formatHours(grand)+' Std.</div>';clearMessage('bossStatus')}catch(e){setMessage('bossStatus',e.message,'error')}}
+async function loadBossMonth(){if(!navigator.onLine){setMessage('bossStatus','Chefansicht benötigt Internet.','warn');return}try{const rows=await api({action:'getBossMonthData',pin:$('chefPin').value,year:Number($('bossYear').value),month:Number($('bossMonth').value)});let grand=0;$('bossResult').innerHTML=(rows||[]).map(x=>{grand+=Number(x.total||0);return '<div class="entry"><h3>'+esc(x.employee)+'</h3><strong>'+formatHours(x.total)+' Std.</strong><div class="muted">'+x.days+' Arbeitstage · '+x.closedDays+' abgeschlossen · '+x.openDays+' offen</div><details><summary>Einträge</summary>'+(x.entries||[]).map(e=>'<div class="entry">'+esc(e.date)+' · '+esc(e.customer)+' · '+formatHours(e.hours)+' Std.<br><span class="muted">'+esc(e.activity)+'</span><br><span class="muted">Weitere Mitarbeiter: '+((e.additionalEmployees||[]).length?esc((e.additionalEmployees||[]).join(', ')):'Keine')+'</span></div>').join('')+'</details></div>'}).join('')+'<div class="total">Gesamtsumme: '+formatHours(grand)+' Std.</div>';clearMessage('bossStatus')}catch(e){setMessage('bossStatus',e.message,'error')}}
 
 function openDb(){return new Promise((resolve,reject)=>{const req=indexedDB.open('DGZeiterfassungOffline',2);req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains('queue'))req.result.createObjectStore('queue',{keyPath:'id',autoIncrement:true})};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
 async function queuePut(item){const db=await openDb();return new Promise((resolve,reject)=>{const tx=db.transaction('queue','readwrite');tx.objectStore('queue').add(item);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)})}
@@ -204,7 +258,7 @@ async function refreshQueueCount(){const q=await queueAll().catch(()=>[]);$('que
 async function syncQueue(){if(!navigator.onLine)return;const items=(await queueAll()).sort((a,b)=>a.createdAt-b.createdAt);for(const item of items){try{await api(item.payload);await queueDelete(item.id)}catch(e){break}}await refreshQueueCount();await loadDay()}
 
 function fillMonths(id){const n=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];$(id).innerHTML=n.map((x,i)=>'<option value="'+(i+1)+'">'+x+'</option>').join('')}
-function init(){fillMonths('empMonth');fillMonths('bossMonth');const d=new Date();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);customerPad=initPad('customerSignature');employeePad=initPad('employeeSignature');toggleMaterial();togglePhotos();updateConnection();const a=auth();if(a.employee&&a.pin)openMain();else $('loginScreen').classList.remove('hidden');if(navigator.onLine)syncQueue()}
+function init(){fillMonths('empMonth');fillMonths('bossMonth');const d=new Date();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);customerPad=initPad('customerSignature');employeePad=initPad('employeeSignature');toggleMaterial();toggleAdditionalEmployees();togglePhotos();updateConnection();const a=auth();if(a.employee&&a.pin)openMain();else $('loginScreen').classList.remove('hidden');if(navigator.onLine)syncQueue()}
 if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));
 window.addEventListener('load',init);
 </script>
