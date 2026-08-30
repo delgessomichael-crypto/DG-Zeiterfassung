@@ -187,6 +187,10 @@ const esc=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').rep
 function localDate(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 function uid(){return 'pwa-'+Date.now()+'-'+Math.random().toString(36).slice(2)}
 function auth(){return{employee:localStorage.getItem('dg_employee')||'',pin:localStorage.getItem('dg_employee_pin')||''}}
+function canAccessBoss(){
+  const employee=auth().employee;
+  return employee==='Del Gesso Michael'||employee==='Del Gesso Katia';
+}
 function setMessage(id,text,type='info'){const el=$(id);el.className='status '+type;el.textContent=text}
 function clearMessage(id){const el=$(id);el.className='';el.textContent=''}
 
@@ -201,9 +205,35 @@ async function api(payload){
 
 async function loginEmployee(){const employee=$('loginEmployee').value,pin=$('loginPin').value;if(!employee){setMessage('loginStatus','Bitte Mitarbeiter auswählen.','error');return}if(!pin){setMessage('loginStatus','Bitte PIN eingeben.','error');return}if(!navigator.onLine){setMessage('loginStatus','Die erste Anmeldung muss online erfolgen.','error');return}try{setMessage('loginStatus','Anmeldung wird geprüft ...','info');const res=await api({action:'employeeLogin',employee,pin});localStorage.setItem('dg_employee',res.employee||employee);localStorage.setItem('dg_employee_pin',pin);openMain()}catch(e){setMessage('loginStatus',e.message,'error')}}
 function logout(){localStorage.removeItem('dg_employee');localStorage.removeItem('dg_employee_pin');$('mainScreen').classList.add('hidden');$('loginScreen').classList.remove('hidden');$('loginPin').value=''}
-function openMain(){const a=auth();$('loginScreen').classList.add('hidden');$('mainScreen').classList.remove('hidden');$('employeeLabel').textContent='Angemeldet: '+a.employee;$('date').value=localDate();updateAdditionalEmployeeOptions();requestAnimationFrame(()=>{customerPad.resize();employeePad.resize()});updateConnection();loadDay();loadCalendarEvents()}
+function openMain(){
+  const a=auth();
+  $('loginScreen').classList.add('hidden');
+  $('mainScreen').classList.remove('hidden');
+  $('employeeLabel').textContent='Angemeldet: '+a.employee;
+  $('date').value=localDate();
+
+  const bossAllowed=canAccessBoss();
+  $('bossTab').classList.toggle('hidden',!bossAllowed);
+  if(!bossAllowed)showEmployee();
+
+  updateAdditionalEmployeeOptions();
+  requestAnimationFrame(()=>{customerPad.resize();employeePad.resize()});
+  updateConnection();
+  loadDay();
+  loadCalendarEvents();
+}
 function showEmployee(){$('employeeView').classList.remove('hidden');$('bossView').classList.add('hidden');$('employeeTab').classList.add('active');$('bossTab').classList.remove('active')}
-function showBoss(){$('employeeView').classList.add('hidden');$('bossView').classList.remove('hidden');$('employeeTab').classList.remove('active');$('bossTab').classList.add('active')}
+function showBoss(){
+  if(!canAccessBoss()){
+    showEmployee();
+    setMessage('entryStatus','Der Bereich Büro / Chef ist für diesen Mitarbeiter nicht freigeschaltet.','error');
+    return;
+  }
+  $('employeeView').classList.add('hidden');
+  $('bossView').classList.remove('hidden');
+  $('employeeTab').classList.remove('active');
+  $('bossTab').classList.add('active');
+}
 
 async function saveDayStatus(){
   const a=auth();
