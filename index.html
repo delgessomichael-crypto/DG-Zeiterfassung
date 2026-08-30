@@ -5,256 +5,208 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#111827">
+  <meta name="application-name" content="DG Zeiterfassung">
+  <meta name="mobile-web-app-capable" content="yes">
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="dg_icon_192.png">
   <link rel="apple-touch-icon" href="dg_icon_192.png">
-  <title>DG Zeiterfassung – Tagesdaten Test</title>
+  <title>DG Zeiterfassung</title>
   <style>
-    *{box-sizing:border-box}
-    body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#f3f4f6;color:#111827}
-    main{max-width:620px;margin:auto;padding:20px}
-    .card{margin-top:4vh;background:#fff;border-radius:20px;padding:24px;box-shadow:0 8px 30px rgba(0,0,0,.08)}
-    img{display:block;width:78%;max-width:320px;margin:0 auto 18px}
-    h1{text-align:center;font-size:24px}
-    h2{font-size:21px;margin-top:22px}
-    label{display:block;margin:14px 0 6px;font-weight:700}
-    select,input,button{width:100%;font:inherit}
-    select,input{padding:13px;border:1px solid #d1d5db;border-radius:12px;background:#fff}
-    button{border:0;border-radius:12px;padding:15px;font-size:18px;font-weight:700;background:#111827;color:#fff;cursor:pointer;margin-top:16px}
-    .status{padding:12px;border-radius:12px;font-weight:700;margin-top:14px}
-    .online{background:#dcfce7;color:#166534}
-    .offline{background:#ffedd5;color:#9a3412}
-    .ok{background:#dcfce7;color:#166534}
-    .err{background:#fee2e2;color:#991b1b}
-    .info{background:#e0f2fe;color:#075985}
-    .hidden{display:none}
-    .entry{padding:12px 0;border-top:1px solid #e5e7eb}
-    .entry:first-child{border-top:0}
-    .muted{color:#6b7280}
-    .total{font-size:20px;font-weight:800;margin-top:14px}
+    :root{--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#111827;--ok:#166534;--okbg:#dcfce7;--warn:#9a3412;--warnbg:#ffedd5;--err:#991b1b;--errbg:#fee2e2}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}
+    button,input,select,textarea{font:inherit} button{cursor:pointer}.hidden{display:none!important}
+    .screen{min-height:100vh;padding:16px}.login-wrap{min-height:calc(100vh - 32px);display:flex;align-items:center;justify-content:center}
+    .login-card,.card{background:#fff;border-radius:20px;padding:20px;box-shadow:0 4px 18px rgba(0,0,0,.07)}.login-card{width:min(100%,480px)}
+    .logo{display:block;width:min(82%,360px);height:auto;margin:0 auto 18px}.center{text-align:center}.app{width:min(100%,1000px);margin:auto}
+    .hero{background:#111827;color:#fff;border-radius:18px;padding:16px;margin-bottom:14px}.hero .logo{background:#fff;border-radius:14px;padding:8px;max-width:330px}
+    .head-row{display:flex;justify-content:space-between;gap:12px;align-items:center}.tabs,.grid2,.button-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .tabs{margin-bottom:14px}.tab,.btn{border:0;border-radius:12px;padding:14px;font-weight:700}.tab{background:#e5e7eb}.tab.active,.primary{background:#111827;color:#fff}
+    .secondary{background:#e5e7eb;color:#111827}.success{background:#166534;color:#fff}.danger{background:#b91c1c;color:#fff}
+    .card{margin-bottom:14px}label{display:block;margin:12px 0 6px;font-weight:700}input,select,textarea{width:100%;padding:13px;border:1px solid var(--line);border-radius:12px;background:#fff}
+    textarea{min-height:88px;resize:vertical}.radio-row,.check-row{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-top:14px}
+    .radio-row label,.check-row label{display:flex;gap:7px;align-items:center;margin:0}.radio-row input,.check-row input{width:auto}
+    .status{padding:11px;border-radius:12px;font-weight:700;margin:10px 0}.ok{background:var(--okbg);color:var(--ok)}.warn{background:var(--warnbg);color:var(--warn)}
+    .error{background:var(--errbg);color:var(--err)}.info{background:#e0f2fe;color:#075985}.muted{color:var(--muted)}.small{font-size:13px}
+    .total{font-size:20px;font-weight:800;margin:12px 0}.entry{padding:13px 0;border-top:1px solid #e5e7eb}.entry:first-child{border-top:0}
+    canvas{width:100%;height:180px;border:2px solid #9ca3af;border-radius:12px;background:#fff;display:block;touch-action:none}.offlinebar{position:sticky;top:0;z-index:20;margin-bottom:12px}
+    .queue{display:flex;justify-content:space-between;align-items:center;gap:10px}.queue button{width:auto}details{margin-top:8px}summary{font-weight:700;cursor:pointer}
+    @media(max-width:700px){.grid2,.button-row,.tabs{grid-template-columns:1fr}.screen{padding:9px}.head-row{align-items:flex-start;flex-direction:column}.head-row button{width:100%}}
   </style>
 </head>
 <body>
-<main>
-  <div class="card">
-    <img src="dg_icon_512.png" alt="Del Gesso">
-    <h1>DG Zeiterfassung</h1>
-
-    <div id="netStatus" class="status"></div>
-
-    <div id="loginArea">
-      <h2>Mitarbeiter-Anmeldung</h2>
-
-      <label for="employee">Mitarbeiter</label>
-      <select id="employee">
+<div id="loginScreen" class="screen">
+  <div class="login-wrap">
+    <div class="login-card">
+      <img class="logo" src="dg_icon_512.png" alt="Del Gesso Gebäudetechnik">
+      <h2 class="center">Mitarbeiter-Anmeldung</h2>
+      <div id="loginNet" class="status"></div>
+      <label for="loginEmployee">Mitarbeiter</label>
+      <select id="loginEmployee">
         <option value="">Bitte auswählen</option>
-        <option>Del Gesso Michael</option>
-        <option>Del Gesso Marco</option>
-        <option>Del Gesso Katia</option>
-        <option>Del Gesso Aurora</option>
-        <option>Sharifi Habibullah</option>
+        <option>Del Gesso Michael</option><option>Del Gesso Marco</option><option>Del Gesso Katia</option><option>Del Gesso Aurora</option><option>Sharifi Habibullah</option>
       </select>
-
-      <label for="pin">PIN</label>
-      <input id="pin" type="password" inputmode="numeric" maxlength="10" placeholder="PIN">
-
-      <button onclick="login()">Anmelden</button>
-      <div id="loginStatus" class="status info">Noch nicht angemeldet.</div>
-    </div>
-
-    <div id="dayArea" class="hidden">
-      <h2>Tagesdaten</h2>
-      <div id="employeeLabel" class="status ok"></div>
-
-      <label for="date">Datum</label>
-      <input id="date" type="date" onchange="loadDayData()">
-
-      <button onclick="loadDayData()">Tag aktualisieren</button>
-
-      <div id="dayStatus" class="status info">Tagesdaten werden geladen ...</div>
-      <div id="entries"></div>
-      <div id="total" class="total"></div>
+      <label for="loginPin">PIN</label>
+      <input id="loginPin" type="password" inputmode="numeric" maxlength="10" placeholder="PIN">
+      <button class="btn primary" style="width:100%;margin-top:16px" onclick="loginEmployee()">Anmelden</button>
+      <div id="loginStatus"></div>
     </div>
   </div>
-</main>
+</div>
+
+<div id="mainScreen" class="screen hidden">
+  <div class="app">
+    <div id="connectionBar" class="status offlinebar"></div>
+    <div id="queueBar" class="status info queue hidden"><span id="queueText"></span><button class="btn secondary" onclick="syncQueue()">Jetzt übertragen</button></div>
+
+    <div class="hero">
+      <img class="logo" src="dg_icon_512.png" alt="Del Gesso Gebäudetechnik">
+      <div class="head-row"><div><strong>Zeiterfassung</strong><br><span id="employeeLabel"></span></div><button class="btn secondary" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
+    </div>
+
+    <div class="tabs"><button id="employeeTab" class="tab active" onclick="showEmployee()">Mitarbeiter</button><button id="bossTab" class="tab" onclick="showBoss()">Büro / Chef</button></div>
+
+    <section id="employeeView">
+      <div class="card">
+        <h2>Arbeitszeit erfassen</h2>
+        <div class="grid2"><div><label for="date">Datum</label><input id="date" type="date" onchange="loadDay()"></div><div><label for="customer">Kunde / Baustelle</label><input id="customer" placeholder="z.B. Müller, Fürth"></div></div>
+        <div class="grid2"><div><label for="start">Von</label><input id="start" type="time" onchange="calculateHours()"></div><div><label for="end">Bis</label><input id="end" type="time" onchange="calculateHours()"></div></div>
+        <label for="hours">Stunden</label><input id="hours" readonly placeholder="Wird automatisch berechnet">
+        <label for="activity">Ausgeführte Tätigkeit</label><textarea id="activity" placeholder="Ausgeführte Arbeiten eintragen"></textarea>
+
+        <div class="radio-row"><strong>Bilder hinzufügen?</strong><label><input type="radio" name="photosUsed" value="no" checked onchange="togglePhotos()">Nein</label><label><input type="radio" name="photosUsed" value="yes" onchange="togglePhotos()">Ja</label></div>
+        <div id="photoBox" class="hidden">
+          <div class="button-row"><button type="button" class="btn primary" onclick="$('cameraPhoto').click()">📷 Foto aufnehmen</button><button type="button" class="btn secondary" onclick="$('galleryPhotos').click()">🖼️ Vorhandene Bilder</button></div>
+          <input id="cameraPhoto" class="hidden" type="file" accept="image/*" capture="environment" onchange="addPhotos(this.files,'cameraPhoto')">
+          <input id="galleryPhotos" class="hidden" type="file" accept="image/*" multiple onchange="addPhotos(this.files,'galleryPhotos')">
+          <div id="photoStatus" class="muted small">Noch keine Bilder hinzugefügt.</div><button id="clearPhotosBtn" type="button" class="btn secondary hidden" style="width:100%;margin-top:8px" onclick="clearPhotos()">Bilder entfernen</button>
+        </div>
+
+        <div class="radio-row"><strong>Material verbaut?</strong><label><input type="radio" name="materialUsed" value="no" checked onchange="toggleMaterial()">Nein</label><label><input type="radio" name="materialUsed" value="yes" onchange="toggleMaterial()">Ja</label></div>
+        <div id="materialBox" class="hidden"><label for="material">Verbautes Material</label><textarea id="material" placeholder="Menge und Bezeichnung"></textarea></div>
+
+        <h3 style="margin-top:20px">Kundenunterschrift</h3><div class="muted small">Bei vorhandener Unterschrift wird der Auftrag nach der Übertragung automatisch ans Büro gesendet.</div>
+        <canvas id="customerSignature"></canvas>
+        <div class="button-row"><button class="btn secondary" onclick="clearCustomerSignature()">Unterschrift löschen</button><button class="btn secondary" onclick="markNoCustomer()">Kein Kunde vor Ort</button></div>
+        <div class="check-row"><label><input id="syncCalendar" type="checkbox">Mit Google Kalender synchronisieren</label></div>
+        <button class="btn primary" style="width:100%;margin-top:14px" onclick="saveEntry()">Eintrag speichern</button><div id="entryStatus"></div>
+      </div>
+
+      <div class="card"><h2>Einträge des Tages</h2><div id="entries" class="muted">Noch keine Tagesdaten geladen.</div><div id="dayTotal" class="total">Gesamt: 0,00 Std.</div><button class="btn secondary" style="width:100%" onclick="loadDay()">Tag aktualisieren</button></div>
+
+      <div class="card">
+        <h2>Tagesabschluss</h2>
+        <label for="pauseHours">Pause gesamt</label>
+        <select id="pauseHours" onchange="updateNetTotal()">
+          <option value="0">Keine Pause</option><option value="0.25">0,25 Std. (15 Min.)</option><option value="0.50">0,50 Std. (30 Min.)</option><option value="0.75">0,75 Std. (45 Min.)</option>
+          <option value="1.00">1,00 Std. (60 Min.)</option><option value="1.25">1,25 Std.</option><option value="1.50">1,50 Std.</option><option value="1.75">1,75 Std.</option>
+          <option value="2.00">2,00 Std.</option><option value="2.25">2,25 Std.</option><option value="2.50">2,50 Std.</option><option value="2.75">2,75 Std.</option><option value="3.00">3,00 Std.</option>
+        </select>
+        <div id="netTotal" class="total">Arbeitszeit netto: 0,00 Std.</div>
+        <h3>Mitarbeiter-Unterschrift</h3><canvas id="employeeSignature"></canvas>
+        <div class="button-row"><button class="btn secondary" onclick="employeePad.clear()">Unterschrift löschen</button><button class="btn success" onclick="closeDay()">Tag abschließen & E-Mail senden</button></div><div id="closeStatus"></div>
+      </div>
+
+      <div class="card">
+        <h2>Monatsübersicht</h2>
+        <div class="grid2"><div><label for="empYear">Jahr</label><input id="empYear" type="number"></div><div><label for="empMonth">Monat</label><select id="empMonth"></select></div></div>
+        <div class="button-row"><button class="btn secondary" onclick="loadMonth()">Monat anzeigen</button><button class="btn primary" onclick="sendMonth()">Monatsbericht ans Büro</button></div><div id="monthStatus"></div><div id="monthResult"></div>
+      </div>
+    </section>
+
+    <section id="bossView" class="hidden">
+      <div class="card">
+        <h2>Büro / Chef</h2><label for="chefPin">Chef-PIN</label><input id="chefPin" type="password" inputmode="numeric" placeholder="PIN">
+        <div class="grid2"><div><label for="bossYear">Jahr</label><input id="bossYear" type="number"></div><div><label for="bossMonth">Monat</label><select id="bossMonth"></select></div></div>
+        <button class="btn primary" style="width:100%;margin-top:14px" onclick="loadBossMonth()">Monatsübersicht laden</button><div id="bossStatus"></div><div id="bossResult"></div>
+      </div>
+    </section>
+  </div>
+</div>
 
 <script>
-  const API_URL = 'https://script.google.com/macros/s/AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc/exec';
+const API_URL='https://script.google.com/macros/s/AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc/exec';
+let preparedPhotos=[],lastDayData={entries:[],total:0,closed:false},customerPad=null,employeePad=null,noCustomerPresent=false;
+const $=id=>document.getElementById(id);
+const formatHours=v=>Number(v||0).toFixed(2).replace('.',',');
+const esc=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+function localDate(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function uid(){return 'pwa-'+Date.now()+'-'+Math.random().toString(36).slice(2)}
+function auth(){return{employee:localStorage.getItem('dg_employee')||'',pin:localStorage.getItem('dg_employee_pin')||''}}
+function setMessage(id,text,type='info'){const el=$(id);el.className='status '+type;el.textContent=text}
+function clearMessage(id){const el=$(id);el.className='';el.textContent=''}
 
-  function todayValue(){
-    const d=new Date();
-    const y=d.getFullYear();
-    const m=String(d.getMonth()+1).padStart(2,'0');
-    const day=String(d.getDate()).padStart(2,'0');
-    return y+'-'+m+'-'+day;
+function updateConnection(){const online=navigator.onLine;setMessage('connectionBar',online?'🟢 Online':'🟠 Offline – Eingaben werden auf diesem Gerät gespeichert.',online?'ok':'warn');if($('loginNet'))setMessage('loginNet',online?'🟢 Online':'🟠 Offline',online?'ok':'warn');refreshQueueCount()}
+window.addEventListener('online',()=>{updateConnection();syncQueue()});window.addEventListener('offline',updateConnection);
+
+async function api(payload){
+  const response=await fetch(API_URL,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)});
+  const text=await response.text();let data;try{data=JSON.parse(text)}catch(e){throw new Error('Ungültige Antwort vom Server.')}
+  if(!data.ok)throw new Error(data.error||'Serverfehler.');return data.data!==undefined?data.data:data;
+}
+
+async function loginEmployee(){const employee=$('loginEmployee').value,pin=$('loginPin').value;if(!employee){setMessage('loginStatus','Bitte Mitarbeiter auswählen.','error');return}if(!pin){setMessage('loginStatus','Bitte PIN eingeben.','error');return}if(!navigator.onLine){setMessage('loginStatus','Die erste Anmeldung muss online erfolgen.','error');return}try{setMessage('loginStatus','Anmeldung wird geprüft ...','info');const res=await api({action:'employeeLogin',employee,pin});localStorage.setItem('dg_employee',res.employee||employee);localStorage.setItem('dg_employee_pin',pin);openMain()}catch(e){setMessage('loginStatus',e.message,'error')}}
+function logout(){localStorage.removeItem('dg_employee');localStorage.removeItem('dg_employee_pin');$('mainScreen').classList.add('hidden');$('loginScreen').classList.remove('hidden');$('loginPin').value=''}
+function openMain(){const a=auth();$('loginScreen').classList.add('hidden');$('mainScreen').classList.remove('hidden');$('employeeLabel').textContent='Angemeldet: '+a.employee;$('date').value=localDate();requestAnimationFrame(()=>{customerPad.resize();employeePad.resize()});updateConnection();loadDay()}
+function showEmployee(){$('employeeView').classList.remove('hidden');$('bossView').classList.add('hidden');$('employeeTab').classList.add('active');$('bossTab').classList.remove('active')}
+function showBoss(){$('employeeView').classList.add('hidden');$('bossView').classList.remove('hidden');$('employeeTab').classList.remove('active');$('bossTab').classList.add('active')}
+
+function calculateHours(){const s=$('start').value,e=$('end').value;if(!s||!e){$('hours').value='';return}const a=s.split(':').map(Number),b=e.split(':').map(Number);let sm=a[0]*60+a[1],em=b[0]*60+b[1];if(em<sm)em+=1440;const mins=em-sm;$('hours').value=mins>0?(mins/60).toFixed(2):''}
+function toggleMaterial(){const yes=document.querySelector('input[name="materialUsed"]:checked').value==='yes';$('materialBox').classList.toggle('hidden',!yes);if(!yes)$('material').value=''}
+function togglePhotos(){const yes=document.querySelector('input[name="photosUsed"]:checked').value==='yes';$('photoBox').classList.toggle('hidden',!yes);if(!yes)clearPhotos()}
+function updatePhotoStatus(){$('photoStatus').textContent=preparedPhotos.length?preparedPhotos.length+' von 6 Bild(ern) bereit.':'Noch keine Bilder hinzugefügt.';$('clearPhotosBtn').classList.toggle('hidden',preparedPhotos.length===0)}
+function clearPhotos(){preparedPhotos=[];$('cameraPhoto').value='';$('galleryPhotos').value='';updatePhotoStatus()}
+async function addPhotos(files,inputId){const remaining=6-preparedPhotos.length;if(remaining<=0)return;const list=Array.from(files||[]).slice(0,remaining);$('photoStatus').textContent='Bilder werden vorbereitet ...';try{for(const f of list)preparedPhotos.push({dataUrl:await resizeImage(f)});updatePhotoStatus()}catch(e){$('photoStatus').textContent='Bild konnte nicht vorbereitet werden.'}$(inputId).value=''}
+function resizeImage(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onerror=reject;r.onload=()=>{const img=new Image();img.onerror=reject;img.onload=()=>{const max=1200;let w=img.width,h=img.height;if(w>max||h>max){const f=Math.min(max/w,max/h);w=Math.round(w*f);h=Math.round(h*f)}const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);resolve(c.toDataURL('image/jpeg',0.68))};img.src=r.result};r.readAsDataURL(file)})}
+
+function initPad(id){const canvas=$(id),ctx=canvas.getContext('2d');let drawing=false,signed=false;function resize(){const ratio=devicePixelRatio||1,rect=canvas.getBoundingClientRect();canvas.width=Math.max(1,Math.round(rect.width*ratio));canvas.height=Math.round(180*ratio);ctx.setTransform(ratio,0,0,ratio,0,0);ctx.lineWidth=2;ctx.lineCap='round';ctx.strokeStyle='#111827'}function pt(ev){const r=canvas.getBoundingClientRect(),s=ev.touches?ev.touches[0]:ev;return{x:s.clientX-r.left,y:s.clientY-r.top}}function start(ev){drawing=true;signed=true;const p=pt(ev);ctx.beginPath();ctx.moveTo(p.x,p.y);ev.preventDefault()}function move(ev){if(!drawing)return;const p=pt(ev);ctx.lineTo(p.x,p.y);ctx.stroke();ev.preventDefault()}function end(ev){drawing=false;if(ev)ev.preventDefault()}canvas.addEventListener('mousedown',start);canvas.addEventListener('mousemove',move);window.addEventListener('mouseup',end);canvas.addEventListener('touchstart',start,{passive:false});canvas.addEventListener('touchmove',move,{passive:false});canvas.addEventListener('touchend',end,{passive:false});resize();return{resize,clear(){ctx.clearRect(0,0,canvas.getBoundingClientRect().width,180);signed=false},hasSignature(){return signed},dataUrl(){return signed?canvas.toDataURL('image/png'):''}}}
+function clearCustomerSignature(){customerPad.clear();noCustomerPresent=false}
+function markNoCustomer(){customerPad.clear();noCustomerPresent=true;setMessage('entryStatus','Kundenunterschrift wird ausgelassen.','info')}
+
+async function saveEntry(){
+  const a=auth(),date=$('date').value,customer=$('customer').value.trim(),activity=$('activity').value.trim(),hours=Number($('hours').value),materialUsed=document.querySelector('input[name="materialUsed"]:checked').value==='yes',material=$('material').value.trim();
+  if(!customer){setMessage('entryStatus','Bitte Kunde / Baustelle eintragen.','error');return}if(!$('start').value||!$('end').value){setMessage('entryStatus','Von und Bis müssen ausgefüllt werden.','error');return}if(!(hours>0)){setMessage('entryStatus','Arbeitszeit konnte nicht berechnet werden.','error');return}if(!activity){setMessage('entryStatus','Bitte die ausgeführte Tätigkeit eintragen.','error');return}if(materialUsed&&!material){setMessage('entryStatus','Bitte Material eintragen.','error');return}
+  const entry={clientId:uid(),employee:a.employee,employeePin:a.pin,date,customer,start:$('start').value,end:$('end').value,hours,activity,syncCalendar:$('syncCalendar').checked,materialUsed,material,photos:preparedPhotos.slice(),customerSignature:noCustomerPresent?'':customerPad.dataUrl()};
+  const item={type:'saveEntry',createdAt:Date.now(),payload:{action:'saveEntry',employee:a.employee,pin:a.pin,entry}};
+  if(!navigator.onLine){await queuePut(item);setMessage('entryStatus','🟠 Offline gespeichert. Automatische Übertragung folgt bei Internetverbindung.','warn');resetEntry();await refreshQueueCount();return}
+  try{setMessage('entryStatus','Eintrag wird übertragen ...','info');const day=await api(item.payload);lastDayData=day;renderDay();resetEntry();setMessage('entryStatus','✅ Eintrag gespeichert und ans Büro-System übertragen.','ok')}catch(e){await queuePut(item);setMessage('entryStatus','🟠 Verbindung fehlgeschlagen. Auftrag wurde sicher offline vorgemerkt.','warn');resetEntry();await refreshQueueCount()}
+}
+function resetEntry(){$('customer').value='';$('start').value='';$('end').value='';$('hours').value='';$('activity').value='';$('syncCalendar').checked=false;document.querySelector('input[name="materialUsed"][value="no"]').checked=true;toggleMaterial();document.querySelector('input[name="photosUsed"][value="no"]').checked=true;togglePhotos();clearCustomerSignature();noCustomerPresent=false}
+
+async function loadDay(){const a=auth(),date=$('date').value;if(!a.employee||!date)return;if(!navigator.onLine){const cached=localStorage.getItem('dg_day_'+a.employee+'_'+date);if(cached){lastDayData=JSON.parse(cached);renderDay()}return}try{lastDayData=await api({action:'getDayData',employee:a.employee,pin:a.pin,date});localStorage.setItem('dg_day_'+a.employee+'_'+date,JSON.stringify(lastDayData));renderDay()}catch(e){setMessage('entryStatus',e.message,'error')}}
+function renderDay(){
+  const entries=lastDayData.entries||[];
+  if(!entries.length){$('entries').innerHTML='<div class="muted">Keine Einträge für diesen Tag.</div>'}
+  else{
+    $('entries').innerHTML=entries.map(e=>`<div class="entry">
+      <strong>${esc(e.customer)}</strong><br>
+      ${esc(e.start)} - ${esc(e.end)} · <strong>${formatHours(e.hours)} Std.</strong><br>
+      <span class="muted">${esc(e.activity)}</span><br>
+      <span class="muted">Material: ${e.materialUsed?esc(e.material||'Ja'):'Nein'} · Bilder: ${Number(e.photoCount||0)}</span>
+      ${lastDayData.closed?'':`<br><button class="btn danger" style="margin-top:8px" data-id="${esc(e.id)}" onclick="deleteEntry(this.dataset.id)">Eintrag löschen</button>`}
+    </div>`).join('');
   }
+  $('dayTotal').textContent='Gesamt: '+formatHours(lastDayData.total)+' Std.';updateNetTotal();if(lastDayData.closed)setMessage('closeStatus','Dieser Tag ist bereits abgeschlossen.','ok');else clearMessage('closeStatus')
+}
+async function deleteEntry(id){if(!navigator.onLine){setMessage('entryStatus','Löschen ist offline erst nach der Synchronisierung möglich.','warn');return}if(!confirm('Eintrag wirklich löschen?'))return;const a=auth();try{lastDayData=await api({action:'deleteEntry',id,employee:a.employee,date:$('date').value,pin:a.pin});renderDay();setMessage('entryStatus','Eintrag gelöscht.','ok')}catch(e){setMessage('entryStatus',e.message,'error')}}
+function updateNetTotal(){const pause=Number($('pauseHours').value)||0;$('netTotal').textContent='Arbeitszeit netto: '+formatHours(Math.max(0,Number(lastDayData.total||0)-pause))+' Std.'}
 
-  function formatHours(v){
-    return Number(v||0).toFixed(2).replace('.',',');
-  }
+async function closeDay(){const a=auth(),date=$('date').value;if(!employeePad.hasSignature()){setMessage('closeStatus','Bitte Mitarbeiter-Unterschrift leisten.','error');return}if(!confirm('Arbeitstag wirklich abschließen?'))return;const item={type:'closeDay',createdAt:Date.now(),payload:{action:'closeDay',employee:a.employee,pin:a.pin,date,signatureDataUrl:employeePad.dataUrl(),pauseHours:Number($('pauseHours').value)||0}};if(!navigator.onLine){await queuePut(item);setMessage('closeStatus','🟠 Tagesabschluss offline gespeichert. Wird automatisch übertragen.','warn');employeePad.clear();await refreshQueueCount();return}try{const res=await api(item.payload);setMessage('closeStatus',res.alreadyClosed?'Tag war bereits abgeschlossen.':'✅ Tag abgeschlossen und E-Mail gesendet.','ok');employeePad.clear();await loadDay()}catch(e){await queuePut(item);setMessage('closeStatus','🟠 Tagesabschluss wurde offline vorgemerkt.','warn');await refreshQueueCount()}}
 
-  function escapeHtml(v){
-    return String(v==null?'':v)
-      .replace(/&/g,'&amp;')
-      .replace(/</g,'&lt;')
-      .replace(/>/g,'&gt;')
-      .replace(/"/g,'&quot;')
-      .replace(/'/g,'&#39;');
-  }
+async function loadMonth(){const a=auth();if(!navigator.onLine){setMessage('monthStatus','Monatsübersicht benötigt Internet.','warn');return}try{const data=await api({action:'getMonthData',employee:a.employee,pin:a.pin,year:Number($('empYear').value),month:Number($('empMonth').value)});$('monthResult').innerHTML='<div class="total">Gesamt: '+formatHours(data.total)+' Std.</div>'+(data.rows||[]).map(r=>'<div class="entry"><strong>'+esc(r.date)+'</strong> · '+esc(r.customer)+' · '+formatHours(r.hours)+' Std. '+(r.closed?'✓':'(offen)')+'</div>').join('');clearMessage('monthStatus')}catch(e){setMessage('monthStatus',e.message,'error')}}
+async function sendMonth(){const a=auth();if(!navigator.onLine){setMessage('monthStatus','Versand benötigt Internet.','warn');return}try{const r=await api({action:'sendMonthReport',employee:a.employee,pin:a.pin,year:Number($('empYear').value),month:Number($('empMonth').value)});setMessage('monthStatus','✅ Monatsbericht gesendet. Gesamt: '+formatHours(r.total)+' Std.','ok')}catch(e){setMessage('monthStatus',e.message,'error')}}
+async function loadBossMonth(){if(!navigator.onLine){setMessage('bossStatus','Chefansicht benötigt Internet.','warn');return}try{const rows=await api({action:'getBossMonthData',pin:$('chefPin').value,year:Number($('bossYear').value),month:Number($('bossMonth').value)});let grand=0;$('bossResult').innerHTML=(rows||[]).map(x=>{grand+=Number(x.total||0);return '<div class="entry"><h3>'+esc(x.employee)+'</h3><strong>'+formatHours(x.total)+' Std.</strong><div class="muted">'+x.days+' Arbeitstage · '+x.closedDays+' abgeschlossen · '+x.openDays+' offen</div><details><summary>Einträge</summary>'+(x.entries||[]).map(e=>'<div class="entry">'+esc(e.date)+' · '+esc(e.customer)+' · '+formatHours(e.hours)+' Std.<br><span class="muted">'+esc(e.activity)+'</span></div>').join('')+'</details></div>'}).join('')+'<div class="total">Gesamtsumme: '+formatHours(grand)+' Std.</div>';clearMessage('bossStatus')}catch(e){setMessage('bossStatus',e.message,'error')}}
 
-  function updateNetStatus(){
-    const el=document.getElementById('netStatus');
-    if(navigator.onLine){
-      el.className='status online';
-      el.textContent='🟢 Online';
-    }else{
-      el.className='status offline';
-      el.textContent='🟠 Offline';
-    }
-  }
+function openDb(){return new Promise((resolve,reject)=>{const req=indexedDB.open('DGZeiterfassungOffline',2);req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains('queue'))req.result.createObjectStore('queue',{keyPath:'id',autoIncrement:true})};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
+async function queuePut(item){const db=await openDb();return new Promise((resolve,reject)=>{const tx=db.transaction('queue','readwrite');tx.objectStore('queue').add(item);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)})}
+async function queueAll(){const db=await openDb();return new Promise((resolve,reject)=>{const req=db.transaction('queue','readonly').objectStore('queue').getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error)})}
+async function queueDelete(id){const db=await openDb();return new Promise((resolve,reject)=>{const tx=db.transaction('queue','readwrite');tx.objectStore('queue').delete(id);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)})}
+async function refreshQueueCount(){const q=await queueAll().catch(()=>[]);$('queueBar').classList.toggle('hidden',q.length===0);$('queueText').textContent=q.length+' Übertragung(en) ausstehend.'}
+async function syncQueue(){if(!navigator.onLine)return;const items=(await queueAll()).sort((a,b)=>a.createdAt-b.createdAt);for(const item of items){try{await api(item.payload);await queueDelete(item.id)}catch(e){break}}await refreshQueueCount();await loadDay()}
 
-  async function apiCall(payload){
-    const response=await fetch(API_URL,{
-      method:'POST',
-      redirect:'follow',
-      headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body:JSON.stringify(payload)
-    });
-
-    const text=await response.text();
-    let data=null;
-    try{data=JSON.parse(text);}catch(e){}
-
-    if(!response.ok || !data){
-      throw new Error('Ungültige Antwort vom Backend.');
-    }
-
-    return data;
-  }
-
-  async function login(){
-    const employee=document.getElementById('employee').value;
-    const pin=document.getElementById('pin').value;
-    const out=document.getElementById('loginStatus');
-
-    if(!employee){
-      out.className='status err';
-      out.textContent='Bitte Mitarbeiter auswählen.';
-      return;
-    }
-
-    if(!pin){
-      out.className='status err';
-      out.textContent='Bitte PIN eingeben.';
-      return;
-    }
-
-    if(!navigator.onLine){
-      out.className='status err';
-      out.textContent='Für diesen Test bitte online anmelden.';
-      return;
-    }
-
-    out.className='status info';
-    out.textContent='Anmeldung wird geprüft ...';
-
-    try{
-      const data=await apiCall({
-        action:'employeeLogin',
-        employee:employee,
-        pin:pin
-      });
-
-      if(!data.ok) throw new Error(data.error||'Anmeldung fehlgeschlagen.');
-
-      localStorage.setItem('dg_employee',data.employee);
-      localStorage.setItem('dg_employee_pin',pin);
-
-      document.getElementById('loginArea').classList.add('hidden');
-      document.getElementById('dayArea').classList.remove('hidden');
-      document.getElementById('employeeLabel').textContent='✅ Angemeldet: '+data.employee;
-      document.getElementById('date').value=todayValue();
-
-      await loadDayData();
-
-    }catch(err){
-      out.className='status err';
-      out.textContent=err.message||String(err);
-    }
-  }
-
-  async function loadDayData(){
-    const employee=localStorage.getItem('dg_employee')||'';
-    const pin=localStorage.getItem('dg_employee_pin')||'';
-    const date=document.getElementById('date').value;
-    const status=document.getElementById('dayStatus');
-
-    if(!employee||!pin){
-      status.className='status err';
-      status.textContent='Keine Mitarbeiter-Anmeldung gefunden.';
-      return;
-    }
-
-    if(!date){
-      status.className='status err';
-      status.textContent='Bitte Datum auswählen.';
-      return;
-    }
-
-    if(!navigator.onLine){
-      status.className='status offline';
-      status.textContent='Offline: Tagesdaten können momentan nicht vom Büro geladen werden.';
-      return;
-    }
-
-    status.className='status info';
-    status.textContent='Tagesdaten werden geladen ...';
-
-    try{
-      const result=await apiCall({
-        action:'getDayData',
-        employee:employee,
-        pin:pin,
-        date:date
-      });
-
-      if(!result.ok) throw new Error(result.error||'Tagesdaten konnten nicht geladen werden.');
-
-      const data=result.data||{entries:[],total:0,closed:false};
-      const entries=data.entries||[];
-
-      if(!entries.length){
-        document.getElementById('entries').innerHTML='<div class="muted">Keine Einträge für diesen Tag vorhanden.</div>';
-      }else{
-        document.getElementById('entries').innerHTML=entries.map(function(entry){
-          return '<div class="entry">'+
-            '<strong>'+escapeHtml(entry.customer||'')+'</strong><br>'+
-            escapeHtml(entry.start||'')+' - '+escapeHtml(entry.end||'')+
-            ' · '+formatHours(entry.hours||0)+' Std.<br>'+
-            '<span class="muted">'+escapeHtml(entry.activity||'')+'</span>'+
-            '</div>';
-        }).join('');
-      }
-
-      document.getElementById('total').textContent='Gesamt: '+formatHours(data.total||0)+' Std.';
-      status.className='status ok';
-      status.textContent=data.closed
-        ?'✅ Tagesdaten geladen – Tag abgeschlossen.'
-        :'✅ Tagesdaten geladen.';
-
-    }catch(err){
-      status.className='status err';
-      status.textContent=err.message||String(err);
-    }
-  }
-
-  window.addEventListener('online',updateNetStatus);
-  window.addEventListener('offline',updateNetStatus);
-  updateNetStatus();
-
-  if('serviceWorker' in navigator){
-    window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));
-  }
+function fillMonths(id){const n=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];$(id).innerHTML=n.map((x,i)=>'<option value="'+(i+1)+'">'+x+'</option>').join('')}
+function init(){fillMonths('empMonth');fillMonths('bossMonth');const d=new Date();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);customerPad=initPad('customerSignature');employeePad=initPad('employeeSignature');toggleMaterial();togglePhotos();updateConnection();const a=auth();if(a.employee&&a.pin)openMain();else $('loginScreen').classList.remove('hidden');if(navigator.onLine)syncQueue()}
+if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));
+window.addEventListener('load',init);
 </script>
 </body>
 </html>
