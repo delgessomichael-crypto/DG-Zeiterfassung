@@ -1,5 +1,6 @@
-const CACHE_NAME = 'dg-zeiterfassung-shell-v1';
-const APP_SHELL = [
+const CACHE_NAME = 'dg-zeiterfassung-v3';
+
+const SHELL = [
   './',
   './index.html',
   './manifest.json',
@@ -9,7 +10,7 @@ const APP_SHELL = [
 
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL))
+    caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL))
   );
   self.skipWaiting();
 });
@@ -17,7 +18,11 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+      Promise.all(
+        keys
+          .filter(key => key !== CACHE_NAME)
+          .map(key => caches.delete(key))
+      )
     )
   );
   self.clients.claim();
@@ -30,11 +35,13 @@ self.addEventListener('fetch', event => {
     fetch(event.request)
       .then(response => {
         const copy = response.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
+        caches.open(CACHE_NAME)
+          .then(cache => cache.put(event.request, copy));
         return response;
       })
       .catch(() =>
-        caches.match(event.request).then(cached => cached || caches.match('./index.html'))
+        caches.match(event.request)
+          .then(cached => cached || caches.match('./index.html'))
       )
   );
 });
