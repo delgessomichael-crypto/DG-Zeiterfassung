@@ -263,9 +263,16 @@ function updateConnection(){const online=navigator.onLine;setMessage('connection
 window.addEventListener('online',()=>{updateConnection();syncQueue();loadCalendarEvents()});window.addEventListener('offline',updateConnection);
 
 async function api(payload){
-  const response=await fetch(API_URL,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)});
-  const text=await response.text();let data;try{data=JSON.parse(text)}catch(e){throw new Error('Ungültige Antwort vom Server.')}
-  if(!data.ok)throw new Error(data.error||'Serverfehler.');return data.data!==undefined?data.data:data;
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),45000);
+  try{
+    const response=await fetch(API_URL,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload),signal:controller.signal});
+    const text=await response.text();let data;try{data=JSON.parse(text)}catch(e){throw new Error('Ungültige Antwort vom Server.')}
+    if(!data.ok)throw new Error(data.error||'Serverfehler.');return data.data!==undefined?data.data:data;
+  }catch(e){
+    if(e&&e.name==='AbortError')throw new Error('Server antwortet zu langsam. Bitte erneut versuchen.');
+    throw e;
+  }finally{clearTimeout(timer)}
 }
 
 async function loginEmployee(){const employee=$('loginEmployee').value,pin=$('loginPin').value;if(!employee){setMessage('loginStatus','Bitte Mitarbeiter auswählen.','error');return}if(!pin){setMessage('loginStatus','Bitte PIN eingeben.','error');return}if(!navigator.onLine){setMessage('loginStatus','Die erste Anmeldung muss online erfolgen.','error');return}try{setMessage('loginStatus','Anmeldung wird geprüft ...','info');const res=await api({action:'employeeLogin',employee,pin});localStorage.setItem('dg_employee',res.employee||employee);localStorage.setItem('dg_employee_pin',pin);localStorage.setItem('dg_chef_access',res.chefAccess?'1':'0');openMain()}catch(e){setMessage('loginStatus',e.message,'error')}}
