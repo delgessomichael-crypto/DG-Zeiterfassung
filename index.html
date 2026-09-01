@@ -38,8 +38,9 @@
     .boss-month-row{padding:12px 10px;border-top:1px solid #e5e7eb}
     .boss-month-value{font-size:18px;font-weight:800;text-align:right}.target-value{color:#b91c1c}.actual-value{color:#166534}.balance-plus{color:#166534}.balance-minus{color:#b91c1c}.balance-zero{color:#374151}
     .boss-month-details{grid-column:1/-1;margin-top:4px}
+    .adjustment-box{border:1px solid #d1d5db;border-radius:12px;padding:12px;margin-top:10px;background:#f9fafb}.adjustment-grid{display:grid;grid-template-columns:120px 1fr auto auto;gap:8px;align-items:end}.adjustment-grid label{margin:0}.adjustment-grid input{padding:10px}.adjustment-history{margin-top:8px}.adjustment-item{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:7px 0;border-top:1px solid #e5e7eb}.adjustment-item:first-child{border-top:0}.adjustment-positive{color:#166534;font-weight:800}.adjustment-negative{color:#b91c1c;font-weight:800}
     .admin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.weekday-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.weekday-grid label{font-size:12px}.admin-actions{display:flex;gap:8px;flex-wrap:wrap}.admin-actions .btn{width:auto}.badge{display:inline-block;padding:3px 8px;border-radius:999px;background:#e5e7eb;font-size:12px;font-weight:700}.admin-section{border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-top:14px}.admin-section h3{margin:0 0 8px}.save-bar{position:sticky;bottom:8px;background:#fff;padding-top:10px;z-index:5}.sum-box{margin-top:10px;padding:10px;border-radius:10px;background:#f3f4f6;font-weight:700}.field-hint{font-size:12px;color:var(--muted);margin-top:5px}
-    @media(max-width:700px){.grid2,.button-row,.tabs,.admin-grid{grid-template-columns:1fr}.weekday-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.screen{padding:9px}.head-row{align-items:flex-start;flex-direction:column}.head-row button{width:100%}.radio-row{grid-template-columns:minmax(125px,1fr) 64px 64px;gap:5px}.radio-row label{white-space:nowrap}.additional-hours-row{grid-template-columns:1fr 95px}.boss-month-head,.boss-month-row{grid-template-columns:minmax(120px,1.25fr) repeat(3,minmax(76px,.8fr));gap:5px}.boss-month-head{font-size:11px;padding-left:4px;padding-right:4px}.boss-month-row{padding-left:4px;padding-right:4px}.boss-month-value{font-size:15px}}
+    @media(max-width:700px){.grid2,.button-row,.tabs,.admin-grid{grid-template-columns:1fr}.weekday-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.screen{padding:9px}.head-row{align-items:flex-start;flex-direction:column}.head-row button{width:100%}.radio-row{grid-template-columns:minmax(125px,1fr) 64px 64px;gap:5px}.radio-row label{white-space:nowrap}.additional-hours-row{grid-template-columns:1fr 95px}.boss-month-head,.boss-month-row{grid-template-columns:minmax(120px,1.25fr) repeat(3,minmax(76px,.8fr));gap:5px}.boss-month-head{font-size:11px;padding-left:4px;padding-right:4px}.boss-month-row{padding-left:4px;padding-right:4px}.boss-month-value{font-size:15px}.adjustment-grid{grid-template-columns:1fr 1fr}.adjustment-grid .btn{width:100%}.adjustment-item{align-items:flex-start;flex-direction:column}}
   </style>
 </head>
 <body>
@@ -668,7 +669,8 @@ async function loadBossMonth(){
     if(!(rows||[]).length){$('bossResult').innerHTML='<div class="muted">Für diesen Monat sind keine Mitarbeiterdaten vorhanden.</div>';clearMessage('bossStatus');return}
     let grandTarget=0,grandActual=0;
     let html='<div class="boss-month-head"><div>Mitarbeiter</div><div style="text-align:right;color:#b91c1c">Soll</div><div style="text-align:right;color:#166534">Ist</div><div style="text-align:right">+ / −</div></div>';
-    html+=(rows||[]).map(x=>{
+    window.__bossMonthRows=rows||[];
+    html+=(rows||[]).map((x,rowIndex)=>{
       const target=Number(x.targetTotal||0),actual=Number(x.actualTotal!=null?x.actualTotal:x.total||0),balance=Number(x.balance!=null?x.balance:actual-target);
       grandTarget+=target;grandActual+=actual;
       const balanceClass=balance>0?'balance-plus':balance<0?'balance-minus':'balance-zero';
@@ -679,10 +681,14 @@ async function loadBossMonth(){
         '<div class="boss-month-value actual-value">'+formatHours(actual)+' Std.</div>'+
         '<div class="boss-month-value '+balanceClass+'">'+balanceText+'</div>'+
         '<div class="boss-month-details">'+
-          '<div class="muted small">Arbeitszeit '+formatHours(x.workTotal||0)+' Std. · Gutschriften '+formatHours(x.creditedTotal||0)+' Std. · Wochen-Soll '+formatHours(x.weeklyHours||0)+' Std.</div>'+
+          '<div class="muted small">Arbeitszeit '+formatHours(x.workTotal||0)+' Std. · Gutschriften '+formatHours(x.creditedTotal||0)+' Std. · Manuelle Korrektur '+(Number(x.adjustmentTotal||0)>0?'+':'')+formatHours(x.adjustmentTotal||0)+' Std. · Wochen-Soll '+formatHours(x.weeklyHours||0)+' Std.</div>'+
           '<div class="status info">Monat: Krank '+Number(x.sickDays||0)+' · Urlaub '+Number(x.vacationDays||0)+' · Feiertag '+Number(x.holidayDays||0)+'</div>'+
           '<div class="status info">Jahr: Krank '+Number(x.yearSickDays||0)+' · Urlaub beansprucht '+Number(x.yearVacationDays||0)+' · Urlaub zustehend '+formatHours(x.vacationEntitlement)+' · Resturlaub '+formatHours(x.vacationRemaining)+' Tage</div>'+
           ((x.statuses||[]).length?'<details><summary>Tagesstatus</summary>'+(x.statuses||[]).map(s=>'<div class="entry">'+formatDateDE(s.date)+' · <strong>'+esc(s.status)+'</strong>'+(Number(s.creditedHours||0)?' · '+formatHours(s.creditedHours)+' Std.':'')+'</div>').join('')+'</details>':'')+
+          '<details open><summary>Stunden gutschreiben / abziehen</summary><div class="adjustment-box">'+
+            '<div class="adjustment-grid"><label>Stunden<input id="adjHours_'+rowIndex+'" inputmode="decimal" placeholder="z.B. 2,5"></label><label>Grund<input id="adjReason_'+rowIndex+'" placeholder="z.B. Korrektur Vormonat"></label><button class="btn success" onclick="saveBossAdjustment('+rowIndex+',1)">+ Gutschreiben</button><button class="btn danger" onclick="saveBossAdjustment('+rowIndex+',-1)">− Abziehen</button></div>'+
+            '<div class="adjustment-history">'+((x.adjustments||[]).length?(x.adjustments||[]).map(a=>'<div class="adjustment-item"><div><span class="'+(Number(a.hours)>=0?'adjustment-positive':'adjustment-negative')+'">'+(Number(a.hours)>0?'+':'')+formatHours(a.hours)+' Std.</span> · '+esc(a.reason||'')+'<div class="muted small">'+esc(a.createdAt||'')+' · '+esc(a.createdBy||'')+'</div></div><button class="btn secondary" onclick="deleteBossAdjustment(\''+esc(a.id)+'\')">Entfernen</button></div>').join(''):'<div class="muted small">Noch keine manuellen Stundenkorrekturen.</div>')+'</div>'+
+          '</div></details>'+
           '<details><summary>Einträge</summary>'+(x.entries||[]).map(e=>'<div class="entry">'+esc(e.date)+' · '+esc(e.customer)+' · '+formatHours(e.hours)+' Std.'+(e.isAdditionalAssignment?' <strong>· Mitarbeit</strong>':'')+'<br><span class="muted">'+esc(e.activity)+'</span>'+(e.isAdditionalAssignment?'<br><span class="muted">Eingetragen von '+esc(e.assignedBy||'')+'</span>':'')+'</div>').join('')+'</details>'+
         '</div>'+
       '</div>';
@@ -696,6 +702,33 @@ async function loadBossMonth(){
     $('bossResult').innerHTML='';
     setMessage('bossStatus','Monatsübersicht konnte nicht geladen werden: '+e.message,'error');
   }
+}
+
+function parseDecimalInput(value){const n=Number(String(value==null?'':value).trim().replace(',','.'));return Number.isFinite(n)?n:NaN}
+async function saveBossAdjustment(rowIndex,direction){
+  if(!navigator.onLine){setMessage('bossStatus','Stundenkorrekturen benötigen Internet.','warn');return}
+  const rows=window.__bossMonthRows||[],x=rows[rowIndex];if(!x)return;
+  const raw=parseDecimalInput($('adjHours_'+rowIndex).value),reason=$('adjReason_'+rowIndex).value.trim();
+  if(!(raw>0)){setMessage('bossStatus','Bitte eine positive Stundenanzahl eingeben, z.B. 2,5.','error');return}
+  if(!reason){setMessage('bossStatus','Bitte einen Grund für die Stundenkorrektur eintragen.','error');return}
+  const hours=Math.abs(raw)*(direction<0?-1:1);
+  const actionText=direction<0?'abziehen':'gutschreiben';
+  if(!confirm(formatHours(Math.abs(hours))+' Std. bei '+x.employee+' '+actionText+'?'))return;
+  try{
+    setMessage('bossStatus','Stundenkorrektur wird gespeichert ...','info');
+    await api({action:'saveMonthlyAdjustment',employee:auth().employee,employeePin:auth().pin,targetEmployee:x.employee,year:Number($('bossYear').value),month:Number($('bossMonth').value),hours,reason});
+    await loadBossMonth();
+    setMessage('bossStatus','✅ Stundenkorrektur gespeichert.','ok');
+  }catch(e){setMessage('bossStatus','Stundenkorrektur nicht möglich: '+e.message,'error')}
+}
+async function deleteBossAdjustment(adjustmentId){
+  if(!navigator.onLine){setMessage('bossStatus','Stundenkorrekturen benötigen Internet.','warn');return}
+  if(!confirm('Diese Stundenkorrektur wirklich entfernen?'))return;
+  try{
+    await api({action:'deleteMonthlyAdjustment',employee:auth().employee,employeePin:auth().pin,adjustmentId});
+    await loadBossMonth();
+    setMessage('bossStatus','✅ Stundenkorrektur entfernt.','ok');
+  }catch(e){setMessage('bossStatus','Korrektur konnte nicht entfernt werden: '+e.message,'error')}
 }
 
 function openDb(){return new Promise((resolve,reject)=>{const req=indexedDB.open('DGZeiterfassungOffline',2);req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains('queue'))req.result.createObjectStore('queue',{keyPath:'id',autoIncrement:true})};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
