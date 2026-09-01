@@ -33,7 +33,7 @@
     .multi-dropdown{position:relative;margin-top:8px}.multi-menu{border:1px solid var(--line);border-radius:12px;padding:8px;background:#fff;margin-top:6px}
     .multi-menu label{display:flex;align-items:center;gap:9px;padding:9px;margin:0;border-radius:8px}.multi-menu label:hover{background:#f3f4f6}.multi-menu input{width:auto}
     details{margin-top:8px}summary{font-weight:700;cursor:pointer}
-    .admin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.weekday-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.weekday-grid label{font-size:12px}.admin-actions{display:flex;gap:8px;flex-wrap:wrap}.admin-actions .btn{width:auto}.badge{display:inline-block;padding:3px 8px;border-radius:999px;background:#e5e7eb;font-size:12px;font-weight:700}
+    .admin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.weekday-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.weekday-grid label{font-size:12px}.admin-actions{display:flex;gap:8px;flex-wrap:wrap}.admin-actions .btn{width:auto}.badge{display:inline-block;padding:3px 8px;border-radius:999px;background:#e5e7eb;font-size:12px;font-weight:700}.admin-section{border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-top:14px}.admin-section h3{margin:0 0 8px}.save-bar{position:sticky;bottom:8px;background:#fff;padding-top:10px;z-index:5}.sum-box{margin-top:10px;padding:10px;border-radius:10px;background:#f3f4f6;font-weight:700}.field-hint{font-size:12px;color:var(--muted);margin-top:5px}
     @media(max-width:700px){.grid2,.button-row,.tabs,.admin-grid{grid-template-columns:1fr}.weekday-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.screen{padding:9px}.head-row{align-items:flex-start;flex-direction:column}.head-row button{width:100%}.radio-row{grid-template-columns:minmax(125px,1fr) 64px 64px;gap:5px}.radio-row label{white-space:nowrap}.additional-hours-row{grid-template-columns:1fr 95px}}
   </style>
 </head>
@@ -48,7 +48,7 @@
       <select id="loginEmployee"><option value="">Mitarbeiter werden geladen ...</option></select>
       <label for="loginPin">PIN</label>
       <input id="loginPin" type="password" inputmode="numeric" maxlength="10" placeholder="PIN">
-      <button class="btn primary" style="width:100%;margin-top:16px" onclick="loginEmployee()">Anmelden</button>
+      <button class="btn primary" style="width:100%;margin-top:16px" data-enter-default onclick="loginEmployee()">Anmelden</button>
       <div id="loginStatus"></div>
     </div>
   </div>
@@ -81,7 +81,7 @@
             </select>
           </div>
           <div style="display:flex;align-items:end">
-            <button id="dayStatusSaveBtn" class="btn primary" style="width:100%" onclick="saveDayStatus()">Status speichern</button>
+            <button id="dayStatusSaveBtn" class="btn primary" style="width:100%" data-enter-default onclick="saveDayStatus()">Status speichern</button>
           </div>
         </div>
         <div id="dayStatusMessage"></div>
@@ -144,7 +144,7 @@
         <canvas id="customerSignature"></canvas>
         <div class="button-row"><button class="btn secondary" onclick="clearCustomerSignature()">Unterschrift löschen</button><button class="btn secondary" onclick="markNoCustomer()">Kein Kunde vor Ort</button></div>
         <div class="check-row"><label><input id="syncCalendar" type="checkbox">Mit Google Kalender synchronisieren</label></div>
-        <button class="btn primary" style="width:100%;margin-top:14px" onclick="saveEntry()">Eintrag speichern</button><div id="entryStatus"></div>
+        <button class="btn primary" style="width:100%;margin-top:14px" data-enter-default onclick="saveEntry()">Eintrag speichern</button><div id="entryStatus"></div>
       </div>
 
       <div class="card"><h2>Einträge des Tages</h2><div id="entries" class="muted">Noch keine Tagesdaten geladen.</div><div id="dayTotal" class="total">Gesamt: 0,00 Std.</div><button class="btn secondary" style="width:100%" onclick="loadDay()">Tag aktualisieren</button></div>
@@ -165,37 +165,56 @@
       <div class="card">
         <h2>Monatsübersicht</h2>
         <div class="grid2"><div><label for="empYear">Jahr</label><input id="empYear" type="number"></div><div><label for="empMonth">Monat</label><select id="empMonth"></select></div></div>
-        <div class="button-row"><button class="btn secondary" onclick="loadMonth()">Monat anzeigen</button><button class="btn primary" onclick="sendMonth()">Monatsbericht ans Büro</button></div><div id="monthStatus"></div><div id="monthResult"></div>
+        <div class="button-row"><button class="btn secondary" data-enter-default onclick="loadMonth()">Monat anzeigen</button><button class="btn primary" onclick="sendMonth()">Monatsbericht ans Büro</button></div><div id="monthStatus"></div><div id="monthResult"></div>
       </div>
     </section>
 
     <section id="bossView" class="hidden">
       <div class="card">
-        <h2>Büro / Chef</h2><label for="chefPin">Chef-PIN</label><input id="chefPin" type="password" inputmode="numeric" placeholder="PIN">
+        <h2>Büro / Chef</h2><div class="muted small">Zugriff über deine Mitarbeiter-Anmeldung mit Chefberechtigung.</div>
         <div class="grid2"><div><label for="bossYear">Jahr</label><input id="bossYear" type="number"></div><div><label for="bossMonth">Monat</label><select id="bossMonth"></select></div></div>
-        <div class="button-row"><button class="btn primary" onclick="loadBossMonth()">Monatsübersicht laden</button><button class="btn secondary" onclick="loadChefAdministration()">Verwaltung laden</button></div><div id="bossStatus"></div><div id="bossResult"></div>
+        <div class="button-row"><button class="btn primary" data-enter-default onclick="loadBossMonth()">Monatsübersicht laden</button><button class="btn secondary" onclick="loadChefAdministration()">Verwaltung laden</button></div><div id="bossStatus"></div><div id="bossResult"></div>
       </div>
 
       <div class="card">
         <h2>Mitarbeiterverwaltung</h2>
-        <div class="muted small">Mitarbeiter können angelegt, bearbeitet oder deaktiviert werden. Historische Zeitdaten bleiben beim Deaktivieren erhalten.</div>
-        <input id="adminOriginalName" type="hidden">
-        <div class="admin-grid"><div><label>Name</label><input id="adminName" placeholder="Vorname Nachname"></div><div><label>PIN</label><input id="adminPin" inputmode="numeric" placeholder="bei Änderung/neuem Mitarbeiter"></div></div>
-        <div class="admin-grid"><div><label>Google Kalender-ID</label><input id="adminCalendarId" placeholder="…@group.calendar.google.com"></div><div><label>Beschäftigungsart</label><select id="adminEmploymentType" onchange="employmentTypeChanged()"><option>Vollzeit</option><option>Teilzeit</option><option>Aushilfe</option></select></div></div>
-        <label>Wochenstunden (Mo–Fr)</label><input id="adminWeeklyHours" type="number" min="0" max="60" step="0.25" onchange="distributeWeeklyHours()" placeholder="bitte selbst eintragen">
-        <div class="weekday-grid">
-          <div><label>Montag</label><input id="adminMon" type="number" min="0" max="24" step="0.25"></div><div><label>Dienstag</label><input id="adminTue" type="number" min="0" max="24" step="0.25"></div><div><label>Mittwoch</label><input id="adminWed" type="number" min="0" max="24" step="0.25"></div><div><label>Donnerstag</label><input id="adminThu" type="number" min="0" max="24" step="0.25"></div><div><label>Freitag</label><input id="adminFri" type="number" min="0" max="24" step="0.25"></div>
+        <div class="muted small">Bestehenden Mitarbeiter auswählen und Daten laden – oder „Neuer Mitarbeiter“ wählen. Änderungen werden erst mit „Mitarbeiter speichern“ übernommen.</div>
+        <div class="admin-section">
+          <h3>1. Mitarbeiter auswählen</h3>
+          <div class="admin-grid"><div><label>Bestehender Mitarbeiter</label><select id="adminEmployeeSelect" onchange="loadSelectedEmployeeAdmin()"><option value="">Bitte Mitarbeiter wählen</option></select></div><div style="display:flex;align-items:end"><button type="button" class="btn secondary" style="width:100%" onclick="clearEmployeeAdminForm()">+ Neuer Mitarbeiter</button></div></div>
         </div>
-        <div class="check-row"><label><input id="adminHolidayCredit" type="checkbox" checked>Feiertagsstunden gutschreiben</label><label><input id="adminChefAccess" type="checkbox">Chefzugang</label></div>
-        <div class="button-row"><button class="btn primary" onclick="saveEmployeeAdminUi()">Mitarbeiter speichern</button><button class="btn secondary" onclick="clearEmployeeAdminForm()">Neuer Mitarbeiter</button></div>
-        <div id="employeeAdminStatus"></div><div id="employeeAdminList"></div>
+        <input id="adminOriginalName" type="hidden">
+        <input id="adminOriginalActive" type="hidden" value="1">
+        <div class="admin-section">
+          <h3>2. Stammdaten</h3>
+          <div class="admin-grid"><div><label>Name</label><input id="adminName" placeholder="Vorname Nachname"></div><div><label>PIN</label><input id="adminPin" inputmode="numeric" placeholder="bei bestehendem Mitarbeiter leer lassen"></div></div>
+          <div class="admin-grid"><div><label>Google Kalender-ID</label><input id="adminCalendarId" placeholder="…@group.calendar.google.com"><div class="field-hint">Kann leer bleiben, wenn noch kein Kalender zugeordnet ist.</div></div><div><label>Beschäftigungsart</label><select id="adminEmploymentType" onchange="employmentTypeChanged()"><option>Vollzeit</option><option>Teilzeit</option><option>Aushilfe</option></select></div></div>
+        </div>
+        <div class="admin-section">
+          <h3>3. Sollstunden</h3>
+          <label>Wochenstunden Montag–Freitag</label>
+          <div class="admin-grid"><div><input id="adminWeeklyHours" type="text" inputmode="decimal" placeholder="z. B. 40 oder 20"><div class="field-hint">Komma und Punkt sind erlaubt.</div></div><div style="display:flex;align-items:start"><button type="button" class="btn secondary" style="width:100%" onclick="distributeWeeklyHours()">Gleichmäßig auf Mo–Fr verteilen</button></div></div>
+          <div class="weekday-grid">
+            <div><label>Montag</label><input id="adminMon" type="text" inputmode="decimal" oninput="updateWeeklyHoursFromDays()"></div><div><label>Dienstag</label><input id="adminTue" type="text" inputmode="decimal" oninput="updateWeeklyHoursFromDays()"></div><div><label>Mittwoch</label><input id="adminWed" type="text" inputmode="decimal" oninput="updateWeeklyHoursFromDays()"></div><div><label>Donnerstag</label><input id="adminThu" type="text" inputmode="decimal" oninput="updateWeeklyHoursFromDays()"></div><div><label>Freitag</label><input id="adminFri" type="text" inputmode="decimal" oninput="updateWeeklyHoursFromDays()"></div>
+          </div>
+          <div id="adminHoursSum" class="sum-box">Summe Mo–Fr: 0,00 Std.</div>
+          <div class="field-hint">Die Tageswerte sind entscheidend für Urlaub, Krankheit und Feiertage. Die Wochenstunden werden daraus automatisch kontrolliert.</div>
+        </div>
+        <div class="admin-section">
+          <h3>4. Einstellungen</h3>
+          <div class="check-row"><label><input id="adminHolidayCredit" type="checkbox" checked>Feiertagsstunden gutschreiben</label><label><input id="adminChefAccess" type="checkbox">Chefzugang</label></div>
+          <div id="adminActiveState" class="status info">Neuer Mitarbeiter</div>
+          <button id="adminActiveBtn" type="button" class="btn danger hidden" style="width:100%" onclick="toggleSelectedEmployeeActiveUi()">Mitarbeiter deaktivieren</button>
+        </div>
+        <div class="save-bar"><button class="btn primary" style="width:100%" data-enter-default onclick="saveEmployeeAdminUi()">✓ Mitarbeiter speichern</button></div>
+        <div id="employeeAdminStatus"></div>
       </div>
 
       <div class="card">
         <h2>Urlaub / Krankheit</h2>
         <div class="admin-grid"><div><label>Mitarbeiter</label><select id="absenceEmployee"></select></div><div><label>Art</label><select id="absenceType"><option>Urlaub</option><option>Krank</option></select></div></div>
         <div class="grid2"><div><label>Von</label><input id="absenceStart" type="date"></div><div><label>Bis</label><input id="absenceEnd" type="date"></div></div>
-        <button class="btn primary" style="width:100%;margin-top:12px" onclick="saveAbsenceUi()">Zeitraum eintragen</button>
+        <button class="btn primary" style="width:100%;margin-top:12px" data-enter-default onclick="saveAbsenceUi()">Zeitraum eintragen</button>
         <div id="absenceStatus"></div><div id="absenceList"></div>
       </div>
 
@@ -205,14 +224,14 @@
         <div class="muted small">Urlaub zustehend wird von dir manuell pro Kalenderjahr eingetragen. Beansprucht und Resturlaub berechnet die App automatisch aus den erfassten Urlaubstagen.</div>
         <div class="admin-grid"><div><label>Mitarbeiter</label><select id="vacationEmployee" onchange="loadVacationAccountUi()"></select></div><div><label>Jahr</label><input id="vacationYear" type="number" onchange="loadVacationAccountUi()"></div></div>
         <label>Urlaub zustehend (Tage)</label><input id="vacationEntitlement" type="number" min="0" max="100" step="0.5" placeholder="manuell eintragen">
-        <div class="button-row"><button class="btn primary" onclick="saveVacationEntitlementUi()">Urlaubsanspruch speichern</button><button class="btn secondary" onclick="loadVacationAccountsUi()">Jahresübersicht laden</button></div>
+        <div class="button-row"><button class="btn primary" data-enter-default onclick="saveVacationEntitlementUi()">Urlaubsanspruch speichern</button><button class="btn secondary" onclick="loadVacationAccountsUi()">Jahresübersicht laden</button></div>
         <div id="vacationStatus"></div><div id="vacationAccountResult"></div><div id="vacationAccountsList"></div>
       </div>
 
       <div class="card">
         <h2>Feiertage Bayern / Nürnberg</h2>
         <div class="muted small">Gesetzliche Feiertage werden automatisch berücksichtigt. Eine Stundengutschrift erfolgt nur anhand der von dir hinterlegten Sollstunden. Bei Aushilfe ist die Feiertagsgutschrift standardmäßig aus.</div>
-        <div class="grid2"><div><label>Jahr</label><input id="holidayYear" type="number"></div><div style="display:flex;align-items:end"><button class="btn secondary" style="width:100%" onclick="syncHolidaysUi()">Feiertage aktualisieren</button></div></div>
+        <div class="grid2"><div><label>Jahr</label><input id="holidayYear" type="number"></div><div style="display:flex;align-items:end"><button class="btn secondary" style="width:100%" data-enter-default onclick="syncHolidaysUi()">Feiertage aktualisieren</button></div></div>
         <div id="holidayStatus"></div>
       </div>
     </section>
@@ -275,6 +294,7 @@ function showBoss(){
   $('bossView').classList.remove('hidden');
   $('employeeTab').classList.remove('active');
   $('bossTab').classList.add('active');
+  if(navigator.onLine) loadChefAdministration();
 }
 
 
@@ -294,9 +314,8 @@ function renderAdditionalEmployeeMenu(){
   updateAdditionalEmployeesButton();
 }
 function fillAbsenceEmployees(){const opts=(employeeDirectory||[]).map(x=>'<option>'+esc(x)+'</option>').join('');if($('absenceEmployee'))$('absenceEmployee').innerHTML=opts;if($('vacationEmployee'))$('vacationEmployee').innerHTML=opts}
-function chefPayload(extra={}){const a=auth();return Object.assign({employee:a.employee,employeePin:a.pin,chefPin:$('chefPin').value},extra)}
+function chefPayload(extra={}){const a=auth();return Object.assign({employee:a.employee,employeePin:a.pin},extra)}
 async function loadChefAdministration(){
-  if(!$('chefPin').value){setMessage('bossStatus','Bitte Chef-PIN eingeben.','error');return}
   try{
     const rows=await api(chefPayload({action:'getEmployeeAdminData'}));
     renderEmployeeAdminList(rows||[]);
@@ -306,28 +325,43 @@ async function loadChefAdministration(){
   }catch(e){setMessage('bossStatus',e.message,'error')}
 }
 function renderEmployeeAdminList(rows){
-  $('employeeAdminList').innerHTML=(rows||[]).map((x,i)=>`<div class="entry"><strong>${esc(x.name)}</strong> <span class="badge">${esc(x.employmentType)}</span> ${x.active?'':'<span class="badge">inaktiv</span>'}<br><span class="muted">${formatHours(x.weeklyHours)} Std./Woche · Mo ${formatHours(x.monday)} · Di ${formatHours(x.tuesday)} · Mi ${formatHours(x.wednesday)} · Do ${formatHours(x.thursday)} · Fr ${formatHours(x.friday)} · Feiertag ${x.holidayCredit?'ja':'nein'}</span><div class="admin-actions" style="margin-top:8px"><button class="btn secondary" data-i="${i}" onclick="editEmployeeAdmin(Number(this.dataset.i))">Bearbeiten</button><button class="btn ${x.active?'danger':'success'}" data-name="${esc(x.name)}" data-active="${x.active?'0':'1'}" onclick="toggleEmployeeActiveUi(this.dataset.name,this.dataset.active==='1')">${x.active?'Deaktivieren':'Aktivieren'}</button></div></div>`).join('')||'<div class="muted">Keine Mitarbeiter.</div>';
   window.__employeeAdminRows=rows||[];
+  if($('adminEmployeeSelect')){
+    const previous=$('adminEmployeeSelect').value;
+    $('adminEmployeeSelect').innerHTML='<option value="">Bitte Mitarbeiter wählen</option>'+window.__employeeAdminRows.map((x,i)=>'<option value="'+i+'">'+esc(x.name)+(x.active?'':' (inaktiv)')+'</option>').join('');
+    if(previous!=='' && window.__employeeAdminRows[Number(previous)]) $('adminEmployeeSelect').value=previous;
+  }
 }
-function editEmployeeAdmin(i){const x=(window.__employeeAdminRows||[])[i];if(!x)return;$('adminOriginalName').value=x.name;$('adminName').value=x.name;$('adminPin').value='';$('adminCalendarId').value=x.calendarId||'';$('adminEmploymentType').value=x.employmentType||'Vollzeit';$('adminWeeklyHours').value=x.weeklyHours||0;$('adminMon').value=x.monday||0;$('adminTue').value=x.tuesday||0;$('adminWed').value=x.wednesday||0;$('adminThu').value=x.thursday||0;$('adminFri').value=x.friday||0;$('adminHolidayCredit').checked=Boolean(x.holidayCredit);$('adminChefAccess').checked=Boolean(x.chefAccess);$('adminName').scrollIntoView({behavior:'smooth',block:'center'})}
-function clearEmployeeAdminForm(){$('adminOriginalName').value='';$('adminName').value='';$('adminPin').value='';$('adminCalendarId').value='';$('adminEmploymentType').value='Vollzeit';$('adminWeeklyHours').value='';['adminMon','adminTue','adminWed','adminThu','adminFri'].forEach(id=>$(id).value='');$('adminHolidayCredit').checked=true;$('adminChefAccess').checked=false}
-function distributeWeeklyHours(){const w=Math.max(0,Number($('adminWeeklyHours').value)||0),d=Math.round((w/5)*100)/100;['adminMon','adminTue','adminWed','adminThu','adminFri'].forEach(id=>$(id).value=d.toFixed(2))}
+function parseHoursInput(v){const s=String(v==null?'':v).trim().replace(',','.');if(!s)return 0;const n=Number(s);return Number.isFinite(n)?n:NaN}
+function formatInputHours(v){return Number(v||0).toFixed(2).replace('.',',')}
+function loadSelectedEmployeeAdmin(){const v=$('adminEmployeeSelect').value;if(v==='')return;editEmployeeAdmin(Number(v))}
+function editEmployeeAdmin(i){const x=(window.__employeeAdminRows||[])[i];if(!x)return;$('adminOriginalName').value=x.name;$('adminOriginalActive').value=x.active?'1':'0';$('adminName').value=x.name;$('adminPin').value='';$('adminCalendarId').value=x.calendarId||'';$('adminEmploymentType').value=x.employmentType||'Vollzeit';$('adminWeeklyHours').value=formatInputHours(x.weeklyHours);$('adminMon').value=formatInputHours(x.monday);$('adminTue').value=formatInputHours(x.tuesday);$('adminWed').value=formatInputHours(x.wednesday);$('adminThu').value=formatInputHours(x.thursday);$('adminFri').value=formatInputHours(x.friday);$('adminHolidayCredit').checked=Boolean(x.holidayCredit);$('adminChefAccess').checked=Boolean(x.chefAccess);if($('adminEmployeeSelect'))$('adminEmployeeSelect').value=String(i);if($('adminActiveState')){$('adminActiveState').textContent=x.active?'Status: Aktiv':'Status: Inaktiv';$('adminActiveState').className='status '+(x.active?'ok':'warn')}if($('adminActiveBtn')){$('adminActiveBtn').classList.remove('hidden');$('adminActiveBtn').textContent=x.active?'Mitarbeiter deaktivieren':'Mitarbeiter aktivieren';$('adminActiveBtn').className='btn '+(x.active?'danger':'success')}updateHoursSum();$('adminName').scrollIntoView({behavior:'smooth',block:'center'})}
+function clearEmployeeAdminForm(){$('adminOriginalName').value='';$('adminOriginalActive').value='1';if($('adminEmployeeSelect'))$('adminEmployeeSelect').value='';$('adminName').value='';$('adminPin').value='';$('adminCalendarId').value='';$('adminEmploymentType').value='Vollzeit';$('adminWeeklyHours').value='';['adminMon','adminTue','adminWed','adminThu','adminFri'].forEach(id=>$(id).value='');$('adminHolidayCredit').checked=true;$('adminChefAccess').checked=false;if($('adminActiveState')){$('adminActiveState').textContent='Neuer Mitarbeiter';$('adminActiveState').className='status info'}if($('adminActiveBtn'))$('adminActiveBtn').classList.add('hidden');updateHoursSum();clearMessage('employeeAdminStatus')}
+function updateHoursSum(){const vals=['adminMon','adminTue','adminWed','adminThu','adminFri'].map(id=>parseHoursInput($(id).value));const valid=vals.every(Number.isFinite);const sum=valid?vals.reduce((a,b)=>a+b,0):0;if($('adminHoursSum'))$('adminHoursSum').textContent=valid?'Summe Mo–Fr: '+formatHours(sum)+' Std.':'Bitte Stundenwerte prüfen.';return valid?sum:NaN}
+function updateWeeklyHoursFromDays(){const sum=updateHoursSum();if(Number.isFinite(sum))$('adminWeeklyHours').value=formatInputHours(sum)}
+function distributeWeeklyHours(){const w=parseHoursInput($('adminWeeklyHours').value);if(!Number.isFinite(w)||w<0||w>60){setMessage('employeeAdminStatus','Bitte gültige Wochenstunden zwischen 0 und 60 eingeben.','error');return}const d=Math.round((w/5)*100)/100;['adminMon','adminTue','adminWed','adminThu','adminFri'].forEach(id=>$(id).value=formatInputHours(d));updateHoursSum();clearMessage('employeeAdminStatus')}
 function employmentTypeChanged(){if($('adminEmploymentType').value==='Aushilfe')$('adminHolidayCredit').checked=false}
 async function saveEmployeeAdminUi(){
-  const item={name:$('adminName').value.trim(),pin:$('adminPin').value.trim(),calendarId:$('adminCalendarId').value.trim(),employmentType:$('adminEmploymentType').value,weeklyHours:Number($('adminWeeklyHours').value)||0,monday:Number($('adminMon').value)||0,tuesday:Number($('adminTue').value)||0,wednesday:Number($('adminWed').value)||0,thursday:Number($('adminThu').value)||0,friday:Number($('adminFri').value)||0,holidayCredit:$('adminHolidayCredit').checked,chefAccess:$('adminChefAccess').checked,active:true};
-  if(!item.name){setMessage('employeeAdminStatus','Name fehlt.','error');return}
+  const dayIds=['adminMon','adminTue','adminWed','adminThu','adminFri'];const dayVals=dayIds.map(id=>parseHoursInput($(id).value));let weekly=parseHoursInput($('adminWeeklyHours').value);
+  if(!Number.isFinite(weekly)||weekly<0||weekly>60){setMessage('employeeAdminStatus','Wochenstunden sind ungültig. Erlaubt: 0 bis 60 Std.','error');return}
+  if(dayVals.some(v=>!Number.isFinite(v)||v<0||v>24)){setMessage('employeeAdminStatus','Bitte die Sollstunden Montag bis Freitag prüfen. Erlaubt sind 0 bis 24 Std. je Tag.','error');return}
+  if(dayVals.every(v=>v===0)&&weekly>0){const d=Math.round((weekly/5)*100)/100;dayVals.fill(d);dayIds.forEach((id,i)=>$(id).value=formatInputHours(dayVals[i]))}
+  const daySum=Math.round(dayVals.reduce((a,b)=>a+b,0)*100)/100;weekly=daySum;$('adminWeeklyHours').value=formatInputHours(weekly);updateHoursSum();
+  const item={name:$('adminName').value.trim(),pin:$('adminPin').value.trim(),calendarId:$('adminCalendarId').value.trim(),employmentType:$('adminEmploymentType').value,weeklyHours:weekly,monday:dayVals[0],tuesday:dayVals[1],wednesday:dayVals[2],thursday:dayVals[3],friday:dayVals[4],holidayCredit:$('adminHolidayCredit').checked,chefAccess:$('adminChefAccess').checked,active:$('adminOriginalActive').value!=='0'};
+  if(!item.name){setMessage('employeeAdminStatus','Bitte einen Namen eintragen oder bestehenden Mitarbeiter auswählen.','error');return}
   if(!$('adminOriginalName').value&&!item.pin){setMessage('employeeAdminStatus','Für einen neuen Mitarbeiter bitte PIN eingeben.','error');return}
   if($('adminOriginalName').value&&$('adminOriginalName').value!==item.name){setMessage('employeeAdminStatus','Den Namen eines bestehenden Mitarbeiters bitte nicht ändern. Neu anlegen und alten deaktivieren.','warn');return}
-  try{const res=await api(chefPayload({action:'saveEmployeeAdmin',item}));setMessage('employeeAdminStatus','✅ Mitarbeiter gespeichert.','ok');renderEmployeeAdminList(res.employees||[]);await loadEmployeeDirectory();clearEmployeeAdminForm()}catch(e){setMessage('employeeAdminStatus',e.message,'error')}
+  try{setMessage('employeeAdminStatus','Mitarbeiter wird gespeichert ...','info');const res=await api(chefPayload({action:'saveEmployeeAdmin',item}));renderEmployeeAdminList(res.employees||[]);await loadEmployeeDirectory();setMessage('employeeAdminStatus','✅ Gespeichert: '+item.name+' · '+formatHours(weekly)+' Std./Woche.','ok');const idx=(window.__employeeAdminRows||[]).findIndex(x=>x.name===item.name);if(idx>=0)editEmployeeAdmin(idx)}catch(e){setMessage('employeeAdminStatus','Speichern nicht möglich: '+e.message,'error')}
 }
 async function toggleEmployeeActiveUi(name,active){if(!confirm((active?'Mitarbeiter aktivieren: ':'Mitarbeiter deaktivieren: ')+name+'?'))return;try{await api(chefPayload({action:'setEmployeeActive',targetName:name,active}));await loadChefAdministration();await loadEmployeeDirectory()}catch(e){setMessage('employeeAdminStatus',e.message,'error')}}
+async function toggleSelectedEmployeeActiveUi(){const name=$('adminOriginalName').value;if(!name)return;const active=$('adminOriginalActive').value==='0';await toggleEmployeeActiveUi(name,active);const idx=(window.__employeeAdminRows||[]).findIndex(x=>x.name===name);if(idx>=0)editEmployeeAdmin(idx)}
 async function saveAbsenceUi(){const target=$('absenceEmployee').value,type=$('absenceType').value,startDate=$('absenceStart').value,endDate=$('absenceEnd').value;if(!target||!startDate||!endDate){setMessage('absenceStatus','Bitte Mitarbeiter und Zeitraum auswählen.','error');return}try{const r=await api(chefPayload({action:'saveAbsence',targetEmployee:target,type,startDate,endDate}));setMessage('absenceStatus','✅ '+type+' eingetragen: '+r.days+' Arbeitstag(e).','ok');const abs=await api(chefPayload({action:'getAbsences'}));renderAbsenceList(abs||[])}catch(e){setMessage('absenceStatus',e.message,'error')}}
 function renderAbsenceList(rows){$('absenceList').innerHTML=(rows||[]).map(x=>`<div class="entry"><strong>${esc(x.employee)}</strong> · ${esc(x.type)}<br><span class="muted">${formatDateDE(x.start)} bis ${formatDateDE(x.end)}</span><br><button class="btn danger" style="margin-top:8px" data-id="${esc(x.id)}" onclick="deleteAbsenceUi(this.dataset.id)">Eintrag löschen</button></div>`).join('')||'<div class="muted">Keine geplanten Abwesenheiten.</div>'}
 async function deleteAbsenceUi(id){if(!confirm('Abwesenheit wirklich löschen?'))return;try{await api(chefPayload({action:'deleteAbsence',id}));const abs=await api(chefPayload({action:'getAbsences'}));renderAbsenceList(abs||[]);setMessage('absenceStatus','Abwesenheit gelöscht.','ok')}catch(e){setMessage('absenceStatus',e.message,'error')}}
 async function syncHolidaysUi(){try{const y=Number($('holidayYear').value);await api(chefPayload({action:'syncHolidays',year:y}));setMessage('holidayStatus','✅ Feiertage für '+y+' aktualisiert.','ok')}catch(e){setMessage('holidayStatus',e.message,'error')}}
 
 async function loadVacationAccountUi(){
-  if(!$('vacationEmployee')||!$('vacationEmployee').value||!$('vacationYear').value||!$('chefPin').value)return;
+  if(!$('vacationEmployee')||!$('vacationEmployee').value||!$('vacationYear').value)return;
   try{
     const x=await api(chefPayload({action:'getVacationAccount',targetEmployee:$('vacationEmployee').value,year:Number($('vacationYear').value)}));
     $('vacationEntitlement').value=Number(x.vacationEntitlement||0)||'';
@@ -341,7 +375,7 @@ async function saveVacationEntitlementUi(){
   try{const x=await api(chefPayload({action:'saveVacationEntitlement',targetEmployee:target,year,entitlement}));setMessage('vacationStatus','✅ Urlaubsanspruch gespeichert.','ok');await loadVacationAccountUi();await loadVacationAccountsUi()}catch(e){setMessage('vacationStatus',e.message,'error')}
 }
 async function loadVacationAccountsUi(){
-  if(!$('vacationYear')||!$('vacationYear').value||!$('chefPin').value)return;
+  if(!$('vacationYear')||!$('vacationYear').value)return;
   try{const rows=await api(chefPayload({action:'getVacationAccounts',year:Number($('vacationYear').value)}));$('vacationAccountsList').innerHTML=(rows||[]).map(x=>'<div class="entry"><strong>'+esc(x.employee)+'</strong>'+(!x.active?' <span class="badge">inaktiv</span>':'')+'<br><span class="muted">Urlaub zustehend: '+formatHours(x.vacationEntitlement)+' · beansprucht: '+Number(x.vacationUsed||0)+' · Rest: '+formatHours(x.vacationRemaining)+' Tage · Krank: '+Number(x.sickDays||0)+' Tage</span></div>').join('')||'<div class="muted">Keine Daten.</div>'}catch(e){setMessage('vacationStatus',e.message,'error')}
 }
 
@@ -597,7 +631,7 @@ async function closeDay(){const a=auth(),date=$('date').value;if(!employeePad.ha
 
 async function loadMonth(){const a=auth();if(!navigator.onLine){setMessage('monthStatus','Monatsübersicht benötigt Internet.','warn');return}try{const data=await api({action:'getMonthData',employee:a.employee,pin:a.pin,year:Number($('empYear').value),month:Number($('empMonth').value)});const ms=data.monthSummary||{},ys=data.yearSummary||{};let html='<div class="total">Gesamt: '+formatHours(data.total)+' Std.</div><div class="status info">Dieser Monat: Urlaub '+Number(ms.vacationDays||0)+' Tag(e) · Krank '+Number(ms.sickDays||0)+' Tag(e) · Feiertage '+Number(ms.holidayDays||0)+' Tag(e)</div><div class="status info">Jahr '+Number(ys.year||$('empYear').value)+': Urlaub '+Number(ys.vacationUsed||0)+' Tag(e) · Krank '+Number(ys.sickDays||0)+' Tag(e) · Urlaub zustehend '+formatHours(ys.vacationEntitlement)+' · Resturlaub '+formatHours(ys.vacationRemaining)+' Tage</div>';html+=(data.rows||[]).map(r=>'<div class="entry"><strong>'+esc(r.date)+'</strong> · '+esc(r.customer)+' · '+formatHours(r.hours)+' Std. '+(r.closed?'✓':'(offen)')+(r.isAdditionalAssignment?' <span class="muted">· Mitarbeit, eingetragen von '+esc(r.assignedBy||'')+'</span>':'')+'</div>').join('');if((data.statuses||[]).length){html+='<h3 style="margin-top:16px">Urlaub / Krank / Feiertag</h3>';html+=(data.statuses||[]).map(s=>'<div class="entry"><strong>'+formatDateDE(s.date)+'</strong> · '+esc(s.status)+(Number(s.creditedHours||0)?' · '+formatHours(s.creditedHours)+' Std. Gutschrift':'')+'</div>').join('')}$('monthResult').innerHTML=html;clearMessage('monthStatus')}catch(e){setMessage('monthStatus',e.message,'error')}}
 async function sendMonth(){const a=auth();if(!navigator.onLine){setMessage('monthStatus','Versand benötigt Internet.','warn');return}try{const r=await api({action:'sendMonthReport',employee:a.employee,pin:a.pin,year:Number($('empYear').value),month:Number($('empMonth').value)});setMessage('monthStatus','✅ Monatsbericht gesendet. Gesamt: '+formatHours(r.total)+' Std.','ok')}catch(e){setMessage('monthStatus',e.message,'error')}}
-async function loadBossMonth(){if(!navigator.onLine){setMessage('bossStatus','Chefansicht benötigt Internet.','warn');return}try{const rows=await api({action:'getBossMonthData',employee:auth().employee,employeePin:auth().pin,pin:$('chefPin').value,year:Number($('bossYear').value),month:Number($('bossMonth').value)});let grand=0;$('bossResult').innerHTML=(rows||[]).map(x=>{grand+=Number(x.total||0);return '<div class="entry"><h3>'+esc(x.employee)+'</h3><strong>'+formatHours(x.total)+' Std.</strong><div class="muted">'+x.days+' Arbeitstage · '+x.closedDays+' abgeschlossen · '+x.openDays+' offen</div><div class="status info">Monat: Krank '+Number(x.sickDays||0)+' · Urlaub '+Number(x.vacationDays||0)+' · Feiertag '+Number(x.holidayDays||0)+'</div><div class="status info">Jahr: Krank '+Number(x.yearSickDays||0)+' · Urlaub beansprucht '+Number(x.yearVacationDays||0)+' · Urlaub zustehend '+formatHours(x.vacationEntitlement)+' · Resturlaub '+formatHours(x.vacationRemaining)+' Tage</div>'+((x.statuses||[]).length?'<details><summary>Tagesstatus</summary>'+(x.statuses||[]).map(s=>'<div class="entry">'+formatDateDE(s.date)+' · <strong>'+esc(s.status)+'</strong>'+(Number(s.creditedHours||0)?' · '+formatHours(s.creditedHours)+' Std.':'')+'</div>').join('')+'</details>':'')+'<details><summary>Einträge</summary>'+(x.entries||[]).map(e=>'<div class="entry">'+esc(e.date)+' · '+esc(e.customer)+' · '+formatHours(e.hours)+' Std.'+(e.isAdditionalAssignment?' <strong>· Mitarbeit</strong>':'')+'<br><span class="muted">'+esc(e.activity)+'</span>'+(e.isAdditionalAssignment?'<br><span class="muted">Eingetragen von '+esc(e.assignedBy||'')+'</span>':'<br><span class="muted">Weitere Mitarbeiter: '+((e.additionalEmployeeHours||[]).length?esc((e.additionalEmployeeHours||[]).map(a=>a.name+' ('+formatHours(a.hours)+' Std.)').join(', ')):((e.additionalEmployees||[]).length?esc((e.additionalEmployees||[]).join(', ')):'Keine'))+'</span>')+'</div>').join('')+'</details></div>'}).join('')+'<div class="total">Gesamtsumme: '+formatHours(grand)+' Std.</div>';clearMessage('bossStatus')}catch(e){setMessage('bossStatus',e.message,'error')}}
+async function loadBossMonth(){if(!navigator.onLine){setMessage('bossStatus','Chefansicht benötigt Internet.','warn');return}try{const rows=await api({action:'getBossMonthData',employee:auth().employee,employeePin:auth().pin,year:Number($('bossYear').value),month:Number($('bossMonth').value)});let grand=0;$('bossResult').innerHTML=(rows||[]).map(x=>{grand+=Number(x.total||0);return '<div class="entry"><h3>'+esc(x.employee)+'</h3><strong>'+formatHours(x.total)+' Std.</strong><div class="muted">'+x.days+' Arbeitstage · '+x.closedDays+' abgeschlossen · '+x.openDays+' offen</div><div class="status info">Monat: Krank '+Number(x.sickDays||0)+' · Urlaub '+Number(x.vacationDays||0)+' · Feiertag '+Number(x.holidayDays||0)+'</div><div class="status info">Jahr: Krank '+Number(x.yearSickDays||0)+' · Urlaub beansprucht '+Number(x.yearVacationDays||0)+' · Urlaub zustehend '+formatHours(x.vacationEntitlement)+' · Resturlaub '+formatHours(x.vacationRemaining)+' Tage</div>'+((x.statuses||[]).length?'<details><summary>Tagesstatus</summary>'+(x.statuses||[]).map(s=>'<div class="entry">'+formatDateDE(s.date)+' · <strong>'+esc(s.status)+'</strong>'+(Number(s.creditedHours||0)?' · '+formatHours(s.creditedHours)+' Std.':'')+'</div>').join('')+'</details>':'')+'<details><summary>Einträge</summary>'+(x.entries||[]).map(e=>'<div class="entry">'+esc(e.date)+' · '+esc(e.customer)+' · '+formatHours(e.hours)+' Std.'+(e.isAdditionalAssignment?' <strong>· Mitarbeit</strong>':'')+'<br><span class="muted">'+esc(e.activity)+'</span>'+(e.isAdditionalAssignment?'<br><span class="muted">Eingetragen von '+esc(e.assignedBy||'')+'</span>':'<br><span class="muted">Weitere Mitarbeiter: '+((e.additionalEmployeeHours||[]).length?esc((e.additionalEmployeeHours||[]).map(a=>a.name+' ('+formatHours(a.hours)+' Std.)').join(', ')):((e.additionalEmployees||[]).length?esc((e.additionalEmployees||[]).join(', ')):'Keine'))+'</span>')+'</div>').join('')+'</details></div>'}).join('')+'<div class="total">Gesamtsumme: '+formatHours(grand)+' Std.</div>';clearMessage('bossStatus')}catch(e){setMessage('bossStatus',e.message,'error')}}
 
 function openDb(){return new Promise((resolve,reject)=>{const req=indexedDB.open('DGZeiterfassungOffline',2);req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains('queue'))req.result.createObjectStore('queue',{keyPath:'id',autoIncrement:true})};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
 async function queuePut(item){const db=await openDb();return new Promise((resolve,reject)=>{const tx=db.transaction('queue','readwrite');tx.objectStore('queue').add(item);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)})}
@@ -606,8 +640,25 @@ async function queueDelete(id){const db=await openDb();return new Promise((resol
 async function refreshQueueCount(){const q=await queueAll().catch(()=>[]);$('queueBar').classList.toggle('hidden',q.length===0);$('queueText').textContent=q.length+' Übertragung(en) ausstehend.'}
 async function syncQueue(){if(!navigator.onLine)return;const items=(await queueAll()).sort((a,b)=>a.createdAt-b.createdAt);for(const item of items){try{await api(item.payload);await queueDelete(item.id)}catch(e){break}}await refreshQueueCount();await loadDay()}
 
+function initEnterSupport(){
+  document.addEventListener('keydown',function(ev){
+    if(ev.key!=='Enter')return;
+    const target=ev.target;
+    if(!target)return;
+    if(target.tagName==='BUTTON'||target.type==='checkbox'||target.type==='radio'||target.type==='file')return;
+    if(target.tagName==='TEXTAREA' && !(ev.ctrlKey||ev.metaKey))return;
+    const card=target.closest('.card,.login-card');
+    if(!card)return;
+    const buttons=Array.from(card.querySelectorAll('[data-enter-default]'));
+    const btn=buttons.find(function(b){return !b.disabled && b.offsetParent!==null;});
+    if(!btn)return;
+    ev.preventDefault();
+    btn.click();
+  });
+}
+
 function fillMonths(id){const n=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];$(id).innerHTML=n.map((x,i)=>'<option value="'+(i+1)+'">'+x+'</option>').join('')}
-function init(){fillMonths('empMonth');fillMonths('bossMonth');const d=new Date();loadEmployeeDirectory();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);$('holidayYear').value=d.getFullYear();if($('vacationYear'))$('vacationYear').value=d.getFullYear();$('absenceStart').value=localDate();$('absenceEnd').value=localDate();clearEmployeeAdminForm();customerPad=initPad('customerSignature');employeePad=initPad('employeeSignature');toggleMaterial();toggleAdditionalEmployees();togglePhotos();updateConnection();const a=auth();if(a.employee&&a.pin)openMain();else $('loginScreen').classList.remove('hidden');if(navigator.onLine)syncQueue()}
+function init(){initEnterSupport();fillMonths('empMonth');fillMonths('bossMonth');const d=new Date();loadEmployeeDirectory();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);$('holidayYear').value=d.getFullYear();if($('vacationYear'))$('vacationYear').value=d.getFullYear();$('absenceStart').value=localDate();$('absenceEnd').value=localDate();clearEmployeeAdminForm();customerPad=initPad('customerSignature');employeePad=initPad('employeeSignature');toggleMaterial();toggleAdditionalEmployees();togglePhotos();updateConnection();const a=auth();if(a.employee&&a.pin)openMain();else $('loginScreen').classList.remove('hidden');if(navigator.onLine)syncQueue()}
 if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));
 window.addEventListener('load',init);
 </script>
