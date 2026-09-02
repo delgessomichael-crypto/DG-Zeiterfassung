@@ -644,27 +644,25 @@ async function saveEntry(){
   if(additionalEmployeesUsed&&!additionalEmployees.length){setMessage('entryStatus','Bitte mindestens einen weiteren Mitarbeiter auswählen.','error');return}
   if(additionalEmployeesUsed&&additionalEmployeeHours.some(x=>!(x.hours>0&&x.hours<=24))){setMessage('entryStatus','Bitte für jeden weiteren Mitarbeiter gültige Stunden eintragen.','error');return}
 
-  if(navigator.onLine){
+  if(navigator.onLine&&!selectedAssignmentId){
     try{
       const check=await api({action:'checkEntryConflict',employee:a.employee,pin:a.pin,date,customer,start:$('start').value,end:$('end').value});
       const conflicts=(check&&check.conflicts)||[];
       if(conflicts.length){
-        const details=conflicts.map(x=>x.assignedBy+' hat dir bereits '+formatHours(x.hours)+' Std. bei '+x.customer+' ('+x.start+'-'+x.end+') zugeordnet.').join('\n');
-        const ok=confirm(details+'\n\nWenn du jetzt selbst speicherst, ersetzt dein eigener Eintrag diese Zuordnung in deiner Stunden-Auswertung. Es wird NICHT doppelt gerechnet.\n\nTrotzdem speichern?');
-        if(!ok){setMessage('entryStatus','Speichern abgebrochen. Die bereits zugeordneten Stunden bleiben bestehen.','info');return}
+        const c=conflicts[0];
+        setMessage('entryStatus','Für diesen Zeitraum sind bereits Stunden vorhanden: '+(c.customer||'Eintrag')+' '+(c.start||'')+'-'+(c.end||'')+'. Bitte den vorhandenen Mitarbeit-Eintrag unten verwenden.','warn');
+        return;
       }
-    }catch(e){
-      setMessage('entryStatus','Prüfung auf vorhandene Zuordnungen nicht möglich: '+e.message,'warn');
-    }
+    }catch(e){setMessage('entryStatus','Konfliktprüfung nicht möglich: '+e.message,'warn');return}
   }
 
-  const entry={clientId:uid(),employee:a.employee,employeePin:a.pin,date,customer,start:$('start').value,end:$('end').value,hours,activity,syncCalendar:$('syncCalendar').checked,materialUsed,material,additionalEmployeesUsed,additionalEmployees,additionalEmployeeHours,photos:preparedPhotos.slice(),customerSignature:noCustomerPresent?'':customerPad.dataUrl(),sourceCalendarEventId:selectedCalendarEventId};
+  const entry={clientId:uid(),employee:a.employee,employeePin:a.pin,date,customer,start:$('start').value,end:$('end').value,hours,activity,syncCalendar:$('syncCalendar').checked,materialUsed,material,additionalEmployeesUsed,additionalEmployees,additionalEmployeeHours,photos:preparedPhotos.slice(),customerSignature:noCustomerPresent?'':customerPad.dataUrl(),sourceCalendarEventId:selectedCalendarEventId,replacementAssignmentId:selectedAssignmentId};
   const item={type:'saveEntry',createdAt:Date.now(),payload:{action:'saveEntry',employee:a.employee,pin:a.pin,entry}};
   if(!navigator.onLine){await queuePut(item);setMessage('entryStatus','🟠 Offline gespeichert. Automatische Übertragung folgt bei Internetverbindung.','warn');resetEntry();await refreshQueueCount();return}
   try{setMessage('entryStatus','Eintrag wird übertragen ...','info');const day=await api(item.payload);lastDayData=day;renderDay();resetEntry();await loadCalendarEvents();setMessage('entryStatus','✅ Eintrag gespeichert. Der Auftrag steht jetzt im Chefbereich unter Regieberichte.','ok')}catch(e){await queuePut(item);setMessage('entryStatus','🟠 Verbindung fehlgeschlagen. Auftrag wurde sicher offline vorgemerkt.','warn');resetEntry();await refreshQueueCount()}
 }
 
-function resetEntry(){stopCamera();selectedCalendarEventId='';$('customer').value='';$('start').value='';$('end').value='';$('hours').value='';$('activity').value='';$('syncCalendar').checked=false;document.querySelector('input[name="materialUsed"][value="no"]').checked=true;toggleMaterial();document.querySelector('input[name="additionalEmployeesUsed"][value="no"]').checked=true;toggleAdditionalEmployees();document.querySelector('input[name="photosUsed"][value="no"]').checked=true;togglePhotos();clearCustomerSignature();noCustomerPresent=false}
+function resetEntry(){stopCamera();selectedCalendarEventId='';selectedAssignmentId='';$('customer').value='';$('start').value='';$('end').value='';$('hours').value='';$('activity').value='';$('syncCalendar').checked=false;document.querySelector('input[name="materialUsed"][value="no"]').checked=true;toggleMaterial();document.querySelector('input[name="additionalEmployeesUsed"][value="no"]').checked=true;toggleAdditionalEmployees();document.querySelector('input[name="photosUsed"][value="no"]').checked=true;togglePhotos();clearCustomerSignature();noCustomerPresent=false}
 
 async function loadDay(){const a=auth(),date=$('date').value;if(!a.employee||!date)return;if(!navigator.onLine){const cached=localStorage.getItem('dg_day_'+a.employee+'_'+date);if(cached){lastDayData=JSON.parse(cached);renderDay()}return}try{lastDayData=await api({action:'getDayData',employee:a.employee,pin:a.pin,date});localStorage.setItem('dg_day_'+a.employee+'_'+date,JSON.stringify(lastDayData));renderDay()}catch(e){setMessage('entryStatus',e.message,'error')}}
 function renderDay(){
@@ -672,11 +670,11 @@ function renderDay(){
   if(!entries.length){$('entries').innerHTML='<div class="muted">Keine Einträge für diesen Tag.</div>'}
   else{
     $('entries').innerHTML=entries.map(e=>`<div class="entry">
-      <strong>${esc(e.customer)}</strong>${e.isAdditionalAssignment?' <span class="small">· Mitarbeit</span>':''}<br>
+      <strong>${esc(e.customer)}</strong>${e.isAdditionalAssignment?' <span class="badge">BEREITS ERFASST · Mitarbeit</span>':''}<br>
       ${esc(e.start)} - ${esc(e.end)} · <strong>${formatHours(e.hours)} Std.</strong><br>
-      ${e.isAdditionalAssignment?`<span class="muted">Eingetragen von ${esc(e.assignedBy||'')}</span><br>`:''}
+      ${e.isAdditionalAssignment?`<div class="status ${e.assignmentStatus==='Abweichung'?'warn':e.assignmentStatus==='Bestätigt'?'ok':'info'}">Diese Stunden sind bereits deinem Stundenkonto zugeordnet.<br>Eingetragen von ${esc(e.assignedBy||'')} · Status: ${esc(e.assignmentStatus||'Zugeordnet')}${e.assignmentNote?'<br>Hinweis: '+esc(e.assignmentNote):''}</div>`:''}
       <span class="muted">${esc(e.activity)}</span><br>
-      ${e.isAdditionalAssignment?'':`<span class="muted">Material: ${e.materialUsed?esc(e.material||'Ja'):'Nein'} · Bilder: ${Number(e.photoCount||0)}</span>`}
+      ${e.isAdditionalAssignment?`<div class="admin-actions" style="margin-top:8px"><button class="btn success" onclick="confirmAssignment('${esc(e.assignmentId)}')">✓ Stimmt</button><button class="btn secondary" onclick="takeAssignment('${esc(e.assignmentId)}')">Eigene Angaben erfassen</button><button class="btn danger" onclick="reportAssignmentIssue('${esc(e.assignmentId)}')">Stimmt nicht</button></div>`:`<span class="muted">Material: ${e.materialUsed?esc(e.material||'Ja'):'Nein'} · Bilder: ${Number(e.photoCount||0)}</span>`}
       ${lastDayData.closed||e.isAdditionalAssignment?'':`<br><button class="btn danger" style="margin-top:8px" data-id="${esc(e.id)}" onclick="deleteEntry(this.dataset.id)">Eintrag löschen</button>`}
     </div>`).join('');
   }
@@ -686,12 +684,27 @@ function renderDay(){
   if(lastDayData.closed)setMessage('closeStatus','Dieser Tag ist bereits abgeschlossen.','ok');else clearMessage('closeStatus')
 }
 
+async function confirmAssignment(id){
+  if(!navigator.onLine){setMessage('entryStatus','Bestätigung benötigt Internet.','warn');return}
+  const a=auth();try{await api({action:'confirmEmployeeAssignment',employee:a.employee,pin:a.pin,assignmentId:id});await loadDay();setMessage('entryStatus','✓ Mitarbeit bestätigt.','ok')}catch(e){setMessage('entryStatus',e.message,'error')}
+}
+function takeAssignment(id){
+  const e=(lastDayData.entries||[]).find(x=>x.assignmentId===id);if(!e)return;
+  selectedAssignmentId=id;$('customer').value=e.customer||'';$('start').value=e.start||'';$('end').value=e.end||'';$('activity').value=e.activity||'';calculateHours();
+  $('customer').scrollIntoView({behavior:'smooth',block:'center'});setMessage('entryStatus','Du bearbeitest jetzt eine bereits zugeordnete Mitarbeit. Beim Speichern wird sie ersetzt – nicht doppelt gezählt.','info');
+}
+async function reportAssignmentIssue(id){
+  if(!navigator.onLine){setMessage('entryStatus','Abweichung melden benötigt Internet.','warn');return}
+  const note=prompt('Was stimmt an dieser Mitarbeit-Zuordnung nicht?');if(note===null)return;if(!note.trim()){setMessage('entryStatus','Bitte einen kurzen Hinweis eingeben.','error');return}
+  const a=auth();try{await api({action:'reportEmployeeAssignmentIssue',employee:a.employee,pin:a.pin,assignmentId:id,note:note.trim()});await loadDay();setMessage('entryStatus','⚠ Abweichung wurde für das Büro markiert.','warn')}catch(e){setMessage('entryStatus',e.message,'error')}
+}
+
 async function deleteEntry(id){if(!navigator.onLine){setMessage('entryStatus','Löschen ist offline erst nach der Synchronisierung möglich.','warn');return}if(!confirm('Eintrag wirklich löschen?'))return;const a=auth();try{lastDayData=await api({action:'deleteEntry',id,employee:a.employee,date:$('date').value,pin:a.pin});renderDay();setMessage('entryStatus','Eintrag gelöscht.','ok')}catch(e){setMessage('entryStatus',e.message,'error')}}
 function updateNetTotal(){const pause=Number($('pauseHours').value)||0;$('netTotal').textContent='Arbeitszeit netto: '+formatHours(Math.max(0,Number(lastDayData.total||0)-pause))+' Std.'}
 
 async function closeDay(){const a=auth(),date=$('date').value;if(!employeePad.hasSignature()){setMessage('closeStatus','Bitte Mitarbeiter-Unterschrift leisten.','error');return}if(!confirm('Arbeitstag wirklich abschließen?'))return;const item={type:'closeDay',createdAt:Date.now(),payload:{action:'closeDay',employee:a.employee,pin:a.pin,date,signatureDataUrl:employeePad.dataUrl(),pauseHours:Number($('pauseHours').value)||0}};if(!navigator.onLine){await queuePut(item);setMessage('closeStatus','🟠 Tagesabschluss offline gespeichert. Wird automatisch übertragen.','warn');employeePad.clear();await refreshQueueCount();return}try{const res=await api(item.payload);setMessage('closeStatus',res.alreadyClosed?'Tag war bereits abgeschlossen.':'✅ Tag abgeschlossen. Der Abschluss ist im Chefbereich verfügbar.','ok');employeePad.clear();await loadDay()}catch(e){await queuePut(item);setMessage('closeStatus','🟠 Tagesabschluss wurde offline vorgemerkt.','warn');await refreshQueueCount()}}
 
-async function loadMonth(){const a=auth();if(!navigator.onLine){setMessage('monthStatus','Monatsübersicht benötigt Internet.','warn');return}try{const data=await api({action:'getMonthData',employee:a.employee,pin:a.pin,year:Number($('empYear').value),month:Number($('empMonth').value)});const ms=data.monthSummary||{},ys=data.yearSummary||{};let html='<div class="total">Gesamt: '+formatHours(data.total)+' Std.</div><div class="status info">Dieser Monat: Urlaub '+Number(ms.vacationDays||0)+' Tag(e) · Krank '+Number(ms.sickDays||0)+' Tag(e) · Feiertage '+Number(ms.holidayDays||0)+' Tag(e)</div><div class="status info">Jahr '+Number(ys.year||$('empYear').value)+': Urlaub '+Number(ys.vacationUsed||0)+' Tag(e) · Krank '+Number(ys.sickDays||0)+' Tag(e) · Urlaub zustehend '+formatHours(ys.vacationEntitlement)+' · Resturlaub '+formatHours(ys.vacationRemaining)+' Tage</div>';html+=(data.rows||[]).map(r=>'<div class="entry"><strong>'+esc(r.date)+'</strong> · '+esc(r.customer)+' · '+formatHours(r.hours)+' Std. '+(r.closed?'✓':'(offen)')+(r.isAdditionalAssignment?' <span class="muted">· Mitarbeit, eingetragen von '+esc(r.assignedBy||'')+'</span>':'')+'</div>').join('');if((data.statuses||[]).length){html+='<h3 style="margin-top:16px">Urlaub / Krank / Feiertag</h3>';html+=(data.statuses||[]).map(s=>'<div class="entry"><strong>'+formatDateDE(s.date)+'</strong> · '+esc(s.status)+(Number(s.creditedHours||0)?' · '+formatHours(s.creditedHours)+' Std. Gutschrift':'')+'</div>').join('')}$('monthResult').innerHTML=html;clearMessage('monthStatus')}catch(e){setMessage('monthStatus',e.message,'error')}}
+async function loadMonth(){const a=auth();if(!navigator.onLine){setMessage('monthStatus','Monatsübersicht benötigt Internet.','warn');return}try{const data=await api({action:'getMonthData',employee:a.employee,pin:a.pin,year:Number($('empYear').value),month:Number($('empMonth').value)});const ms=data.monthSummary||{},ys=data.yearSummary||{};let html='<div class="total">Gesamt: '+formatHours(data.total)+' Std.</div><div class="status info">Dieser Monat: Urlaub '+Number(ms.vacationDays||0)+' Tag(e) · Krank '+Number(ms.sickDays||0)+' Tag(e) · Feiertage '+Number(ms.holidayDays||0)+' Tag(e)</div><div class="status info">Jahr '+Number(ys.year||$('empYear').value)+': Urlaub '+Number(ys.vacationUsed||0)+' Tag(e) · Krank '+Number(ys.sickDays||0)+' Tag(e) · Urlaub zustehend '+formatHours(ys.vacationEntitlement)+' · Resturlaub '+formatHours(ys.vacationRemaining)+' Tage</div>';html+=(data.rows||[]).map(r=>'<div class="entry"><strong>'+esc(r.date)+'</strong> · '+esc(r.customer)+' · '+formatHours(r.hours)+' Std. '+(r.closed?'✓':'(offen)')+(r.isAdditionalAssignment?' <span class="muted">· Mitarbeit, eingetragen von '+esc(r.assignedBy||'')+' · '+esc(r.assignmentStatus||'Zugeordnet')+'</span>':'')+'</div>').join('');if((data.statuses||[]).length){html+='<h3 style="margin-top:16px">Urlaub / Krank / Feiertag</h3>';html+=(data.statuses||[]).map(s=>'<div class="entry"><strong>'+formatDateDE(s.date)+'</strong> · '+esc(s.status)+(Number(s.creditedHours||0)?' · '+formatHours(s.creditedHours)+' Std. Gutschrift':'')+'</div>').join('')}$('monthResult').innerHTML=html;clearMessage('monthStatus')}catch(e){setMessage('monthStatus',e.message,'error')}}
 async function sendMonth(){const a=auth();if(!navigator.onLine){setMessage('monthStatus','Versand benötigt Internet.','warn');return}try{const r=await api({action:'sendMonthReport',employee:a.employee,pin:a.pin,year:Number($('empYear').value),month:Number($('empMonth').value)});setMessage('monthStatus','✅ Monatsbericht gesendet. Gesamt: '+formatHours(r.total)+' Std.','ok')}catch(e){setMessage('monthStatus',e.message,'error')}}
 async function loadBossMonth(){
   if(!navigator.onLine){setMessage('bossStatus','Chefansicht benötigt Internet.','warn');return}
@@ -718,12 +731,14 @@ async function loadBossMonth(){
           '<div class="muted small">Arbeitszeit '+formatHours(x.workTotal||0)+' Std. · Gutschriften '+formatHours(x.creditedTotal||0)+' Std. · Manuelle Korrektur '+(Number(x.adjustmentTotal||0)>0?'+':'')+formatHours(x.adjustmentTotal||0)+' Std. · Wochen-Soll '+formatHours(x.weeklyHours||0)+' Std.</div>'+
           '<div class="status info">Monat: Krank '+Number(x.sickDays||0)+' · Urlaub '+Number(x.vacationDays||0)+' · Feiertag '+Number(x.holidayDays||0)+'</div>'+
           '<div class="status info">Jahr: Krank '+Number(x.yearSickDays||0)+' · Urlaub beansprucht '+Number(x.yearVacationDays||0)+' · Urlaub zustehend '+formatHours(x.vacationEntitlement)+' · Resturlaub '+formatHours(x.vacationRemaining)+' Tage</div>'+
+          ((x.overlapConflicts||[]).length?'<div class="status error">⚠ Doppelbelegung prüfen: '+(x.overlapConflicts||[]).map(c=>formatDateDE(c.date)+' '+esc(c.first)+' / '+esc(c.second)).join(' · ')+'</div>':'')+
+          ((x.assignmentIssues||[]).length?'<div class="status warn">⚠ Gemeldete Abweichung: '+(x.assignmentIssues||[]).map(c=>formatDateDE(c.date)+' '+esc(c.customer)+' – '+esc(c.note)).join(' · ')+'</div>':'')+
           ((x.statuses||[]).length?'<details><summary>Tagesstatus</summary>'+(x.statuses||[]).map(s=>'<div class="entry">'+formatDateDE(s.date)+' · <strong>'+esc(s.status)+'</strong>'+(Number(s.creditedHours||0)?' · '+formatHours(s.creditedHours)+' Std.':'')+'</div>').join('')+'</details>':'')+
           '<details open><summary>Stunden gutschreiben / abziehen</summary><div class="adjustment-box">'+
             '<div class="adjustment-grid"><label>Stunden<input id="adjHours_'+rowIndex+'" inputmode="decimal" placeholder="z.B. 2,5"></label><label>Grund<input id="adjReason_'+rowIndex+'" placeholder="z.B. Korrektur Vormonat"></label><button class="btn success" onclick="saveBossAdjustment('+rowIndex+',1)">+ Gutschreiben</button><button class="btn danger" onclick="saveBossAdjustment('+rowIndex+',-1)">− Abziehen</button></div>'+
             '<div class="adjustment-history">'+((x.adjustments||[]).length?(x.adjustments||[]).map(a=>'<div class="adjustment-item"><div><span class="'+(Number(a.hours)>=0?'adjustment-positive':'adjustment-negative')+'">'+(Number(a.hours)>0?'+':'')+formatHours(a.hours)+' Std.</span> · '+esc(a.reason||'')+'<div class="muted small">'+esc(a.createdAt||'')+' · '+esc(a.createdBy||'')+'</div></div><button class="btn secondary" onclick="deleteBossAdjustment(\''+esc(a.id)+'\')">Entfernen</button></div>').join(''):'<div class="muted small">Noch keine manuellen Stundenkorrekturen.</div>')+'</div>'+
           '</div></details>'+
-          '<details><summary>Einträge</summary>'+(x.entries||[]).map(e=>'<div class="entry">'+esc(e.date)+' · '+esc(e.customer)+' · '+formatHours(e.hours)+' Std.'+(e.isAdditionalAssignment?' <strong>· Mitarbeit</strong>':'')+'<br><span class="muted">'+esc(e.activity)+'</span>'+(e.isAdditionalAssignment?'<br><span class="muted">Eingetragen von '+esc(e.assignedBy||'')+'</span>':'')+'</div>').join('')+'</details>'+
+          '<details><summary>Einträge</summary>'+(x.entries||[]).map(e=>'<div class="entry">'+esc(e.date)+' · '+esc(e.customer)+' · '+formatHours(e.hours)+' Std.'+(e.isAdditionalAssignment?' <strong>· Mitarbeit</strong>':'')+'<br><span class="muted">'+esc(e.activity)+'</span>'+(e.isAdditionalAssignment?'<br><span class="muted">Eingetragen von '+esc(e.assignedBy||'')+' · Status '+esc(e.assignmentStatus||'Zugeordnet')+(e.assignmentNote?' · '+esc(e.assignmentNote):'')+'</span>':'')+'</div>').join('')+'</details>'+
         '</div>'+
       '</div>';
     }).join('');
