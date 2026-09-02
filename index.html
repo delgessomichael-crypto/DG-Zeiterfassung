@@ -39,7 +39,8 @@
     .boss-month-value{font-size:18px;font-weight:800;text-align:right}.target-value{color:#b91c1c}.actual-value{color:#166534}.balance-plus{color:#166534}.balance-minus{color:#b91c1c}.balance-zero{color:#374151}
     .boss-month-details{grid-column:1/-1;margin-top:4px}
     .adjustment-box{border:1px solid #d1d5db;border-radius:12px;padding:12px;margin-top:10px;background:#f9fafb}.adjustment-grid{display:grid;grid-template-columns:120px 1fr auto auto;gap:8px;align-items:end}.adjustment-grid label{margin:0}.adjustment-grid input{padding:10px}.adjustment-history{margin-top:8px}.adjustment-item{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:7px 0;border-top:1px solid #e5e7eb}.adjustment-item:first-child{border-top:0}.adjustment-positive{color:#166534;font-weight:800}.adjustment-negative{color:#b91c1c;font-weight:800}
-    .admin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.weekday-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.weekday-grid label{font-size:12px}.admin-actions{display:flex;gap:8px;flex-wrap:wrap}.admin-actions .btn{width:auto}.badge{display:inline-block;padding:3px 8px;border-radius:999px;background:#e5e7eb;font-size:12px;font-weight:700}.admin-section{border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-top:14px}.admin-section h3{margin:0 0 8px}.save-bar{position:sticky;bottom:8px;background:#fff;padding-top:10px;z-index:5}.sum-box{margin-top:10px;padding:10px;border-radius:10px;background:#f3f4f6;font-weight:700}.field-hint{font-size:12px;color:var(--muted);margin-top:5px}
+    .admin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+    .camera-live{margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:12px;background:#111827}.camera-live video{width:100%;max-height:420px;border-radius:10px;background:#000}.report-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.report-actions .btn{width:auto}.report-meta{font-size:13px;color:var(--muted);margin-top:5px}.report-card{border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin-top:10px}.report-card.open{border-left:5px solid #166534}.report-card.billed{border-left:5px solid #b91c1c}.weekday-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.weekday-grid label{font-size:12px}.admin-actions{display:flex;gap:8px;flex-wrap:wrap}.admin-actions .btn{width:auto}.badge{display:inline-block;padding:3px 8px;border-radius:999px;background:#e5e7eb;font-size:12px;font-weight:700}.admin-section{border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-top:14px}.admin-section h3{margin:0 0 8px}.save-bar{position:sticky;bottom:8px;background:#fff;padding-top:10px;z-index:5}.sum-box{margin-top:10px;padding:10px;border-radius:10px;background:#f3f4f6;font-weight:700}.field-hint{font-size:12px;color:var(--muted);margin-top:5px}
     @media(max-width:700px){.grid2,.button-row,.tabs,.admin-grid{grid-template-columns:1fr}.weekday-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.screen{padding:9px}.head-row{align-items:flex-start;flex-direction:column}.head-row button{width:100%}.radio-row{grid-template-columns:minmax(125px,1fr) 64px 64px;gap:5px}.radio-row label{white-space:nowrap}.additional-hours-row{grid-template-columns:1fr 95px}.boss-month-head,.boss-month-row{grid-template-columns:minmax(120px,1.25fr) repeat(3,minmax(76px,.8fr));gap:5px}.boss-month-head{font-size:11px;padding-left:4px;padding-right:4px}.boss-month-row{padding-left:4px;padding-right:4px}.boss-month-value{font-size:15px}.adjustment-grid{grid-template-columns:1fr 1fr}.adjustment-grid .btn{width:100%}.adjustment-item{align-items:flex-start;flex-direction:column}}
   </style>
 </head>
@@ -114,8 +115,9 @@
 
         <div class="radio-row"><strong>Bilder hinzufügen?</strong><label><input type="radio" name="photosUsed" value="no" checked onchange="togglePhotos()">Nein</label><label><input type="radio" name="photosUsed" value="yes" onchange="togglePhotos()">Ja</label></div>
         <div id="photoBox" class="hidden">
-          <div class="button-row"><button type="button" class="btn primary" onclick="$('cameraPhoto').click()">📷 Fotos aufnehmen (max. 6)</button><button type="button" class="btn secondary" onclick="$('galleryPhotos').click()">🖼️ Vorhandene Bilder</button></div>
-          <input id="cameraPhoto" class="hidden" type="file" accept="image/*" capture="environment" multiple onchange="addPhotos(this.files,'cameraPhoto')">
+          <div class="button-row"><button type="button" class="btn primary" onclick="startCamera()">📷 Kamera starten</button><button type="button" class="btn secondary" onclick="$('galleryPhotos').click()">🖼️ Vorhandene Bilder</button></div>
+          <div id="cameraLive" class="camera-live hidden"><video id="cameraVideo" autoplay playsinline muted></video><div class="button-row" style="margin-top:8px"><button type="button" class="btn success" onclick="captureCameraPhoto()">📸 Foto aufnehmen</button><button type="button" class="btn secondary" onclick="stopCamera()">Kamera schließen</button></div></div>
+          <input id="cameraPhoto" class="hidden" type="file" accept="image/*" capture="environment" onchange="addPhotos(this.files,'cameraPhoto')">
           <input id="galleryPhotos" class="hidden" type="file" accept="image/*" multiple onchange="addPhotos(this.files,'galleryPhotos')">
           <div id="photoStatus" class="muted small">Noch keine Bilder hinzugefügt.</div><button id="clearPhotosBtn" type="button" class="btn secondary hidden" style="width:100%;margin-top:8px" onclick="clearPhotos()">Bilder entfernen</button>
         </div>
@@ -171,7 +173,7 @@
       <div class="card">
         <h2>Monatsübersicht</h2>
         <div class="grid2"><div><label for="empYear">Jahr</label><input id="empYear" type="number"></div><div><label for="empMonth">Monat</label><select id="empMonth"></select></div></div>
-        <div class="button-row"><button class="btn secondary" data-enter-default onclick="loadMonth()">Monat anzeigen</button><button class="btn primary" onclick="sendMonth()">Monatsbericht ans Büro</button></div><div id="monthStatus"></div><div id="monthResult"></div>
+        <button class="btn secondary" style="width:100%" data-enter-default onclick="loadMonth()">Monat anzeigen</button><div id="monthStatus"></div><div id="monthResult"></div>
       </div>
     </section>
 
@@ -180,6 +182,23 @@
         <h2>Büro / Chef</h2><div class="muted small">Zugriff über deine Mitarbeiter-Anmeldung mit Chefberechtigung.</div>
         <div class="grid2"><div><label for="bossYear">Jahr</label><input id="bossYear" type="number"></div><div><label for="bossMonth">Monat</label><select id="bossMonth"></select></div></div>
         <div class="button-row"><button class="btn primary" data-enter-default onclick="loadBossMonth()">Monatsübersicht laden</button><button class="btn secondary" onclick="loadChefAdministration()">Verwaltung laden</button></div><div id="bossStatus"></div><div id="bossResult"></div>
+      </div>
+
+      <div class="card">
+        <h2>Monatsabschlüsse</h2>
+        <div class="muted small">Gezielt laden: Es werden nur der ausgewählte Mitarbeiter und Monat abgefragt.</div>
+        <div class="admin-grid"><div><label>Mitarbeiter</label><select id="closureEmployee"></select></div><div><label>Jahr</label><input id="closureYear" type="number"></div></div>
+        <label>Monat</label><select id="closureMonth"></select>
+        <button class="btn primary" style="width:100%;margin-top:12px" onclick="loadMonthClosure()">Monatsabschluss anzeigen</button>
+        <div id="closureStatus"></div><div id="closureResult"></div>
+      </div>
+
+      <div class="card">
+        <h2>Regieberichte</h2>
+        <div class="muted small">Offene Aufträge zuerst. Abgerechnete Aufträge werden nur bei Bedarf geladen.</div>
+        <div class="admin-grid"><div><label>Jahr</label><input id="regieYear" type="number"></div><div><label>Monat</label><select id="regieMonth"><option value="0">Alle Monate</option></select></div></div>
+        <div class="button-row"><button class="btn success" onclick="loadRegieReports('Offen')">Offene Regieberichte</button><button class="btn secondary" onclick="loadRegieReports('Abgerechnet')">Abgerechnete Aufträge</button></div>
+        <div id="regieStatus"></div><div id="regieResult"></div>
       </div>
 
       <div class="card">
@@ -246,7 +265,7 @@
 
 <script>
 const API_URL='https://script.google.com/macros/s/AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc/exec';
-let preparedPhotos=[],lastDayData={entries:[],total:0,closed:false},customerPad=null,employeePad=null,noCustomerPresent=false,employeeDirectory=[];
+let preparedPhotos=[],lastDayData={entries:[],total:0,closed:false},customerPad=null,employeePad=null,noCustomerPresent=false,employeeDirectory=[],cameraStream=null,selectedCalendarEventId='';
 const $=id=>document.getElementById(id);
 const formatHours=v=>Number(v||0).toFixed(2).replace('.',',');
 const esc=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -261,7 +280,7 @@ function setMessage(id,text,type='info'){const el=$(id);el.className='status '+t
 function clearMessage(id){const el=$(id);el.className='';el.textContent=''}
 
 function updateConnection(){const online=navigator.onLine;setMessage('connectionBar',online?'🟢 Online':'🟠 Offline – Eingaben werden auf diesem Gerät gespeichert.',online?'ok':'warn');if($('loginNet'))setMessage('loginNet',online?'🟢 Online':'🟠 Offline',online?'ok':'warn');refreshQueueCount()}
-window.addEventListener('online',()=>{updateConnection();syncQueue();loadCalendarEvents()});window.addEventListener('offline',updateConnection);
+window.addEventListener('online',async()=>{updateConnection();await syncQueue();await loadCalendarEvents()});window.addEventListener('offline',updateConnection);
 
 async function api(payload){
   const controller=new AbortController();
@@ -326,7 +345,7 @@ function renderAdditionalEmployeeMenu(){
   $('additionalEmployeesMenu').innerHTML=(employeeDirectory||[]).filter(x=>x!==current).map(name=>`<label data-employee="${esc(name)}"><input type="checkbox" name="additionalEmployee" value="${esc(name)}" onchange="updateAdditionalEmployeesButton();renderAdditionalEmployeeHours()">${esc(name)}</label>`).join('');
   updateAdditionalEmployeesButton();
 }
-function fillAbsenceEmployees(){const opts=(employeeDirectory||[]).map(x=>'<option>'+esc(x)+'</option>').join('');if($('absenceEmployee'))$('absenceEmployee').innerHTML=opts;if($('vacationEmployee'))$('vacationEmployee').innerHTML=opts}
+function fillAbsenceEmployees(){const opts=(employeeDirectory||[]).map(x=>'<option>'+esc(x)+'</option>').join('');if($('absenceEmployee'))$('absenceEmployee').innerHTML=opts;if($('vacationEmployee'))$('vacationEmployee').innerHTML=opts;if($('closureEmployee'))$('closureEmployee').innerHTML=opts}
 function chefPayload(extra={}){const a=auth();return Object.assign({employee:a.employee,employeePin:a.pin},extra)}
 async function loadChefAdministration(){
   try{
@@ -529,6 +548,7 @@ function takeCalendarEvent(index){
   const events=window.__dgCalendarEvents||[];
   const event=events[index];
   if(!event)return;
+  selectedCalendarEventId=event.id||'';
 
   $('date').value=event.startDate||localDate();
 
@@ -589,9 +609,24 @@ function updateAdditionalEmployeesButton(){
     : 'Mitarbeiter auswählen';
 }
 function updateAdditionalEmployeeOptions(){renderAdditionalEmployeeMenu()}
-function togglePhotos(){const yes=document.querySelector('input[name="photosUsed"]:checked').value==='yes';$('photoBox').classList.toggle('hidden',!yes);if(!yes)clearPhotos()}
-function updatePhotoStatus(){$('photoStatus').textContent=preparedPhotos.length?preparedPhotos.length+' von 6 Bild(ern) bereit.':'Noch keine Bilder hinzugefügt.';$('clearPhotosBtn').classList.toggle('hidden',preparedPhotos.length===0)}
+function togglePhotos(){const yes=document.querySelector('input[name="photosUsed"]:checked').value==='yes';$('photoBox').classList.toggle('hidden',!yes);if(!yes){stopCamera();clearPhotos()}}
+function updatePhotoStatus(){$('photoStatus').textContent=preparedPhotos.length?preparedPhotos.length+' von 6 Bild(ern) bereit. Du kannst direkt weitere Fotos aufnehmen.':'Noch keine Bilder hinzugefügt.';$('clearPhotosBtn').classList.toggle('hidden',preparedPhotos.length===0)}
 function clearPhotos(){preparedPhotos=[];$('cameraPhoto').value='';$('galleryPhotos').value='';updatePhotoStatus()}
+async function startCamera(){
+  if(preparedPhotos.length>=6){setMessage('entryStatus','Maximal 6 Bilder möglich.','warn');return}
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){$('cameraPhoto').click();return}
+  try{
+    stopCamera();
+    cameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+    $('cameraVideo').srcObject=cameraStream;$('cameraLive').classList.remove('hidden');
+  }catch(e){$('cameraLive').classList.add('hidden');$('cameraPhoto').click()}
+}
+function stopCamera(){if(cameraStream){cameraStream.getTracks().forEach(t=>t.stop());cameraStream=null}if($('cameraVideo'))$('cameraVideo').srcObject=null;if($('cameraLive'))$('cameraLive').classList.add('hidden')}
+function captureCameraPhoto(){
+  if(!cameraStream||preparedPhotos.length>=6){if(preparedPhotos.length>=6)stopCamera();return}
+  const v=$('cameraVideo');if(!v.videoWidth||!v.videoHeight)return;
+  const max=1200,f=Math.min(1,max/v.videoWidth,max/v.videoHeight),c=document.createElement('canvas');c.width=Math.round(v.videoWidth*f);c.height=Math.round(v.videoHeight*f);c.getContext('2d').drawImage(v,0,0,c.width,c.height);preparedPhotos.push({dataUrl:c.toDataURL('image/jpeg',0.68)});updatePhotoStatus();if(preparedPhotos.length>=6)stopCamera();
+}
 async function addPhotos(files,inputId){const remaining=6-preparedPhotos.length;if(remaining<=0)return;const list=Array.from(files||[]).slice(0,remaining);$('photoStatus').textContent='Bilder werden vorbereitet ...';try{for(const f of list)preparedPhotos.push({dataUrl:await resizeImage(f)});updatePhotoStatus()}catch(e){$('photoStatus').textContent='Bild konnte nicht vorbereitet werden.'}$(inputId).value=''}
 function resizeImage(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onerror=reject;r.onload=()=>{const img=new Image();img.onerror=reject;img.onload=()=>{const max=1200;let w=img.width,h=img.height;if(w>max||h>max){const f=Math.min(max/w,max/h);w=Math.round(w*f);h=Math.round(h*f)}const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);resolve(c.toDataURL('image/jpeg',0.68))};img.src=r.result};r.readAsDataURL(file)})}
 
@@ -623,13 +658,13 @@ async function saveEntry(){
     }
   }
 
-  const entry={clientId:uid(),employee:a.employee,employeePin:a.pin,date,customer,start:$('start').value,end:$('end').value,hours,activity,syncCalendar:$('syncCalendar').checked,materialUsed,material,additionalEmployeesUsed,additionalEmployees,additionalEmployeeHours,photos:preparedPhotos.slice(),customerSignature:noCustomerPresent?'':customerPad.dataUrl()};
+  const entry={clientId:uid(),employee:a.employee,employeePin:a.pin,date,customer,start:$('start').value,end:$('end').value,hours,activity,syncCalendar:$('syncCalendar').checked,materialUsed,material,additionalEmployeesUsed,additionalEmployees,additionalEmployeeHours,photos:preparedPhotos.slice(),customerSignature:noCustomerPresent?'':customerPad.dataUrl(),sourceCalendarEventId:selectedCalendarEventId};
   const item={type:'saveEntry',createdAt:Date.now(),payload:{action:'saveEntry',employee:a.employee,pin:a.pin,entry}};
   if(!navigator.onLine){await queuePut(item);setMessage('entryStatus','🟠 Offline gespeichert. Automatische Übertragung folgt bei Internetverbindung.','warn');resetEntry();await refreshQueueCount();return}
-  try{setMessage('entryStatus','Eintrag wird übertragen ...','info');const day=await api(item.payload);lastDayData=day;renderDay();resetEntry();setMessage('entryStatus','✅ Eintrag gespeichert und ans Büro-System übertragen.','ok')}catch(e){await queuePut(item);setMessage('entryStatus','🟠 Verbindung fehlgeschlagen. Auftrag wurde sicher offline vorgemerkt.','warn');resetEntry();await refreshQueueCount()}
+  try{setMessage('entryStatus','Eintrag wird übertragen ...','info');const day=await api(item.payload);lastDayData=day;renderDay();resetEntry();await loadCalendarEvents();setMessage('entryStatus','✅ Eintrag gespeichert. Der Auftrag steht jetzt im Chefbereich unter Regieberichte.','ok')}catch(e){await queuePut(item);setMessage('entryStatus','🟠 Verbindung fehlgeschlagen. Auftrag wurde sicher offline vorgemerkt.','warn');resetEntry();await refreshQueueCount()}
 }
 
-function resetEntry(){$('customer').value='';$('start').value='';$('end').value='';$('hours').value='';$('activity').value='';$('syncCalendar').checked=false;document.querySelector('input[name="materialUsed"][value="no"]').checked=true;toggleMaterial();document.querySelector('input[name="additionalEmployeesUsed"][value="no"]').checked=true;toggleAdditionalEmployees();document.querySelector('input[name="photosUsed"][value="no"]').checked=true;togglePhotos();clearCustomerSignature();noCustomerPresent=false}
+function resetEntry(){stopCamera();selectedCalendarEventId='';$('customer').value='';$('start').value='';$('end').value='';$('hours').value='';$('activity').value='';$('syncCalendar').checked=false;document.querySelector('input[name="materialUsed"][value="no"]').checked=true;toggleMaterial();document.querySelector('input[name="additionalEmployeesUsed"][value="no"]').checked=true;toggleAdditionalEmployees();document.querySelector('input[name="photosUsed"][value="no"]').checked=true;togglePhotos();clearCustomerSignature();noCustomerPresent=false}
 
 async function loadDay(){const a=auth(),date=$('date').value;if(!a.employee||!date)return;if(!navigator.onLine){const cached=localStorage.getItem('dg_day_'+a.employee+'_'+date);if(cached){lastDayData=JSON.parse(cached);renderDay()}return}try{lastDayData=await api({action:'getDayData',employee:a.employee,pin:a.pin,date});localStorage.setItem('dg_day_'+a.employee+'_'+date,JSON.stringify(lastDayData));renderDay()}catch(e){setMessage('entryStatus',e.message,'error')}}
 function renderDay(){
@@ -641,8 +676,7 @@ function renderDay(){
       ${esc(e.start)} - ${esc(e.end)} · <strong>${formatHours(e.hours)} Std.</strong><br>
       ${e.isAdditionalAssignment?`<span class="muted">Eingetragen von ${esc(e.assignedBy||'')}</span><br>`:''}
       <span class="muted">${esc(e.activity)}</span><br>
-      ${e.isAdditionalAssignment?'':`<span class="muted">Material: ${e.materialUsed?esc(e.material||'Ja'):'Nein'} · Bilder: ${Number(e.photoCount||0)}</span><br>
-      <span class="muted">Weitere Mitarbeiter: ${(e.additionalEmployeeHours||[]).length?esc((e.additionalEmployeeHours||[]).map(x=>x.name+' ('+formatHours(x.hours)+' Std.)').join(', ')):((e.additionalEmployees||[]).length?esc((e.additionalEmployees||[]).join(', ')):'Keine')}</span>`}
+      ${e.isAdditionalAssignment?'':`<span class="muted">Material: ${e.materialUsed?esc(e.material||'Ja'):'Nein'} · Bilder: ${Number(e.photoCount||0)}</span>`}
       ${lastDayData.closed||e.isAdditionalAssignment?'':`<br><button class="btn danger" style="margin-top:8px" data-id="${esc(e.id)}" onclick="deleteEntry(this.dataset.id)">Eintrag löschen</button>`}
     </div>`).join('');
   }
@@ -655,7 +689,7 @@ function renderDay(){
 async function deleteEntry(id){if(!navigator.onLine){setMessage('entryStatus','Löschen ist offline erst nach der Synchronisierung möglich.','warn');return}if(!confirm('Eintrag wirklich löschen?'))return;const a=auth();try{lastDayData=await api({action:'deleteEntry',id,employee:a.employee,date:$('date').value,pin:a.pin});renderDay();setMessage('entryStatus','Eintrag gelöscht.','ok')}catch(e){setMessage('entryStatus',e.message,'error')}}
 function updateNetTotal(){const pause=Number($('pauseHours').value)||0;$('netTotal').textContent='Arbeitszeit netto: '+formatHours(Math.max(0,Number(lastDayData.total||0)-pause))+' Std.'}
 
-async function closeDay(){const a=auth(),date=$('date').value;if(!employeePad.hasSignature()){setMessage('closeStatus','Bitte Mitarbeiter-Unterschrift leisten.','error');return}if(!confirm('Arbeitstag wirklich abschließen?'))return;const item={type:'closeDay',createdAt:Date.now(),payload:{action:'closeDay',employee:a.employee,pin:a.pin,date,signatureDataUrl:employeePad.dataUrl(),pauseHours:Number($('pauseHours').value)||0}};if(!navigator.onLine){await queuePut(item);setMessage('closeStatus','🟠 Tagesabschluss offline gespeichert. Wird automatisch übertragen.','warn');employeePad.clear();await refreshQueueCount();return}try{const res=await api(item.payload);setMessage('closeStatus',res.alreadyClosed?'Tag war bereits abgeschlossen.':'✅ Tag abgeschlossen und E-Mail gesendet.','ok');employeePad.clear();await loadDay()}catch(e){await queuePut(item);setMessage('closeStatus','🟠 Tagesabschluss wurde offline vorgemerkt.','warn');await refreshQueueCount()}}
+async function closeDay(){const a=auth(),date=$('date').value;if(!employeePad.hasSignature()){setMessage('closeStatus','Bitte Mitarbeiter-Unterschrift leisten.','error');return}if(!confirm('Arbeitstag wirklich abschließen?'))return;const item={type:'closeDay',createdAt:Date.now(),payload:{action:'closeDay',employee:a.employee,pin:a.pin,date,signatureDataUrl:employeePad.dataUrl(),pauseHours:Number($('pauseHours').value)||0}};if(!navigator.onLine){await queuePut(item);setMessage('closeStatus','🟠 Tagesabschluss offline gespeichert. Wird automatisch übertragen.','warn');employeePad.clear();await refreshQueueCount();return}try{const res=await api(item.payload);setMessage('closeStatus',res.alreadyClosed?'Tag war bereits abgeschlossen.':'✅ Tag abgeschlossen. Der Abschluss ist im Chefbereich verfügbar.','ok');employeePad.clear();await loadDay()}catch(e){await queuePut(item);setMessage('closeStatus','🟠 Tagesabschluss wurde offline vorgemerkt.','warn');await refreshQueueCount()}}
 
 async function loadMonth(){const a=auth();if(!navigator.onLine){setMessage('monthStatus','Monatsübersicht benötigt Internet.','warn');return}try{const data=await api({action:'getMonthData',employee:a.employee,pin:a.pin,year:Number($('empYear').value),month:Number($('empMonth').value)});const ms=data.monthSummary||{},ys=data.yearSummary||{};let html='<div class="total">Gesamt: '+formatHours(data.total)+' Std.</div><div class="status info">Dieser Monat: Urlaub '+Number(ms.vacationDays||0)+' Tag(e) · Krank '+Number(ms.sickDays||0)+' Tag(e) · Feiertage '+Number(ms.holidayDays||0)+' Tag(e)</div><div class="status info">Jahr '+Number(ys.year||$('empYear').value)+': Urlaub '+Number(ys.vacationUsed||0)+' Tag(e) · Krank '+Number(ys.sickDays||0)+' Tag(e) · Urlaub zustehend '+formatHours(ys.vacationEntitlement)+' · Resturlaub '+formatHours(ys.vacationRemaining)+' Tage</div>';html+=(data.rows||[]).map(r=>'<div class="entry"><strong>'+esc(r.date)+'</strong> · '+esc(r.customer)+' · '+formatHours(r.hours)+' Std. '+(r.closed?'✓':'(offen)')+(r.isAdditionalAssignment?' <span class="muted">· Mitarbeit, eingetragen von '+esc(r.assignedBy||'')+'</span>':'')+'</div>').join('');if((data.statuses||[]).length){html+='<h3 style="margin-top:16px">Urlaub / Krank / Feiertag</h3>';html+=(data.statuses||[]).map(s=>'<div class="entry"><strong>'+formatDateDE(s.date)+'</strong> · '+esc(s.status)+(Number(s.creditedHours||0)?' · '+formatHours(s.creditedHours)+' Std. Gutschrift':'')+'</div>').join('')}$('monthResult').innerHTML=html;clearMessage('monthStatus')}catch(e){setMessage('monthStatus',e.message,'error')}}
 async function sendMonth(){const a=auth();if(!navigator.onLine){setMessage('monthStatus','Versand benötigt Internet.','warn');return}try{const r=await api({action:'sendMonthReport',employee:a.employee,pin:a.pin,year:Number($('empYear').value),month:Number($('empMonth').value)});setMessage('monthStatus','✅ Monatsbericht gesendet. Gesamt: '+formatHours(r.total)+' Std.','ok')}catch(e){setMessage('monthStatus',e.message,'error')}}
@@ -702,6 +736,37 @@ async function loadBossMonth(){
     $('bossResult').innerHTML='';
     setMessage('bossStatus','Monatsübersicht konnte nicht geladen werden: '+e.message,'error');
   }
+}
+
+async function loadMonthClosure(){
+  if(!navigator.onLine){setMessage('closureStatus','Monatsabschlüsse benötigen Internet.','warn');return}
+  const target=$('closureEmployee').value,year=Number($('closureYear').value),month=Number($('closureMonth').value);if(!target||!year||!month){setMessage('closureStatus','Bitte Mitarbeiter, Jahr und Monat auswählen.','error');return}
+  try{
+    setMessage('closureStatus','Monatsabschluss wird geladen ...','info');
+    const x=await api(chefPayload({action:'getChefEmployeeMonthData',targetEmployee:target,year,month})),ms=x.monthSummary||{},ys=x.yearSummary||{};
+    let html='<div class="total">'+esc(target)+' · Gesamt '+formatHours(x.total)+' Std.</div>'+
+      '<div class="status info">Arbeitszeit '+formatHours(x.workTotal)+' Std. · Gutschriften '+formatHours(x.creditedTotal)+' Std. · Urlaub '+Number(ms.vacationDays||0)+' · Krank '+Number(ms.sickDays||0)+' · Feiertage '+Number(ms.holidayDays||0)+'</div>'+
+      '<div class="status info">Jahr: Urlaub zustehend '+formatHours(ys.vacationEntitlement)+' · beansprucht '+Number(ys.vacationUsed||0)+' · Rest '+formatHours(ys.vacationRemaining)+' Tage</div>';
+    html+=(x.rows||[]).map(r=>'<div class="entry"><strong>'+formatDateDE(r.date)+'</strong> · '+esc(r.customer)+' · <strong>'+formatHours(r.hours)+' Std.</strong> '+(r.closed?'✓ abgeschlossen':'offen')+'<br><span class="muted">'+esc(r.activity||'')+'</span></div>').join('')||'<div class="muted">Keine Arbeitszeiteinträge in diesem Monat.</div>';
+    if((x.dayClosures||[]).length)html+='<h3>Tagesabschlüsse</h3>'+(x.dayClosures||[]).map(r=>'<div class="entry"><strong>'+formatDateDE(r.date)+'</strong> · Netto '+formatHours(r.netHours)+' Std. · Pause '+Number(r.pauseMinutes||0)+' Min.<br><span class="muted">Abgeschlossen: '+esc(r.closedAt||'')+'</span>'+(r.signatureUrl?'<br><a class="btn secondary" target="_blank" rel="noopener" href="'+esc(r.signatureUrl)+'">Mitarbeiter-Unterschrift öffnen</a>':'')+'</div>').join('');
+    if((x.statuses||[]).length)html+='<h3>Tagesstatus</h3>'+(x.statuses||[]).map(r=>'<div class="entry">'+formatDateDE(r.date)+' · '+esc(r.status)+' · '+formatHours(r.creditedHours)+' Std.</div>').join('');
+    $('closureResult').innerHTML=html;clearMessage('closureStatus');
+  }catch(e){$('closureResult').innerHTML='';setMessage('closureStatus',e.message,'error')}
+}
+function reportLinks(r){let html='';if(r.customerSignatureUrl)html+='<a class="btn secondary" target="_blank" rel="noopener" href="'+esc(r.customerSignatureUrl)+'">Unterschrift öffnen</a>';const urls=String(r.photoUrls||'').split(' | ').filter(Boolean);urls.forEach((u,i)=>html+='<a class="btn secondary" target="_blank" rel="noopener" href="'+esc(u)+'">Bild '+(i+1)+'</a>');return html}
+async function loadRegieReports(status){
+  if(!navigator.onLine){setMessage('regieStatus','Regieberichte benötigen Internet.','warn');return}
+  const year=Number($('regieYear').value)||0,month=Number($('regieMonth').value)||0;
+  try{
+    setMessage('regieStatus',(status==='Offen'?'Offene':'Abgerechnete')+' Regieberichte werden geladen ...','info');
+    const rows=await api(chefPayload({action:'getRegieReports',status,year,month}));window.__regieStatus=status;
+    $('regieResult').innerHTML=(rows||[]).map(r=>'<div class="report-card '+(status==='Offen'?'open':'billed')+'"><strong>'+formatDateDE(r.date)+' · '+esc(r.customer)+'</strong><div class="report-meta">'+esc(r.employee)+' · '+esc(r.start)+'–'+esc(r.end)+' · '+formatHours(r.hours)+' Std.</div><div style="margin-top:8px">'+esc(r.activity||'')+'</div>'+(r.materialUsed?'<div class="report-meta"><strong>Material:</strong> '+esc(r.material||'Ja')+'</div>':'')+(r.additionalEmployeeHours?'<div class="report-meta"><strong>Weitere Mitarbeiter:</strong> '+esc(r.additionalEmployeeHours)+'</div>':'')+'<div class="report-actions">'+reportLinks(r)+(status==='Offen'?'<button class="btn success" onclick="markRegieBilled(\''+esc(r.id)+'\')">Als abgerechnet markieren</button>':'')+'</div>'+(status==='Abgerechnet'?'<div class="status info">Abgerechnet am '+esc(r.billedAt||'')+' von '+esc(r.billedBy||'')+'</div>':'')+'</div>').join('')||'<div class="status ok">Keine '+(status==='Offen'?'offenen':'abgerechneten')+' Regieberichte für diese Auswahl.</div>';
+    setMessage('regieStatus',(rows||[]).length+' Bericht(e) geladen.','ok');
+  }catch(e){$('regieResult').innerHTML='';setMessage('regieStatus',e.message,'error')}
+}
+async function markRegieBilled(entryId){
+  if(!confirm('Diesen Auftrag wirklich als abgerechnet markieren? Eingeloggter Chef und aktueller Zeitpunkt werden automatisch gespeichert.'))return;
+  try{await api(chefPayload({action:'markRegieReportBilled',entryId}));setMessage('regieStatus','✅ Auftrag als abgerechnet markiert.','ok');await loadRegieReports('Offen')}catch(e){setMessage('regieStatus',e.message,'error')}
 }
 
 function parseDecimalInput(value){const n=Number(String(value==null?'':value).trim().replace(',','.'));return Number.isFinite(n)?n:NaN}
@@ -756,7 +821,7 @@ function initEnterSupport(){
 }
 
 function fillMonths(id){const n=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];$(id).innerHTML=n.map((x,i)=>'<option value="'+(i+1)+'">'+x+'</option>').join('')}
-function init(){initEnterSupport();fillMonths('empMonth');fillMonths('bossMonth');const d=new Date();loadEmployeeDirectory();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);$('holidayYear').value=d.getFullYear();if($('vacationYear'))$('vacationYear').value=d.getFullYear();$('absenceStart').value=localDate();$('absenceEnd').value=localDate();clearEmployeeAdminForm();customerPad=initPad('customerSignature');employeePad=initPad('employeeSignature');toggleMaterial();toggleAdditionalEmployees();togglePhotos();updateConnection();const a=auth();if(a.employee&&a.pin)openMain();else $('loginScreen').classList.remove('hidden');if(navigator.onLine)syncQueue()}
+function init(){initEnterSupport();fillMonths('empMonth');fillMonths('bossMonth');fillMonths('closureMonth');fillMonths('regieMonth');$('regieMonth').insertAdjacentHTML('afterbegin','<option value="0">Alle Monate</option>');const d=new Date();loadEmployeeDirectory();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('closureYear').value=d.getFullYear();$('regieYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);$('closureMonth').value=String(d.getMonth()+1);$('regieMonth').value=String(d.getMonth()+1);$('holidayYear').value=d.getFullYear();if($('vacationYear'))$('vacationYear').value=d.getFullYear();$('absenceStart').value=localDate();$('absenceEnd').value=localDate();clearEmployeeAdminForm();customerPad=initPad('customerSignature');employeePad=initPad('employeeSignature');toggleMaterial();toggleAdditionalEmployees();togglePhotos();updateConnection();const a=auth();if(a.employee&&a.pin)openMain();else $('loginScreen').classList.remove('hidden');if(navigator.onLine)syncQueue()}
 if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));
 window.addEventListener('load',init);
 </script>
