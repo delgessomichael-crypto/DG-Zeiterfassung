@@ -10,7 +10,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="dg_icon_192.png">
   <link rel="apple-touch-icon" href="dg_icon_192.png">
-  <title>DG Zeiterfassung</title>
+  <title>DG Zeiterfassung v23</title>
   <style>
     :root{--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#111827;--ok:#166534;--okbg:#dcfce7;--warn:#9a3412;--warnbg:#ffedd5;--err:#991b1b;--errbg:#fee2e2}
     *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}
@@ -41,7 +41,9 @@
     .adjustment-box{border:1px solid #d1d5db;border-radius:12px;padding:12px;margin-top:10px;background:#f9fafb}.adjustment-grid{display:grid;grid-template-columns:120px 1fr auto auto;gap:8px;align-items:end}.adjustment-grid label{margin:0}.adjustment-grid input{padding:10px}.adjustment-history{margin-top:8px}.adjustment-item{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:7px 0;border-top:1px solid #e5e7eb}.adjustment-item:first-child{border-top:0}.adjustment-positive{color:#166534;font-weight:800}.adjustment-negative{color:#b91c1c;font-weight:800}
     .admin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
     .camera-live{margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:12px;background:#111827}.camera-live video{width:100%;max-height:420px;border-radius:10px;background:#000}.report-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.report-actions .btn{width:auto}.report-meta{font-size:13px;color:var(--muted);margin-top:5px}.report-card{border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin-top:10px}.report-card.open{border-left:5px solid #166534}.report-card.billed{border-left:5px solid #b91c1c}.weekday-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.weekday-grid label{font-size:12px}.admin-actions{display:flex;gap:8px;flex-wrap:wrap}.admin-actions .btn{width:auto}.badge{display:inline-block;padding:3px 8px;border-radius:999px;background:#e5e7eb;font-size:12px;font-weight:700}.admin-section{border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-top:14px}.admin-section h3{margin:0 0 8px}.save-bar{position:sticky;bottom:8px;background:#fff;padding-top:10px;z-index:5}.sum-box{margin-top:10px;padding:10px;border-radius:10px;background:#f3f4f6;font-weight:700}.field-hint{font-size:12px;color:var(--muted);margin-top:5px}
-    @media(max-width:700px){.grid2,.button-row,.tabs,.admin-grid{grid-template-columns:1fr}.weekday-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.screen{padding:9px}.head-row{align-items:flex-start;flex-direction:column}.head-row button{width:100%}.radio-row{grid-template-columns:minmax(125px,1fr) 64px 64px;gap:5px}.radio-row label{white-space:nowrap}.additional-hours-row{grid-template-columns:1fr 95px}.boss-month-head,.boss-month-row{grid-template-columns:minmax(120px,1.25fr) repeat(3,minmax(76px,.8fr));gap:5px}.boss-month-head{font-size:11px;padding-left:4px;padding-right:4px}.boss-month-row{padding-left:4px;padding-right:4px}.boss-month-value{font-size:15px}.adjustment-grid{grid-template-columns:1fr 1fr}.adjustment-grid .btn{width:100%}.adjustment-item{align-items:flex-start;flex-direction:column}}
+
+    .boss-compact-head,.boss-compact-row{display:grid;grid-template-columns:minmax(150px,1.5fr) repeat(3,minmax(80px,.8fr)) 48px minmax(100px,.8fr);gap:8px;align-items:center}.boss-compact-head{font-size:12px;font-weight:800;color:var(--muted);padding:0 8px 7px}.boss-compact-row{padding:11px 8px;border-top:1px solid #e5e7eb}.boss-compact-value{text-align:right;font-weight:800}.traffic{font-size:20px;text-align:center}.detail-toolbar{position:sticky;top:0;z-index:8;background:#fff;padding:8px 0;border-bottom:1px solid #e5e7eb;margin-bottom:10px}.detail-toolbar-inner{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}.detail-nav{display:flex;gap:8px;flex-wrap:wrap}.detail-nav .btn{width:auto}.action-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}.action-tabs .btn{width:auto;padding:10px}.object-summary{padding:12px;border-radius:12px;background:#f3f4f6;margin:10px 0}.filter-row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.filter-row .btn{width:auto;padding:10px}.filter-row .active{background:#111827;color:#fff}.closure-badge{display:inline-block;padding:4px 8px;border-radius:999px;font-weight:800;font-size:12px;background:#e5e7eb}.closure-badge.closed{background:#dcfce7;color:#166534}
+    @media(max-width:700px){.boss-compact-head,.boss-compact-row{grid-template-columns:minmax(105px,1.4fr) repeat(3,minmax(55px,.7fr)) 30px minmax(72px,.8fr);gap:4px;font-size:11px}.boss-compact-value{font-size:12px}.grid2,.button-row,.tabs,.admin-grid{grid-template-columns:1fr}.weekday-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.screen{padding:9px}.head-row{align-items:flex-start;flex-direction:column}.head-row button{width:100%}.radio-row{grid-template-columns:minmax(125px,1fr) 64px 64px;gap:5px}.radio-row label{white-space:nowrap}.additional-hours-row{grid-template-columns:1fr 95px}.boss-month-head,.boss-month-row{grid-template-columns:minmax(120px,1.25fr) repeat(3,minmax(76px,.8fr));gap:5px}.boss-month-head{font-size:11px;padding-left:4px;padding-right:4px}.boss-month-row{padding-left:4px;padding-right:4px}.boss-month-value{font-size:15px}.adjustment-grid{grid-template-columns:1fr 1fr}.adjustment-grid .btn{width:100%}.adjustment-item{align-items:flex-start;flex-direction:column}}
   </style>
 </head>
 <body>
@@ -181,16 +183,7 @@
       <div class="card">
         <h2>Büro / Chef</h2><div class="muted small">Zugriff über deine Mitarbeiter-Anmeldung mit Chefberechtigung.</div>
         <div class="grid2"><div><label for="bossYear">Jahr</label><input id="bossYear" type="number"></div><div><label for="bossMonth">Monat</label><select id="bossMonth"></select></div></div>
-        <div class="button-row"><button class="btn primary" data-enter-default onclick="loadBossMonth()">Monatsübersicht laden</button><button class="btn secondary" onclick="loadChefAdministration()">Verwaltung laden</button></div><div id="bossStatus"></div><div id="bossResult"></div>
-      </div>
-
-      <div class="card">
-        <h2>Monatsabschlüsse</h2>
-        <div class="muted small">Gezielt laden: Es werden nur der ausgewählte Mitarbeiter und Monat abgefragt.</div>
-        <div class="admin-grid"><div><label>Mitarbeiter</label><select id="closureEmployee"></select></div><div><label>Jahr</label><input id="closureYear" type="number"></div></div>
-        <label>Monat</label><select id="closureMonth"></select>
-        <button class="btn primary" style="width:100%;margin-top:12px" onclick="loadMonthClosure()">Monatsabschluss anzeigen</button>
-        <div id="closureStatus"></div><div id="closureResult"></div>
+        <div class="button-row"><button class="btn primary" data-enter-default onclick="loadBossMonth()">Monatsübersicht laden</button><button class="btn secondary" onclick="downloadTaxAdvisorPdf()">PDF Steuerberater</button></div><div class="filter-row"><button id="bossFilterAll" class="btn secondary active" onclick="setBossFilter('all')">Alle</button><button id="bossFilterAlerts" class="btn secondary" onclick="setBossFilter('alerts')">Auffälligkeiten</button><button id="bossFilterOpen" class="btn secondary" onclick="setBossFilter('open')">Noch zu prüfen</button></div><div id="bossStatus"></div><div id="bossResult"></div>
       </div>
 
       <div class="card">
@@ -345,7 +338,7 @@ function renderAdditionalEmployeeMenu(){
   $('additionalEmployeesMenu').innerHTML=(employeeDirectory||[]).filter(x=>x!==current).map(name=>`<label data-employee="${esc(name)}"><input type="checkbox" name="additionalEmployee" value="${esc(name)}" onchange="updateAdditionalEmployeesButton();renderAdditionalEmployeeHours()">${esc(name)}</label>`).join('');
   updateAdditionalEmployeesButton();
 }
-function fillAbsenceEmployees(){const opts=(employeeDirectory||[]).map(x=>'<option>'+esc(x)+'</option>').join('');if($('absenceEmployee'))$('absenceEmployee').innerHTML=opts;if($('vacationEmployee'))$('vacationEmployee').innerHTML=opts;if($('closureEmployee'))$('closureEmployee').innerHTML=opts}
+function fillAbsenceEmployees(){const opts=(employeeDirectory||[]).map(x=>'<option>'+esc(x)+'</option>').join('');if($('absenceEmployee'))$('absenceEmployee').innerHTML=opts;if($('vacationEmployee'))$('vacationEmployee').innerHTML=opts}
 function chefPayload(extra={}){const a=auth();return Object.assign({employee:a.employee,employeePin:a.pin},extra)}
 async function loadChefAdministration(){
   try{
@@ -706,68 +699,53 @@ async function closeDay(){const a=auth(),date=$('date').value;if(!employeePad.ha
 
 async function loadMonth(){const a=auth();if(!navigator.onLine){setMessage('monthStatus','Monatsübersicht benötigt Internet.','warn');return}try{const data=await api({action:'getMonthData',employee:a.employee,pin:a.pin,year:Number($('empYear').value),month:Number($('empMonth').value)});const ms=data.monthSummary||{},ys=data.yearSummary||{};let html='<div class="total">Gesamt: '+formatHours(data.total)+' Std.</div><div class="status info">Dieser Monat: Urlaub '+Number(ms.vacationDays||0)+' Tag(e) · Krank '+Number(ms.sickDays||0)+' Tag(e) · Feiertage '+Number(ms.holidayDays||0)+' Tag(e)</div><div class="status info">Jahr '+Number(ys.year||$('empYear').value)+': Urlaub '+Number(ys.vacationUsed||0)+' Tag(e) · Krank '+Number(ys.sickDays||0)+' Tag(e) · Urlaub zustehend '+formatHours(ys.vacationEntitlement)+' · Resturlaub '+formatHours(ys.vacationRemaining)+' Tage</div>';html+=(data.rows||[]).map(r=>'<div class="entry"><strong>'+esc(r.date)+'</strong> · '+esc(r.customer)+' · '+formatHours(r.hours)+' Std. '+(r.closed?'✓':'(offen)')+(r.isAdditionalAssignment?' <span class="muted">· Mitarbeit, eingetragen von '+esc(r.assignedBy||'')+' · '+esc(r.assignmentStatus||'Zugeordnet')+'</span>':'')+'</div>').join('');if((data.statuses||[]).length){html+='<h3 style="margin-top:16px">Urlaub / Krank / Feiertag</h3>';html+=(data.statuses||[]).map(s=>'<div class="entry"><strong>'+formatDateDE(s.date)+'</strong> · '+esc(s.status)+(Number(s.creditedHours||0)?' · '+formatHours(s.creditedHours)+' Std. Gutschrift':'')+'</div>').join('')}$('monthResult').innerHTML=html;clearMessage('monthStatus')}catch(e){setMessage('monthStatus',e.message,'error')}}
 async function sendMonth(){const a=auth();if(!navigator.onLine){setMessage('monthStatus','Versand benötigt Internet.','warn');return}try{const r=await api({action:'sendMonthReport',employee:a.employee,pin:a.pin,year:Number($('empYear').value),month:Number($('empMonth').value)});setMessage('monthStatus','✅ Monatsbericht gesendet. Gesamt: '+formatHours(r.total)+' Std.','ok')}catch(e){setMessage('monthStatus',e.message,'error')}}
+let bossFilter='all';
+let bossDetailIndex=-1;
+let bossDetailTab='overview';
+function bossOpenIssues(x){return (x.overlapConflicts||[]).filter(c=>!c.reviewed).length+(x.assignmentIssues||[]).length}
+function bossTraffic(x){if(bossOpenIssues(x)>0)return '🔴';if(x.closureStatus!=='Abgeschlossen')return '🟠';return '🟢'}
+function setBossFilter(v){bossFilter=v;['All','Alerts','Open'].forEach(k=>{const el=$('bossFilter'+k);if(el)el.classList.toggle('active',v===(k==='All'?'all':k==='Alerts'?'alerts':'open'))});renderBossCompact()}
+function renderBossCompact(){
+  const rows=window.__bossMonthRows||[];let grandTarget=0,grandActual=0;
+  rows.forEach(x=>{grandTarget+=Number(x.targetTotal||0);grandActual+=Number(x.actualTotal||0)});
+  const visible=rows.map((x,i)=>({x,i})).filter(o=>bossFilter==='all'||(bossFilter==='alerts'&&((o.x.overlapConflicts||[]).length||(o.x.assignmentIssues||[]).length))||(bossFilter==='open'&&bossOpenIssues(o.x)>0));
+  let html='<div class="boss-compact-head"><div>Mitarbeiter</div><div style="text-align:right">Soll</div><div style="text-align:right">Ist</div><div style="text-align:right">+ / −</div><div></div><div></div></div>';
+  html+=visible.map(o=>{const x=o.x,b=Number(x.balance||0),bc=b>0?'balance-plus':b<0?'balance-minus':'balance-zero';return '<div class="boss-compact-row"><div><strong>'+esc(x.employee)+'</strong>'+(x.active===false?' <span class="muted small">(inaktiv)</span>':'')+'</div><div class="boss-compact-value target-value">'+formatHours(x.targetTotal)+' </div><div class="boss-compact-value actual-value">'+formatHours(x.actualTotal)+'</div><div class="boss-compact-value '+bc+'">'+(b>0?'+':'')+formatHours(b)+'</div><div class="traffic" title="Status">'+bossTraffic(x)+'</div><div><button class="btn secondary" style="width:100%;padding:10px" onclick="openBossActions('+o.i+')">Aktionen</button></div></div>'}).join('')||'<div class="status info">Für diesen Filter keine Mitarbeiter.</div>';
+  const gb=grandActual-grandTarget;html+='<div class="boss-compact-row" style="border-top:2px solid #9ca3af"><div><strong>Gesamt</strong></div><div class="boss-compact-value target-value">'+formatHours(grandTarget)+'</div><div class="boss-compact-value actual-value">'+formatHours(grandActual)+'</div><div class="boss-compact-value '+(gb>0?'balance-plus':gb<0?'balance-minus':'balance-zero')+'">'+(gb>0?'+':'')+formatHours(gb)+'</div><div></div><div></div></div>';
+  $('bossResult').innerHTML=html;
+}
 async function loadBossMonth(){
   if(!navigator.onLine){setMessage('bossStatus','Chefansicht benötigt Internet.','warn');return}
-  const year=Number($('bossYear').value),month=Number($('bossMonth').value);
-  if(!(year>0&&month>=1&&month<=12)){setMessage('bossStatus','Bitte Jahr und Monat prüfen.','error');return}
-  try{
-    setMessage('bossStatus','Monatsübersicht wird geladen ...','info');
-    const rows=await api({action:'getBossMonthData',employee:auth().employee,employeePin:auth().pin,year,month});
-    if(!(rows||[]).length){$('bossResult').innerHTML='<div class="muted">Für diesen Monat sind keine Mitarbeiterdaten vorhanden.</div>';clearMessage('bossStatus');return}
-    let grandTarget=0,grandActual=0;
-    let html='<div class="boss-month-head"><div>Mitarbeiter</div><div style="text-align:right;color:#b91c1c">Soll</div><div style="text-align:right;color:#166534">Ist</div><div style="text-align:right">+ / −</div></div>';
-    window.__bossMonthRows=rows||[];
-    html+=(rows||[]).map((x,rowIndex)=>{
-      const target=Number(x.targetTotal||0),actual=Number(x.actualTotal!=null?x.actualTotal:x.total||0),balance=Number(x.balance!=null?x.balance:actual-target);
-      grandTarget+=target;grandActual+=actual;
-      const balanceClass=balance>0?'balance-plus':balance<0?'balance-minus':'balance-zero';
-      const balanceText=(balance>0?'+':'')+formatHours(balance)+' Std.';
-      return '<div class="boss-month-row">'+
-        '<div><strong>'+esc(x.employee)+'</strong>'+(x.active===false?' <span class="muted small">(inaktiv)</span>':'')+'</div>'+
-        '<div class="boss-month-value target-value">'+formatHours(target)+' Std.</div>'+
-        '<div class="boss-month-value actual-value">'+formatHours(actual)+' Std.</div>'+
-        '<div class="boss-month-value '+balanceClass+'">'+balanceText+'</div>'+
-        '<div class="boss-month-details">'+
-          '<div class="muted small">Arbeitszeit '+formatHours(x.workTotal||0)+' Std. · Gutschriften '+formatHours(x.creditedTotal||0)+' Std. · Manuelle Korrektur '+(Number(x.adjustmentTotal||0)>0?'+':'')+formatHours(x.adjustmentTotal||0)+' Std. · Wochen-Soll '+formatHours(x.weeklyHours||0)+' Std.</div>'+
-          '<div class="status info">Monat: Krank '+Number(x.sickDays||0)+' · Urlaub '+Number(x.vacationDays||0)+' · Feiertag '+Number(x.holidayDays||0)+'</div>'+
-          '<div class="status info">Jahr: Krank '+Number(x.yearSickDays||0)+' · Urlaub beansprucht '+Number(x.yearVacationDays||0)+' · Urlaub zustehend '+formatHours(x.vacationEntitlement)+' · Resturlaub '+formatHours(x.vacationRemaining)+' Tage</div>'+
-          ((x.overlapConflicts||[]).length?'<div class="status error">⚠ Doppelbelegung prüfen: '+(x.overlapConflicts||[]).map(c=>formatDateDE(c.date)+' '+esc(c.first)+' / '+esc(c.second)).join(' · ')+'</div>':'')+
-          ((x.assignmentIssues||[]).length?'<div class="status warn">⚠ Gemeldete Abweichung: '+(x.assignmentIssues||[]).map(c=>formatDateDE(c.date)+' '+esc(c.customer)+' – '+esc(c.note)).join(' · ')+'</div>':'')+
-          ((x.statuses||[]).length?'<details><summary>Tagesstatus</summary>'+(x.statuses||[]).map(s=>'<div class="entry">'+formatDateDE(s.date)+' · <strong>'+esc(s.status)+'</strong>'+(Number(s.creditedHours||0)?' · '+formatHours(s.creditedHours)+' Std.':'')+'</div>').join('')+'</details>':'')+
-          '<details open><summary>Stunden gutschreiben / abziehen</summary><div class="adjustment-box">'+
-            '<div class="adjustment-grid"><label>Stunden<input id="adjHours_'+rowIndex+'" inputmode="decimal" placeholder="z.B. 2,5"></label><label>Grund<input id="adjReason_'+rowIndex+'" placeholder="z.B. Korrektur Vormonat"></label><button class="btn success" onclick="saveBossAdjustment('+rowIndex+',1)">+ Gutschreiben</button><button class="btn danger" onclick="saveBossAdjustment('+rowIndex+',-1)">− Abziehen</button></div>'+
-            '<div class="adjustment-history">'+((x.adjustments||[]).length?(x.adjustments||[]).map(a=>'<div class="adjustment-item"><div><span class="'+(Number(a.hours)>=0?'adjustment-positive':'adjustment-negative')+'">'+(Number(a.hours)>0?'+':'')+formatHours(a.hours)+' Std.</span> · '+esc(a.reason||'')+'<div class="muted small">'+esc(a.createdAt||'')+' · '+esc(a.createdBy||'')+'</div></div><button class="btn secondary" onclick="deleteBossAdjustment(\''+esc(a.id)+'\')">Entfernen</button></div>').join(''):'<div class="muted small">Noch keine manuellen Stundenkorrekturen.</div>')+'</div>'+
-          '</div></details>'+
-          '<details><summary>Einträge</summary>'+(x.entries||[]).map(e=>'<div class="entry">'+esc(e.date)+' · '+esc(e.customer)+' · '+formatHours(e.hours)+' Std.'+(e.isAdditionalAssignment?' <strong>· Mitarbeit</strong>':'')+'<br><span class="muted">'+esc(e.activity)+'</span>'+(e.isAdditionalAssignment?'<br><span class="muted">Eingetragen von '+esc(e.assignedBy||'')+' · Status '+esc(e.assignmentStatus||'Zugeordnet')+(e.assignmentNote?' · '+esc(e.assignmentNote):'')+'</span>':'')+'</div>').join('')+'</details>'+
-        '</div>'+
-      '</div>';
-    }).join('');
-    const grandBalance=grandActual-grandTarget;
-    const grandClass=grandBalance>0?'balance-plus':grandBalance<0?'balance-minus':'balance-zero';
-    html+='<div class="boss-month-row" style="border-top:2px solid #9ca3af"><div><strong>Gesamt</strong></div><div class="boss-month-value target-value">'+formatHours(grandTarget)+' Std.</div><div class="boss-month-value actual-value">'+formatHours(grandActual)+' Std.</div><div class="boss-month-value '+grandClass+'">'+(grandBalance>0?'+':'')+formatHours(grandBalance)+' Std.</div></div>';
-    $('bossResult').innerHTML=html;
-    clearMessage('bossStatus');
-  }catch(e){
-    $('bossResult').innerHTML='';
-    setMessage('bossStatus','Monatsübersicht konnte nicht geladen werden: '+e.message,'error');
-  }
+  const year=Number($('bossYear').value),month=Number($('bossMonth').value);if(!(year>0&&month>=1&&month<=12)){setMessage('bossStatus','Bitte Jahr und Monat prüfen.','error');return}
+  try{setMessage('bossStatus','Monatsübersicht wird geladen ...','info');const rows=await api({action:'getBossMonthData',employee:auth().employee,employeePin:auth().pin,year,month});window.__bossMonthRows=rows||[];bossDetailIndex=-1;renderBossCompact();clearMessage('bossStatus')}catch(e){$('bossResult').innerHTML='';setMessage('bossStatus','Monatsübersicht konnte nicht geladen werden: '+e.message,'error')}
 }
+function bossToolbar(x){return '<div class="detail-toolbar"><div class="detail-toolbar-inner"><button class="btn secondary" onclick="backBossOverview()">← Zurück</button><strong>'+esc(x.employee)+' · '+$('bossMonth').selectedOptions[0].text+' '+esc($('bossYear').value)+'</strong><div class="detail-nav"><button class="btn secondary" onclick="bossPrevEmployee()">← Vorheriger</button><button class="btn secondary" onclick="bossNextEmployee()">Nächster →</button></div></div></div>'}
+function backBossOverview(){bossDetailIndex=-1;renderBossCompact()}
+function bossPrevEmployee(){const r=window.__bossMonthRows||[];if(!r.length)return;bossDetailIndex=(bossDetailIndex-1+r.length)%r.length;renderBossActions()}
+function bossNextEmployee(){const r=window.__bossMonthRows||[];if(!r.length)return;bossDetailIndex=(bossDetailIndex+1)%r.length;renderBossActions()}
+function openBossActions(i){bossDetailIndex=i;bossDetailTab='overview';renderBossActions();window.scrollTo({top:0,behavior:'smooth'})}
+function setBossDetailTab(t){bossDetailTab=t;renderBossActions()}
+function renderBossActions(){
+  const rows=window.__bossMonthRows||[],x=rows[bossDetailIndex];if(!x){renderBossCompact();return}
+  let html=bossToolbar(x)+'<div class="action-tabs"><button class="btn '+(bossDetailTab==='overview'?'primary':'secondary')+'" onclick="setBossDetailTab(\'overview\')">Monatsdetails</button><button class="btn '+(bossDetailTab==='entries'?'primary':'secondary')+'" onclick="setBossDetailTab(\'entries\')">Aufträge</button><button class="btn '+(bossDetailTab==='alerts'?'primary':'secondary')+'" onclick="setBossDetailTab(\'alerts\')">Auffälligkeiten</button><button class="btn '+(bossDetailTab==='adjust'?'primary':'secondary')+'" onclick="setBossDetailTab(\'adjust\')">± Stunden</button><button class="btn '+(bossDetailTab==='closure'?'primary':'secondary')+'" onclick="setBossDetailTab(\'closure\')">Monatsabschluss</button></div>';
+  if(bossDetailTab==='overview')html+=renderBossOverview(x);
+  if(bossDetailTab==='entries')html+=renderBossEntries(x);
+  if(bossDetailTab==='alerts')html+=renderBossAlerts(x);
+  if(bossDetailTab==='adjust')html+=renderBossAdjust(x,bossDetailIndex);
+  if(bossDetailTab==='closure')html+=renderBossClosure(x);
+  $('bossResult').innerHTML=html;
+}
+function renderBossOverview(x){const b=Number(x.balance||0);return '<div class="status info"><strong>Soll '+formatHours(x.targetTotal)+' Std. · Ist '+formatHours(x.actualTotal)+' Std. · '+(b>=0?'+':'')+formatHours(b)+' Std.</strong></div><div class="entry">Arbeitszeit '+formatHours(x.workTotal)+' Std. · Gutschriften '+formatHours(x.creditedTotal)+' Std. · Korrekturen '+(Number(x.adjustmentTotal)>0?'+':'')+formatHours(x.adjustmentTotal)+' Std.</div><div class="entry">Monat: Urlaub '+Number(x.vacationDays||0)+' · Krank '+Number(x.sickDays||0)+' · Feiertage '+Number(x.holidayDays||0)+'</div><div class="entry">Jahr: Urlaub beansprucht '+Number(x.yearVacationDays||0)+' · zustehend '+formatHours(x.vacationEntitlement)+' · Rest '+formatHours(x.vacationRemaining)+' Tage</div><div class="entry">Prüfstatus: '+bossTraffic(x)+' · '+bossOpenIssues(x)+' offene Punkte · Monatsabschluss: <span class="closure-badge '+(x.closureStatus==='Abgeschlossen'?'closed':'')+'">'+esc(x.closureStatus||'Offen')+'</span></div>'}
+function renderBossEntries(x){return (x.entries||[]).map((e,i)=>'<div class="entry"><strong>'+formatDateDE(e.date)+' · '+esc(e.customer)+' · '+formatHours(e.hours)+' Std.</strong>'+(e.isAdditionalAssignment?' · Mitarbeit':'')+'<br><span class="muted">'+esc(e.activity||'')+'</span><div class="admin-actions" style="margin-top:8px"><button class="btn secondary" onclick="openObjectView('+i+')">🏢 Objekt aufrufen</button><button class="btn secondary" onclick="setBossDetailTab(\'adjust\')">± Stunden anpassen</button></div></div>').join('')||'<div class="muted">Keine Aufträge.</div>'}
+function renderBossAlerts(x){let h='';const cs=(x.overlapConflicts||[]);h+=cs.map(c=>'<div class="status '+(c.reviewed?'ok':'error')+'"><strong>'+(c.reviewed?'✓ Überprüft':'⚠ Doppelbelegung prüfen')+'</strong><br>'+formatDateDE(c.date)+' · '+esc(c.first)+' '+esc(c.start1)+'–'+esc(c.end1)+' / '+esc(c.second)+' '+esc(c.start2)+'–'+esc(c.end2)+(c.reviewed?'<br><span class="small">'+esc((c.reviewedInfo||{}).reviewedAt||'')+' · '+esc((c.reviewedInfo||{}).reviewedBy||'')+'</span>':'<br><button class="btn success" style="margin-top:8px" onclick="reviewBossConflict(\''+encodeURIComponent(c.id)+'\',\''+esc(c.date)+'\')">✓ Überprüft – korrekt</button>')+'</div>').join('');h+=(x.assignmentIssues||[]).map(c=>'<div class="status warn"><strong>⚠ Gemeldete Abweichung</strong><br>'+formatDateDE(c.date)+' · '+esc(c.customer)+' · '+esc(c.note||'')+'</div>').join('');return h||'<div class="status ok">Keine Auffälligkeiten.</div>'}
+function renderBossAdjust(x,i){return '<div class="adjustment-box"><h3>Stunden anpassen</h3><div class="muted small">Originalaufträge bleiben unverändert. Jede Korrektur ist nachvollziehbar.</div><div class="adjustment-grid"><label>Stunden<input id="adjHours_'+i+'" inputmode="decimal" placeholder="z.B. 2,5"></label><label>Grund<input id="adjReason_'+i+'" placeholder="Grund ist Pflicht"></label><button class="btn success" onclick="saveBossAdjustment('+i+',1)">+ Gutschreiben</button><button class="btn danger" onclick="saveBossAdjustment('+i+',-1)">− Abziehen</button></div><h3>Historie</h3><div class="adjustment-history">'+((x.adjustments||[]).length?(x.adjustments||[]).map(a=>'<div class="adjustment-item"><div><span class="'+(Number(a.hours)>=0?'adjustment-positive':'adjustment-negative')+'">'+(Number(a.hours)>0?'+':'')+formatHours(a.hours)+' Std.</span> · '+esc(a.reason||'')+'<div class="muted small">'+esc(a.createdAt||'')+' · '+esc(a.createdBy||'')+'</div></div><button class="btn secondary" onclick="deleteBossAdjustment(\''+esc(a.id)+'\')">Entfernen</button></div>').join(''):'<div class="muted">Keine Korrekturen.</div>')+'</div></div>'}
+function renderBossClosure(x){const open=bossOpenIssues(x),closed=x.closureStatus==='Abgeschlossen';let h='<div class="status '+(open?'warn':'ok')+'">'+(open?'🟠 '+open+' offene Punkte vorhanden. Vor Abschluss bitte prüfen.':'🟢 Keine offenen Auffälligkeiten.')+'</div><div class="entry"><strong>Monatsabschluss: '+esc(x.closureStatus||'Offen')+'</strong>'+(x.closureLast?'<br><span class="muted">'+esc(x.closureLast.at||'')+' · '+esc(x.closureLast.by||'')+(x.closureLast.reason?' · '+esc(x.closureLast.reason):'')+'</span>':'')+'</div>';if(!closed)h+='<button class="btn success" style="width:100%" onclick="changeMonthClosure(\'Abgeschlossen\')">✓ Monat abschließen</button>';else h+='<button class="btn secondary" style="width:100%" onclick="changeMonthClosure(\'Wieder geöffnet\')">Monatsabschluss wieder öffnen</button>';if((x.closureHistory||[]).length)h+='<h3>Abschlusshistorie</h3>'+(x.closureHistory||[]).map(e=>'<div class="entry">'+esc(e.action)+' · '+esc(e.at)+' · '+esc(e.by)+(e.reason?' · '+esc(e.reason):'')+'</div>').join('');return h}
+async function reviewBossConflict(encodedId,date){const x=(window.__bossMonthRows||[])[bossDetailIndex];if(!x)return;try{await api(chefPayload({action:'markConflictReviewed',conflictId:decodeURIComponent(encodedId),targetEmployee:x.employee,year:Number($('bossYear').value),month:Number($('bossMonth').value),date}));await reloadBossKeepDetail();setMessage('bossStatus','✓ Doppelbelegung als überprüft gespeichert.','ok')}catch(e){setMessage('bossStatus',e.message,'error')}}
+async function changeMonthClosure(action){const x=(window.__bossMonthRows||[])[bossDetailIndex];if(!x)return;let reason='';if(action==='Wieder geöffnet'){reason=prompt('Grund für die Wiederöffnung:')||'';if(!reason.trim())return}else if(bossOpenIssues(x)>0&&!confirm('Es gibt noch offene Prüfpunkte. Monat trotzdem abschließen?'))return;try{await api(chefPayload({action:'setMonthClosureStatus',targetEmployee:x.employee,year:Number($('bossYear').value),month:Number($('bossMonth').value),closureAction:action,reason}));await reloadBossKeepDetail();setMessage('bossStatus','Monatsabschluss aktualisiert.','ok')}catch(e){setMessage('bossStatus',e.message,'error')}}
+async function reloadBossKeepDetail(){const old=bossDetailIndex,tab=bossDetailTab;const rows=await api({action:'getBossMonthData',employee:auth().employee,employeePin:auth().pin,year:Number($('bossYear').value),month:Number($('bossMonth').value)});window.__bossMonthRows=rows||[];bossDetailIndex=Math.min(old,(rows||[]).length-1);bossDetailTab=tab;renderBossActions()}
+async function openObjectView(entryIndex){const x=(window.__bossMonthRows||[])[bossDetailIndex],e=(x.entries||[])[entryIndex];if(!e)return;try{setMessage('bossStatus','Objekt wird geladen ...','info');const o=await api(chefPayload({action:'getObjectReports',objectId:e.objectId||'',customer:e.customer}));let h=bossToolbar(x)+'<button class="btn secondary" onclick="renderBossActions()">← Zurück zu '+esc(x.employee)+'</button><div class="object-summary"><strong>🏢 '+esc(o.displayName||e.customer)+'</strong><br>Berichte: '+Number(o.reportCount||0)+' · Gesamtstunden: '+formatHours(o.totalHours)+' · Mitarbeiter: '+esc((o.employees||[]).join(', '))+'</div>';h+=(o.reports||[]).map(r=>'<div class="report-card"><strong>'+formatDateDE(r.date)+' · '+esc(r.employee)+' · '+formatHours(r.hours)+' Std.</strong><div class="report-meta">'+esc(r.start)+'–'+esc(r.end)+' · '+esc(r.regieStatus)+'</div><div>'+esc(r.activity||'')+'</div>'+(r.materialUsed?'<div class="report-meta"><strong>Material:</strong> '+esc(r.material||'')+'</div>':'')+'<div class="report-actions">'+reportLinks(r)+'</div></div>').join('');$('bossResult').innerHTML=h;clearMessage('bossStatus')}catch(err){setMessage('bossStatus',err.message,'error')}}
+async function downloadTaxAdvisorPdf(){if(!navigator.onLine){setMessage('bossStatus','PDF-Erstellung benötigt Internet.','warn');return}try{setMessage('bossStatus','PDF für Steuerberater wird erstellt ...','info');const r=await api(chefPayload({action:'createTaxAdvisorPdf',year:Number($('bossYear').value),month:Number($('bossMonth').value)}));const bytes=Uint8Array.from(atob(r.base64),c=>c.charCodeAt(0)),blob=new Blob([bytes],{type:'application/pdf'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=r.fileName||'Monatsuebersicht.pdf';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);setMessage('bossStatus','✅ PDF erstellt.','ok')}catch(e){setMessage('bossStatus','PDF konnte nicht erstellt werden: '+e.message,'error')}}
 
-async function loadMonthClosure(){
-  if(!navigator.onLine){setMessage('closureStatus','Monatsabschlüsse benötigen Internet.','warn');return}
-  const target=$('closureEmployee').value,year=Number($('closureYear').value),month=Number($('closureMonth').value);if(!target||!year||!month){setMessage('closureStatus','Bitte Mitarbeiter, Jahr und Monat auswählen.','error');return}
-  try{
-    setMessage('closureStatus','Monatsabschluss wird geladen ...','info');
-    const x=await api(chefPayload({action:'getChefEmployeeMonthData',targetEmployee:target,year,month})),ms=x.monthSummary||{},ys=x.yearSummary||{};
-    let html='<div class="total">'+esc(target)+' · Gesamt '+formatHours(x.total)+' Std.</div>'+
-      '<div class="status info">Arbeitszeit '+formatHours(x.workTotal)+' Std. · Gutschriften '+formatHours(x.creditedTotal)+' Std. · Urlaub '+Number(ms.vacationDays||0)+' · Krank '+Number(ms.sickDays||0)+' · Feiertage '+Number(ms.holidayDays||0)+'</div>'+
-      '<div class="status info">Jahr: Urlaub zustehend '+formatHours(ys.vacationEntitlement)+' · beansprucht '+Number(ys.vacationUsed||0)+' · Rest '+formatHours(ys.vacationRemaining)+' Tage</div>';
-    html+=(x.rows||[]).map(r=>'<div class="entry"><strong>'+formatDateDE(r.date)+'</strong> · '+esc(r.customer)+' · <strong>'+formatHours(r.hours)+' Std.</strong> '+(r.closed?'✓ abgeschlossen':'offen')+'<br><span class="muted">'+esc(r.activity||'')+'</span></div>').join('')||'<div class="muted">Keine Arbeitszeiteinträge in diesem Monat.</div>';
-    if((x.dayClosures||[]).length)html+='<h3>Tagesabschlüsse</h3>'+(x.dayClosures||[]).map(r=>'<div class="entry"><strong>'+formatDateDE(r.date)+'</strong> · Netto '+formatHours(r.netHours)+' Std. · Pause '+Number(r.pauseMinutes||0)+' Min.<br><span class="muted">Abgeschlossen: '+esc(r.closedAt||'')+'</span>'+(r.signatureUrl?'<br><a class="btn secondary" target="_blank" rel="noopener" href="'+esc(r.signatureUrl)+'">Mitarbeiter-Unterschrift öffnen</a>':'')+'</div>').join('');
-    if((x.statuses||[]).length)html+='<h3>Tagesstatus</h3>'+(x.statuses||[]).map(r=>'<div class="entry">'+formatDateDE(r.date)+' · '+esc(r.status)+' · '+formatHours(r.creditedHours)+' Std.</div>').join('');
-    $('closureResult').innerHTML=html;clearMessage('closureStatus');
-  }catch(e){$('closureResult').innerHTML='';setMessage('closureStatus',e.message,'error')}
-}
 function reportLinks(r){let html='';if(r.customerSignatureUrl)html+='<a class="btn secondary" target="_blank" rel="noopener" href="'+esc(r.customerSignatureUrl)+'">Unterschrift öffnen</a>';const urls=String(r.photoUrls||'').split(' | ').filter(Boolean);urls.forEach((u,i)=>html+='<a class="btn secondary" target="_blank" rel="noopener" href="'+esc(u)+'">Bild '+(i+1)+'</a>');return html}
 async function loadRegieReports(status){
   if(!navigator.onLine){setMessage('regieStatus','Regieberichte benötigen Internet.','warn');return}
@@ -797,7 +775,7 @@ async function saveBossAdjustment(rowIndex,direction){
   try{
     setMessage('bossStatus','Stundenkorrektur wird gespeichert ...','info');
     await api({action:'saveMonthlyAdjustment',employee:auth().employee,employeePin:auth().pin,targetEmployee:x.employee,year:Number($('bossYear').value),month:Number($('bossMonth').value),hours,reason});
-    await loadBossMonth();
+    await reloadBossKeepDetail();
     setMessage('bossStatus','✅ Stundenkorrektur gespeichert.','ok');
   }catch(e){setMessage('bossStatus','Stundenkorrektur nicht möglich: '+e.message,'error')}
 }
@@ -806,7 +784,7 @@ async function deleteBossAdjustment(adjustmentId){
   if(!confirm('Diese Stundenkorrektur wirklich entfernen?'))return;
   try{
     await api({action:'deleteMonthlyAdjustment',employee:auth().employee,employeePin:auth().pin,adjustmentId});
-    await loadBossMonth();
+    await reloadBossKeepDetail();
     setMessage('bossStatus','✅ Stundenkorrektur entfernt.','ok');
   }catch(e){setMessage('bossStatus','Korrektur konnte nicht entfernt werden: '+e.message,'error')}
 }
@@ -836,7 +814,7 @@ function initEnterSupport(){
 }
 
 function fillMonths(id){const n=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];$(id).innerHTML=n.map((x,i)=>'<option value="'+(i+1)+'">'+x+'</option>').join('')}
-function init(){initEnterSupport();fillMonths('empMonth');fillMonths('bossMonth');fillMonths('closureMonth');fillMonths('regieMonth');$('regieMonth').insertAdjacentHTML('afterbegin','<option value="0">Alle Monate</option>');const d=new Date();loadEmployeeDirectory();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('closureYear').value=d.getFullYear();$('regieYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);$('closureMonth').value=String(d.getMonth()+1);$('regieMonth').value=String(d.getMonth()+1);$('holidayYear').value=d.getFullYear();if($('vacationYear'))$('vacationYear').value=d.getFullYear();$('absenceStart').value=localDate();$('absenceEnd').value=localDate();clearEmployeeAdminForm();customerPad=initPad('customerSignature');employeePad=initPad('employeeSignature');toggleMaterial();toggleAdditionalEmployees();togglePhotos();updateConnection();const a=auth();if(a.employee&&a.pin)openMain();else $('loginScreen').classList.remove('hidden');if(navigator.onLine)syncQueue()}
+function init(){initEnterSupport();fillMonths('empMonth');fillMonths('bossMonth');fillMonths('regieMonth');$('regieMonth').insertAdjacentHTML('afterbegin','<option value="0">Alle Monate</option>');const d=new Date();loadEmployeeDirectory();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('regieYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);$('regieMonth').value=String(d.getMonth()+1);$('holidayYear').value=d.getFullYear();if($('vacationYear'))$('vacationYear').value=d.getFullYear();$('absenceStart').value=localDate();$('absenceEnd').value=localDate();clearEmployeeAdminForm();customerPad=initPad('customerSignature');employeePad=initPad('employeeSignature');toggleMaterial();toggleAdditionalEmployees();togglePhotos();updateConnection();const a=auth();if(a.employee&&a.pin)openMain();else $('loginScreen').classList.remove('hidden');if(navigator.onLine)syncQueue()}
 if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));
 window.addEventListener('load',init);
 </script>
