@@ -1,21 +1,19 @@
-DG ZEITERFASSUNG - ARBEITSSTAND v25
-Stand: 03.09.2026
+DG ZEITERFASSUNG v30
 
-Aenderungen v25:
-- Auswahl "Weitere Mitarbeiter" aus der Mitarbeiteransicht entfernt.
-- Jeder Mitarbeiter erfasst kuenftig ausschliesslich seine eigenen Stunden.
-- Neue Eintraege erzeugen keine Mitarbeiterzuordnungen mehr.
-- Chefbereich Regieberichte gruppiert automatisch nach Objekt-ID.
-- Pro Objekt werden Gesamtstunden aller Mitarbeiter, beteiligte Mitarbeiter und Anzahl der Berichte angezeigt.
-- Einzelberichte bleiben aufklappbar mit Taetigkeit, Material, Bildern und Unterschrift.
-- "Objekt als abgerechnet markieren" markiert alle aktuell offenen Regieberichte dieses Objekts gemeinsam als abgerechnet.
-- Objekt-ID wird automatisch im Hintergrund vergeben; keine Eingabe durch Mitarbeiter notwendig.
-- Historische v22/v24 Mitarbeiterzuordnungen bleiben fuer alte Daten erhalten, werden aber fuer neue Eintraege nicht mehr erzeugt.
+Änderungen gegenüber v29:
+- Ausstehende Offline-Übertragungen sind für Mitarbeiter sichtbar.
+- Details zeigen Kunde/Auftrag, Datum, Uhrzeit, Stunden und Tätigkeit.
+- Einzelne ausstehende Aufträge können manuell erneut übertragen werden.
+- Zusätzlich gibt es "Alle jetzt übertragen".
+- Netzwerkfehler und Backend-/Datenfehler werden getrennt behandelt.
+- Nur echte Netzwerkfehler werden automatisch in die Offline-Warteschlange gelegt.
+- Bei Backend-/Datenfehlern bleibt das Formular erhalten und die konkrete Servermeldung wird angezeigt.
+- Bestehende IndexedDB-Warteschlange aus v29 bleibt erhalten.
+- Sichtbare Versionsnummer: Version 30.
+- Service-Worker Cache: dg-zeiterfassung-v30.
 
 Installation:
-1. Code_FINAL_PWA_v25.txt komplett in Google Apps Script einsetzen.
-2. Speichern.
-3. updateExistingSheet() einmal ausfuehren (sicherer Migrationscheck).
-4. Bestehende Web-App-Bereitstellung auf eine neue Version aktualisieren.
-5. index.html im GitHub Repository ersetzen und committen.
-6. App mit ?v=25 neu laden.
+1. GitHub index.html ersetzen.
+2. GitHub sw.js ersetzen.
+3. Backend ist gegenüber v29 unverändert; keine neue Apps-Script-Bereitstellung erforderlich, wenn v29-Backend bereits aktiv ist.
+4. App mit ?v=30 öffnen und auf "Version 30" achten.
