@@ -127,29 +127,6 @@
         <div class="radio-row"><strong>Material verbaut?</strong><label><input type="radio" name="materialUsed" value="no" checked onchange="toggleMaterial()">Nein</label><label><input type="radio" name="materialUsed" value="yes" onchange="toggleMaterial()">Ja</label></div>
         <div id="materialBox" class="hidden"><label for="material">Verbautes Material</label><textarea id="material" placeholder="Menge und Bezeichnung"></textarea></div>
 
-        <div class="radio-row">
-          <strong>Weitere Mitarbeiter?</strong>
-          <label><input type="radio" name="additionalEmployeesUsed" value="no" checked onchange="toggleAdditionalEmployees()">Nein</label>
-          <label><input type="radio" name="additionalEmployeesUsed" value="yes" onchange="toggleAdditionalEmployees()">Ja</label>
-        </div>
-        <div id="additionalEmployeesBox" class="hidden">
-          <label>Weitere Mitarbeiter auswählen</label>
-          <div class="multi-dropdown">
-            <button id="additionalEmployeesButton" type="button" class="btn secondary" style="width:100%" onclick="toggleAdditionalEmployeesMenu()">Mitarbeiter auswählen</button>
-            <div id="additionalEmployeesMenu" class="multi-menu hidden">
-              <label data-employee="Del Gesso Michael"><input type="checkbox" name="additionalEmployee" value="Del Gesso Michael" onchange="updateAdditionalEmployeesButton();renderAdditionalEmployeeHours()">Del Gesso Michael</label>
-              <label data-employee="Del Gesso Laura"><input type="checkbox" name="additionalEmployee" value="Del Gesso Laura" onchange="updateAdditionalEmployeesButton();renderAdditionalEmployeeHours()">Del Gesso Laura</label>
-              <label data-employee="Del Gesso Marco"><input type="checkbox" name="additionalEmployee" value="Del Gesso Marco" onchange="updateAdditionalEmployeesButton();renderAdditionalEmployeeHours()">Del Gesso Marco</label>
-              <label data-employee="Del Gesso Katia"><input type="checkbox" name="additionalEmployee" value="Del Gesso Katia" onchange="updateAdditionalEmployeesButton();renderAdditionalEmployeeHours()">Del Gesso Katia</label>
-              <label data-employee="Del Gesso Aurora"><input type="checkbox" name="additionalEmployee" value="Del Gesso Aurora" onchange="updateAdditionalEmployeesButton();renderAdditionalEmployeeHours()">Del Gesso Aurora</label>
-              <label data-employee="Sharifi Habibullah"><input type="checkbox" name="additionalEmployee" value="Sharifi Habibullah" onchange="updateAdditionalEmployeesButton();renderAdditionalEmployeeHours()">Sharifi Habibullah</label>
-              <label data-employee="Arapoglu David"><input type="checkbox" name="additionalEmployee" value="Arapoglu David" onchange="updateAdditionalEmployeesButton();renderAdditionalEmployeeHours()">Arapoglu David</label>
-            </div>
-          </div>
-          <div id="additionalEmployeeHours" class="additional-hours"></div>
-          <div class="muted small">Mehrfachauswahl möglich. Für jeden ausgewählten Mitarbeiter bitte seine tatsächlichen Stunden auf dieser Baustelle eintragen.</div>
-        </div>
-
         <h3 style="margin-top:20px">Kundenunterschrift</h3><div class="muted small">Bei vorhandener Unterschrift wird der Auftrag nach der Übertragung automatisch ans Büro gesendet.</div>
         <canvas id="customerSignature"></canvas>
         <div class="button-row"><button class="btn secondary" onclick="clearCustomerSignature()">Unterschrift löschen</button><button class="btn secondary" onclick="markNoCustomer()">Kein Kunde vor Ort</button></div>
@@ -310,7 +287,6 @@ function openMain(){
   if(!bossAllowed)showEmployee();
 
   loadEmployeeDirectory();
-  updateAdditionalEmployeeOptions();
   requestAnimationFrame(()=>{customerPad.resize();employeePad.resize()});
   updateConnection();
   loadDay();
@@ -337,14 +313,8 @@ async function loadEmployeeDirectory(){
     const current=auth().employee;
     $('loginEmployee').innerHTML='<option value="">Bitte auswählen</option>'+employeeDirectory.map(x=>'<option>'+esc(x)+'</option>').join('');
     if(current&&employeeDirectory.includes(current))$('loginEmployee').value=current;
-    renderAdditionalEmployeeMenu();
     fillAbsenceEmployees();
   }catch(e){ if($('loginEmployee'))$('loginEmployee').innerHTML='<option value="">Mitarbeiter konnten nicht geladen werden</option>'; }
-}
-function renderAdditionalEmployeeMenu(){
-  const current=auth().employee;
-  $('additionalEmployeesMenu').innerHTML=(employeeDirectory||[]).filter(x=>x!==current).map(name=>`<label data-employee="${esc(name)}"><input type="checkbox" name="additionalEmployee" value="${esc(name)}" onchange="updateAdditionalEmployeesButton();renderAdditionalEmployeeHours()">${esc(name)}</label>`).join('');
-  updateAdditionalEmployeesButton();
 }
 function fillAbsenceEmployees(){const opts=(employeeDirectory||[]).map(x=>'<option>'+esc(x)+'</option>').join('');if($('absenceEmployee'))$('absenceEmployee').innerHTML=opts;if($('vacationEmployee'))$('vacationEmployee').innerHTML=opts}
 function chefPayload(extra={}){const a=auth();return Object.assign({employee:a.employee,employeePin:a.pin},extra)}
@@ -576,42 +546,9 @@ function openNavigation(location){
   window.open('https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(location),'_blank');
 }
 
-function calculateHours(){const s=$('start').value,e=$('end').value;if(!s||!e){$('hours').value='';return}const a=s.split(':').map(Number),b=e.split(':').map(Number);let sm=a[0]*60+a[1],em=b[0]*60+b[1];if(em<sm)em+=1440;const mins=em-sm;$('hours').value=mins>0?(mins/60).toFixed(2):'';renderAdditionalEmployeeHours()}
+function calculateHours(){const s=$('start').value,e=$('end').value;if(!s||!e){$('hours').value='';return}const a=s.split(':').map(Number),b=e.split(':').map(Number);let sm=a[0]*60+a[1],em=b[0]*60+b[1];if(em<sm)em+=1440;const mins=em-sm;$('hours').value=mins>0?(mins/60).toFixed(2):''}
 function toggleMaterial(){const yes=document.querySelector('input[name="materialUsed"]:checked').value==='yes';$('materialBox').classList.toggle('hidden',!yes);if(!yes)$('material').value=''}
 
-function selectedAdditionalEmployees(){return Array.from(document.querySelectorAll('input[name="additionalEmployee"]:checked')).map(x=>x.value)}
-function toggleAdditionalEmployees(){
-  const yes=document.querySelector('input[name="additionalEmployeesUsed"]:checked').value==='yes';
-  $('additionalEmployeesBox').classList.toggle('hidden',!yes);
-  if(!yes) clearAdditionalEmployees();
-}
-function toggleAdditionalEmployeesMenu(){$('additionalEmployeesMenu').classList.toggle('hidden')}
-function renderAdditionalEmployeeHours(){
-  const selected=selectedAdditionalEmployees();
-  const box=$('additionalEmployeeHours');
-  const mainHours=Number($('hours').value)||0;
-  box.innerHTML=selected.map(name=>{
-    const id='addHours_'+name.replace(/[^a-zA-Z0-9]/g,'_');
-    const old=document.getElementById(id);
-    const value=old?old.value:(mainHours>0?mainHours.toFixed(2):'');
-    return `<div class="additional-hours-row"><label for="${id}">${esc(name)}</label><input id="${id}" class="additionalEmployeeHoursInput" data-employee="${esc(name)}" type="number" inputmode="decimal" min="0.01" max="24" step="0.25" value="${esc(value)}" placeholder="Std."></div>`;
-  }).join('');
-}
-function selectedAdditionalEmployeeHours(){return Array.from(document.querySelectorAll('.additionalEmployeeHoursInput')).map(x=>({name:x.dataset.employee,hours:Number(x.value)}))}
-
-function clearAdditionalEmployees(){
-  document.querySelectorAll('input[name="additionalEmployee"]').forEach(x=>x.checked=false);
-  $('additionalEmployeesMenu').classList.add('hidden');
-  updateAdditionalEmployeesButton();
-  renderAdditionalEmployeeHours();
-}
-function updateAdditionalEmployeesButton(){
-  const selected=selectedAdditionalEmployees();
-  $('additionalEmployeesButton').textContent=selected.length
-    ? selected.length+' Mitarbeiter ausgewählt: '+selected.join(', ')
-    : 'Mitarbeiter auswählen';
-}
-function updateAdditionalEmployeeOptions(){renderAdditionalEmployeeMenu()}
 function togglePhotos(){const yes=document.querySelector('input[name="photosUsed"]:checked').value==='yes';$('photoBox').classList.toggle('hidden',!yes);if(!yes){stopCamera();clearPhotos()}}
 function updatePhotoStatus(){$('photoStatus').textContent=preparedPhotos.length?preparedPhotos.length+' von 6 Bild(ern) bereit. Du kannst direkt weitere Fotos aufnehmen.':'Noch keine Bilder hinzugefügt.';$('clearPhotosBtn').classList.toggle('hidden',preparedPhotos.length===0)}
 function clearPhotos(){preparedPhotos=[];$('cameraPhoto').value='';$('galleryPhotos').value='';updatePhotoStatus()}
@@ -638,14 +575,12 @@ function clearCustomerSignature(){customerPad.clear();noCustomerPresent=false}
 function markNoCustomer(){customerPad.clear();noCustomerPresent=true;setMessage('entryStatus','Kundenunterschrift wird ausgelassen.','info')}
 
 async function saveEntry(){
-  const a=auth(),date=$('date').value,customer=$('customer').value.trim(),activity=$('activity').value.trim(),hours=Number($('hours').value),materialUsed=document.querySelector('input[name="materialUsed"]:checked').value==='yes',material=$('material').value.trim(),additionalEmployeesUsed=document.querySelector('input[name="additionalEmployeesUsed"]:checked').value==='yes',additionalEmployees=selectedAdditionalEmployees(),additionalEmployeeHours=selectedAdditionalEmployeeHours();
+  const a=auth(),date=$('date').value,customer=$('customer').value.trim(),activity=$('activity').value.trim(),hours=Number($('hours').value),materialUsed=document.querySelector('input[name="materialUsed"]:checked').value==='yes',material=$('material').value.trim();
   if(!customer){setMessage('entryStatus','Bitte Kunde / Baustelle eintragen.','error');return}
   if(!$('start').value||!$('end').value){setMessage('entryStatus','Von und Bis müssen ausgefüllt werden.','error');return}
   if(!(hours>0)){setMessage('entryStatus','Arbeitszeit konnte nicht berechnet werden.','error');return}
   if(!activity){setMessage('entryStatus','Bitte die ausgeführte Tätigkeit eintragen.','error');return}
   if(materialUsed&&!material){setMessage('entryStatus','Bitte Material eintragen.','error');return}
-  if(additionalEmployeesUsed&&!additionalEmployees.length){setMessage('entryStatus','Bitte mindestens einen weiteren Mitarbeiter auswählen.','error');return}
-  if(additionalEmployeesUsed&&additionalEmployeeHours.some(x=>!(x.hours>0&&x.hours<=24))){setMessage('entryStatus','Bitte für jeden weiteren Mitarbeiter gültige Stunden eintragen.','error');return}
 
   if(navigator.onLine&&!selectedAssignmentId){
     try{
@@ -659,13 +594,13 @@ async function saveEntry(){
     }catch(e){setMessage('entryStatus','Konfliktprüfung nicht möglich: '+e.message,'warn');return}
   }
 
-  const entry={clientId:uid(),employee:a.employee,employeePin:a.pin,date,customer,start:$('start').value,end:$('end').value,hours,activity,syncCalendar:false,materialUsed,material,additionalEmployeesUsed,additionalEmployees,additionalEmployeeHours,photos:preparedPhotos.slice(),customerSignature:noCustomerPresent?'':customerPad.dataUrl(),sourceCalendarEventId:selectedCalendarEventId,replacementAssignmentId:selectedAssignmentId};
+  const entry={clientId:uid(),employee:a.employee,employeePin:a.pin,date,customer,start:$('start').value,end:$('end').value,hours,activity,syncCalendar:false,materialUsed,material,additionalEmployeesUsed:false,additionalEmployees:[],additionalEmployeeHours:[],photos:preparedPhotos.slice(),customerSignature:noCustomerPresent?'':customerPad.dataUrl(),sourceCalendarEventId:selectedCalendarEventId,replacementAssignmentId:selectedAssignmentId};
   const item={type:'saveEntry',createdAt:Date.now(),payload:{action:'saveEntry',employee:a.employee,pin:a.pin,entry}};
   if(!navigator.onLine){await queuePut(item);setMessage('entryStatus','🟠 Offline gespeichert. Automatische Übertragung folgt bei Internetverbindung.','warn');resetEntry();await refreshQueueCount();return}
   try{setMessage('entryStatus','Eintrag wird übertragen ...','info');const day=await api(item.payload);lastDayData=day;renderDay();resetEntry();await loadCalendarEvents();setMessage('entryStatus','✅ Eintrag gespeichert. Der Auftrag steht jetzt im Chefbereich unter Regieberichte.','ok')}catch(e){await queuePut(item);setMessage('entryStatus','🟠 Verbindung fehlgeschlagen. Auftrag wurde sicher offline vorgemerkt.','warn');resetEntry();await refreshQueueCount()}
 }
 
-function resetEntry(){stopCamera();selectedCalendarEventId='';selectedAssignmentId='';$('customer').value='';$('start').value='';$('end').value='';$('hours').value='';$('activity').value='';document.querySelector('input[name="materialUsed"][value="no"]').checked=true;toggleMaterial();document.querySelector('input[name="additionalEmployeesUsed"][value="no"]').checked=true;toggleAdditionalEmployees();document.querySelector('input[name="photosUsed"][value="no"]').checked=true;togglePhotos();clearCustomerSignature();noCustomerPresent=false}
+function resetEntry(){stopCamera();selectedCalendarEventId='';selectedAssignmentId='';$('customer').value='';$('start').value='';$('end').value='';$('hours').value='';$('activity').value='';document.querySelector('input[name="materialUsed"][value="no"]').checked=true;toggleMaterial();document.querySelector('input[name="photosUsed"][value="no"]').checked=true;togglePhotos();clearCustomerSignature();noCustomerPresent=false}
 
 async function loadDay(){const a=auth(),date=$('date').value;if(!a.employee||!date)return;if(!navigator.onLine){const cached=localStorage.getItem('dg_day_'+a.employee+'_'+date);if(cached){lastDayData=JSON.parse(cached);renderDay()}return}try{lastDayData=await api({action:'getDayData',employee:a.employee,pin:a.pin,date});localStorage.setItem('dg_day_'+a.employee+'_'+date,JSON.stringify(lastDayData));renderDay()}catch(e){setMessage('entryStatus',e.message,'error')}}
 function renderDay(){
@@ -769,14 +704,20 @@ async function loadRegieReports(status){
   const year=Number($('regieYear').value)||0,month=Number($('regieMonth').value)||0;
   try{
     setMessage('regieStatus',(status==='Offen'?'Offene':'Abgerechnete')+' Regieberichte werden geladen ...','info');
-    const rows=await api(chefPayload({action:'getRegieReports',status,year,month}));window.__regieStatus=status;
-    $('regieResult').innerHTML=(rows||[]).map(r=>'<div class="report-card '+(status==='Offen'?'open':'billed')+'"><strong>'+formatDateDE(r.date)+' · '+esc(r.customer)+'</strong><div class="report-meta">'+esc(r.employee)+' · '+esc(r.start)+'–'+esc(r.end)+' · '+formatHours(r.hours)+' Std.</div><div style="margin-top:8px">'+esc(r.activity||'')+'</div>'+(r.materialUsed?'<div class="report-meta"><strong>Material:</strong> '+esc(r.material||'Ja')+'</div>':'')+(r.additionalEmployeeHours?'<div class="report-meta"><strong>Weitere Mitarbeiter:</strong> '+esc(r.additionalEmployeeHours)+'</div>':'')+'<div class="report-actions">'+reportLinks(r)+(status==='Offen'?'<button class="btn success" onclick="markRegieBilled(\''+esc(r.id)+'\')">Als abgerechnet markieren</button>':'')+'</div>'+(status==='Abgerechnet'?'<div class="status info">Abgerechnet am '+esc(r.billedAt||'')+' von '+esc(r.billedBy||'')+'</div>':'')+'</div>').join('')||'<div class="status ok">Keine '+(status==='Offen'?'offenen':'abgerechneten')+' Regieberichte für diese Auswahl.</div>';
-    setMessage('regieStatus',(rows||[]).length+' Bericht(e) geladen.','ok');
+    const groups=await api(chefPayload({action:'getRegieReports',status,year,month}));window.__regieStatus=status;
+    $('regieResult').innerHTML=(groups||[]).map((g,gi)=>{
+      const employeeText=(g.employees||[]).join(', ');
+      const range=g.firstDate===g.lastDate?formatDateDE(g.firstDate):(formatDateDE(g.firstDate)+' bis '+formatDateDE(g.lastDate));
+      const reports=(g.reports||[]).map(r=>'<div class="entry"><strong>'+formatDateDE(r.date)+' · '+esc(r.employee)+' · '+formatHours(r.hours)+' Std.</strong><div class="report-meta">'+esc(r.start)+'–'+esc(r.end)+'</div><div>'+esc(r.activity||'')+'</div>'+(r.materialUsed?'<div class="report-meta"><strong>Material:</strong> '+esc(r.material||'')+'</div>':'')+'<div class="report-actions">'+reportLinks(r)+'</div></div>').join('');
+      return '<div class="report-card '+(status==='Offen'?'open':'billed')+'"><strong>🏢 '+esc(g.customer||'Objekt')+'</strong><div class="report-meta">'+range+' · '+Number(g.reportCount||0)+' Bericht(e)</div><div class="total" style="margin:10px 0">Gesamt Personal: '+formatHours(g.totalHours)+' Std.</div><div class="report-meta"><strong>Mitarbeiter:</strong> '+esc(employeeText||'–')+'</div><details style="margin-top:10px"><summary>Einzelberichte anzeigen</summary>'+reports+'</details><div class="report-actions">'+(status==='Offen'?'<button class="btn success" onclick="markRegieObjectBilled(\''+esc(g.objectId)+'\')">Objekt als abgerechnet markieren</button>':'')+'</div>'+(status==='Abgerechnet'?'<div class="status info">Abgerechnet am '+esc(g.billedAt||'')+' von '+esc(g.billedBy||'')+'</div>':'')+'</div>';
+    }).join('')||'<div class="status ok">Keine '+(status==='Offen'?'offenen':'abgerechneten')+' Regieberichte für diese Auswahl.</div>';
+    setMessage('regieStatus',(groups||[]).length+' Objekt(e) geladen.','ok');
   }catch(e){$('regieResult').innerHTML='';setMessage('regieStatus',e.message,'error')}
 }
-async function markRegieBilled(entryId){
-  if(!confirm('Diesen Auftrag wirklich als abgerechnet markieren? Eingeloggter Chef und aktueller Zeitpunkt werden automatisch gespeichert.'))return;
-  try{await api(chefPayload({action:'markRegieReportBilled',entryId}));setMessage('regieStatus','✅ Auftrag als abgerechnet markiert.','ok');await loadRegieReports('Offen')}catch(e){setMessage('regieStatus',e.message,'error')}
+async function markRegieObjectBilled(objectId){
+  if(!objectId){setMessage('regieStatus','Objekt-ID fehlt. Bitte Regieberichte neu laden.','error');return}
+  if(!confirm('Alle offenen Regieberichte dieses Objekts wirklich als abgerechnet markieren? Eingeloggter Chef und aktueller Zeitpunkt werden automatisch gespeichert.'))return;
+  try{const r=await api(chefPayload({action:'markRegieObjectBilled',objectId}));setMessage('regieStatus','✅ '+Number(r.count||0)+' Bericht(e) des Objekts als abgerechnet markiert.','ok');await loadRegieReports('Offen')}catch(e){setMessage('regieStatus',e.message,'error')}
 }
 
 function parseDecimalInput(value){const n=Number(String(value==null?'':value).trim().replace(',','.'));return Number.isFinite(n)?n:NaN}
@@ -831,7 +772,7 @@ function initEnterSupport(){
 }
 
 function fillMonths(id){const n=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];$(id).innerHTML=n.map((x,i)=>'<option value="'+(i+1)+'">'+x+'</option>').join('')}
-function init(){initEnterSupport();fillMonths('empMonth');fillMonths('bossMonth');fillMonths('regieMonth');$('regieMonth').insertAdjacentHTML('afterbegin','<option value="0">Alle Monate</option>');const d=new Date();loadEmployeeDirectory();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('regieYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);$('regieMonth').value=String(d.getMonth()+1);$('holidayYear').value=d.getFullYear();if($('vacationYear'))$('vacationYear').value=d.getFullYear();$('absenceStart').value=localDate();$('absenceEnd').value=localDate();clearEmployeeAdminForm();customerPad=initPad('customerSignature');employeePad=initPad('employeeSignature');toggleMaterial();toggleAdditionalEmployees();togglePhotos();updateConnection();const a=auth();if(a.employee&&a.pin)openMain();else $('loginScreen').classList.remove('hidden');if(navigator.onLine)syncQueue()}
+function init(){initEnterSupport();fillMonths('empMonth');fillMonths('bossMonth');fillMonths('regieMonth');$('regieMonth').insertAdjacentHTML('afterbegin','<option value="0">Alle Monate</option>');const d=new Date();loadEmployeeDirectory();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('regieYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);$('regieMonth').value=String(d.getMonth()+1);$('holidayYear').value=d.getFullYear();if($('vacationYear'))$('vacationYear').value=d.getFullYear();$('absenceStart').value=localDate();$('absenceEnd').value=localDate();clearEmployeeAdminForm();customerPad=initPad('customerSignature');employeePad=initPad('employeeSignature');toggleMaterial();togglePhotos();updateConnection();const a=auth();if(a.employee&&a.pin)openMain();else $('loginScreen').classList.remove('hidden');if(navigator.onLine)syncQueue()}
 if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));
 window.addEventListener('load',init);
 </script>
