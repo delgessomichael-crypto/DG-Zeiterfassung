@@ -1,15 +1,24 @@
-const CACHE_NAME = 'dg-zeiterfassung-v28';
+const CACHE_NAME = 'dg-zeiterfassung-v29';
 const APP_SHELL = ['./', './index.html', './manifest.json', './dg_icon_192.png', './dg_icon_512.png'];
 
 self.addEventListener('install', event => {
   self.skipWaiting();
-  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL).catch(() => {})));
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(cache => cache.addAll(APP_SHELL).catch(() => {}))
+  );
 });
 
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)));
+
+    await Promise.all(
+      keys
+        .filter(k => k !== CACHE_NAME)
+        .map(k => caches.delete(k))
+    );
+
     await self.clients.claim();
   })());
 });
@@ -19,7 +28,9 @@ self.addEventListener('fetch', event => {
 
   event.respondWith((async () => {
     try {
-      const response = await fetch(event.request, { cache: 'no-store' });
+      const response = await fetch(event.request, {
+        cache: 'no-store'
+      });
 
       if (response && response.ok) {
         const cache = await caches.open(CACHE_NAME);
@@ -27,13 +38,18 @@ self.addEventListener('fetch', event => {
       }
 
       return response;
+
     } catch (err) {
+
       const cached = await caches.match(event.request);
 
       if (cached) return cached;
 
       if (event.request.mode === 'navigate') {
-        return (await caches.match('./index.html')) || (await caches.match('./'));
+        return (
+          (await caches.match('./index.html')) ||
+          (await caches.match('./'))
+        );
       }
 
       throw err;
