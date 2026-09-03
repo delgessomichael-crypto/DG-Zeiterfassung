@@ -59,7 +59,7 @@
   <div class="login-wrap">
     <div class="login-card">
       <img class="logo" src="dg_icon_512.png" alt="Del Gesso Gebäudetechnik">
-      <h2 class="center">Mitarbeiter-Anmeldung</h2><div class="center muted small" style="margin-top:-8px;margin-bottom:10px">Version 28</div>
+      <h2 class="center">Mitarbeiter-Anmeldung</h2><div class="center muted small" style="margin-top:-8px;margin-bottom:10px">Version 29</div>
       <div id="loginNet" class="status"></div>
       <label for="loginEmployee">Mitarbeiter</label>
       <select id="loginEmployee" onkeydown="loginEnter(event)"><option value="">Mitarbeiter werden geladen ...</option></select>
@@ -78,7 +78,7 @@
 
     <div class="hero">
       <img class="logo" src="dg_icon_512.png" alt="Del Gesso Gebäudetechnik">
-      <div class="head-row"><div><strong>Zeiterfassung · v28</strong><br><span id="employeeLabel"></span></div><button class="btn secondary" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
+      <div class="head-row"><div><strong>Zeiterfassung · v29</strong><br><span id="employeeLabel"></span></div><button class="btn secondary" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
     </div>
 
     <div class="tabs"><button id="employeeTab" class="tab active" onclick="showEmployee()">Mitarbeiter</button><button id="bossTab" class="tab" onclick="showBoss()">Büro / Chef</button></div>
@@ -601,13 +601,13 @@ async function saveEntry(){
   if(materialUsed&&!material){setMessage('entryStatus','Bitte Material eintragen.','error');return}
 
 
-  const entry={clientId:uid(),employee:a.employee,employeePin:a.pin,date,customer,start:startTime,end:endTime,startMinutes,endMinutes,hours,activity,syncCalendar:false,materialUsed,material,additionalEmployeesUsed:false,additionalEmployees:[],additionalEmployeeHours:[],photos:preparedPhotos.slice(),customerSignature:noCustomerPresent?'':customerPad.dataUrl(),sourceCalendarEventId:selectedCalendarEventId,replacementAssignmentId:selectedAssignmentId};
+  const entry={clientId:uid(),employee:a.employee,employeePin:a.pin,date,customer,start:startTime,end:endTime,startMinutes,endMinutes,hours,activity,syncCalendar:false,materialUsed,material,additionalEmployeesUsed:false,additionalEmployees:[],additionalEmployeeHours:[],photos:preparedPhotos.slice(),customerSignature:noCustomerPresent?'':customerPad.dataUrl(),sourceCalendarEventId:selectedCalendarEventId,replacementAssignmentId:''};
   const item={type:'saveEntry',createdAt:Date.now(),payload:{action:'saveEntry',employee:a.employee,pin:a.pin,entry}};
   if(!navigator.onLine){await queuePut(item);setMessage('entryStatus','🟠 Offline gespeichert. Automatische Übertragung folgt bei Internetverbindung.','warn');resetEntry();await refreshQueueCount();return}
   try{setMessage('entryStatus','Eintrag wird übertragen ...','info');const day=await api(item.payload);lastDayData=day;renderDay();resetEntry();await loadCalendarEvents();setMessage('entryStatus','✅ Eintrag gespeichert. Der Auftrag steht jetzt im Chefbereich unter Regieberichte.','ok')}catch(e){await queuePut(item);setMessage('entryStatus','🟠 Verbindung fehlgeschlagen. Auftrag wurde sicher offline vorgemerkt.','warn');resetEntry();await refreshQueueCount()}
 }
 
-function resetEntry(){stopCamera();selectedCalendarEventId='';selectedAssignmentId='';$('customer').value='';$('start').value='';$('end').value='';$('hours').value='';$('activity').value='';document.querySelector('input[name="materialUsed"][value="no"]').checked=true;toggleMaterial();document.querySelector('input[name="photosUsed"][value="no"]').checked=true;togglePhotos();clearCustomerSignature();noCustomerPresent=false}
+function resetEntry(){stopCamera();selectedCalendarEventId='';$('customer').value='';$('start').value='';$('end').value='';$('hours').value='';$('activity').value='';document.querySelector('input[name="materialUsed"][value="no"]').checked=true;toggleMaterial();document.querySelector('input[name="photosUsed"][value="no"]').checked=true;togglePhotos();clearCustomerSignature();noCustomerPresent=false}
 
 async function loadDay(){const a=auth(),date=$('date').value;if(!a.employee||!date)return;if(!navigator.onLine){const cached=localStorage.getItem('dg_day_'+a.employee+'_'+date);if(cached){lastDayData=JSON.parse(cached);renderDay()}return}try{lastDayData=await api({action:'getDayData',employee:a.employee,pin:a.pin,date});localStorage.setItem('dg_day_'+a.employee+'_'+date,JSON.stringify(lastDayData));renderDay()}catch(e){setMessage('entryStatus',e.message,'error')}}
 function renderDay(){
