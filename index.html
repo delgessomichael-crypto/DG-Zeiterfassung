@@ -59,7 +59,7 @@
   <div class="login-wrap">
     <div class="login-card">
       <img class="logo" src="dg_icon_512.png" alt="Del Gesso Gebäudetechnik">
-      <h2 class="center">Mitarbeiter-Anmeldung</h2>
+      <h2 class="center">Mitarbeiter-Anmeldung</h2><div class="center muted small" style="margin-top:-8px;margin-bottom:10px">Version 28</div>
       <div id="loginNet" class="status"></div>
       <label for="loginEmployee">Mitarbeiter</label>
       <select id="loginEmployee" onkeydown="loginEnter(event)"><option value="">Mitarbeiter werden geladen ...</option></select>
@@ -78,7 +78,7 @@
 
     <div class="hero">
       <img class="logo" src="dg_icon_512.png" alt="Del Gesso Gebäudetechnik">
-      <div class="head-row"><div><strong>Zeiterfassung</strong><br><span id="employeeLabel"></span></div><button class="btn secondary" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
+      <div class="head-row"><div><strong>Zeiterfassung · v28</strong><br><span id="employeeLabel"></span></div><button class="btn secondary" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
     </div>
 
     <div class="tabs"><button id="employeeTab" class="tab active" onclick="showEmployee()">Mitarbeiter</button><button id="bossTab" class="tab" onclick="showBoss()">Büro / Chef</button></div>
@@ -600,17 +600,6 @@ async function saveEntry(){
   if(!activity){setMessage('entryStatus','Bitte die ausgeführte Tätigkeit eintragen.','error');return}
   if(materialUsed&&!material){setMessage('entryStatus','Bitte Material eintragen.','error');return}
 
-  if(navigator.onLine&&!selectedAssignmentId){
-    try{
-      const check=await api({action:'checkEntryConflict',employee:a.employee,pin:a.pin,date,customer,start:startTime,end:endTime});
-      const conflicts=(check&&check.conflicts)||[];
-      if(conflicts.length){
-        const c=conflicts[0];
-        setMessage('entryStatus','Für diesen Zeitraum sind bereits Stunden vorhanden: '+(c.customer||'Eintrag')+' '+(c.start||'')+'-'+(c.end||'')+'. Bitte den vorhandenen Mitarbeit-Eintrag unten verwenden.','warn');
-        return;
-      }
-    }catch(e){setMessage('entryStatus','Konfliktprüfung nicht möglich: '+e.message,'warn');return}
-  }
 
   const entry={clientId:uid(),employee:a.employee,employeePin:a.pin,date,customer,start:startTime,end:endTime,startMinutes,endMinutes,hours,activity,syncCalendar:false,materialUsed,material,additionalEmployeesUsed:false,additionalEmployees:[],additionalEmployeeHours:[],photos:preparedPhotos.slice(),customerSignature:noCustomerPresent?'':customerPad.dataUrl(),sourceCalendarEventId:selectedCalendarEventId,replacementAssignmentId:selectedAssignmentId};
   const item={type:'saveEntry',createdAt:Date.now(),payload:{action:'saveEntry',employee:a.employee,pin:a.pin,entry}};
@@ -791,7 +780,7 @@ function initEnterSupport(){
 
 function fillMonths(id){const n=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];$(id).innerHTML=n.map((x,i)=>'<option value="'+(i+1)+'">'+x+'</option>').join('')}
 function init(){initEnterSupport();fillMonths('empMonth');fillMonths('bossMonth');fillMonths('regieMonth');$('regieMonth').insertAdjacentHTML('afterbegin','<option value="0">Alle Monate</option>');const d=new Date();loadEmployeeDirectory();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('regieYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);$('regieMonth').value=String(d.getMonth()+1);$('holidayYear').value=d.getFullYear();if($('vacationYear'))$('vacationYear').value=d.getFullYear();$('absenceStart').value=localDate();$('absenceEnd').value=localDate();clearEmployeeAdminForm();customerPad=initPad('customerSignature');employeePad=initPad('employeeSignature');toggleMaterial();togglePhotos();updateConnection();const a=auth();if(a.employee&&a.pin)openMain();else $('loginScreen').classList.remove('hidden');if(navigator.onLine)syncQueue()}
-if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));
+if('serviceWorker'in navigator)window.addEventListener('load',async()=>{try{const reg=await navigator.serviceWorker.register('./sw.js?v=28',{updateViaCache:'none'});await reg.update()}catch(e){console.log('Service Worker Update:',e)}});
 window.addEventListener('load',init);
 </script>
 </body>
