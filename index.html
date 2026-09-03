@@ -10,7 +10,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="dg_icon_192.png">
   <link rel="apple-touch-icon" href="dg_icon_192.png">
-  <title>DG Zeiterfassung v24</title>
+  <title>DG Zeiterfassung v26</title>
   <style>
     :root{--brand:#0057a8;--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#111827;--ok:#166534;--okbg:#dcfce7;--warn:#9a3412;--warnbg:#ffedd5;--err:#991b1b;--errbg:#fee2e2}
     *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}
@@ -43,6 +43,14 @@
     .camera-live{margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:12px;background:#111827}.camera-live video{width:100%;max-height:420px;border-radius:10px;background:#000}.report-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.report-actions .btn{width:auto}.report-meta{font-size:13px;color:var(--muted);margin-top:5px}.report-card{border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin-top:10px}.report-card.open{border-left:5px solid #166534}.report-card.billed{border-left:5px solid #b91c1c}.weekday-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.weekday-grid label{font-size:12px}.admin-actions{display:flex;gap:8px;flex-wrap:wrap}.admin-actions .btn{width:auto}.badge{display:inline-block;padding:3px 8px;border-radius:999px;background:#e5e7eb;font-size:12px;font-weight:700}.admin-section{border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-top:14px}.admin-section h3{margin:0 0 8px}.save-bar{position:sticky;bottom:8px;background:#fff;padding-top:10px;z-index:5}.sum-box{margin-top:10px;padding:10px;border-radius:10px;background:#f3f4f6;font-weight:700}.field-hint{font-size:12px;color:var(--muted);margin-top:5px}
 
     .boss-compact-head,.boss-compact-row{display:grid;grid-template-columns:minmax(150px,1.5fr) repeat(3,minmax(80px,.8fr)) 48px minmax(100px,.8fr);gap:8px;align-items:center}.boss-compact-head{font-size:12px;font-weight:800;color:var(--muted);padding:0 8px 7px}.boss-compact-row{padding:11px 8px;border-top:1px solid #e5e7eb}.boss-compact-value{text-align:right;font-weight:800}.traffic{font-size:20px;text-align:center}.detail-toolbar{position:sticky;top:0;z-index:8;background:#fff;padding:8px 0;border-bottom:1px solid #e5e7eb;margin-bottom:10px}.detail-toolbar-inner{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}.detail-nav{display:flex;gap:8px;flex-wrap:wrap}.detail-nav .btn{width:auto}.action-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}.action-tabs .btn{width:auto;padding:10px}.object-summary{padding:12px;border-radius:12px;background:#f3f4f6;margin:10px 0}.filter-row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.filter-row .btn{width:auto;padding:10px}.filter-row .active{background:var(--brand);color:#fff}.closure-badge{display:inline-block;padding:4px 8px;border-radius:999px;font-weight:800;font-size:12px;background:#e5e7eb}.closure-badge.closed{background:#dcfce7;color:#166534}.day-balance{padding:12px;border-radius:12px;font-size:18px;font-weight:800;margin:12px 0}.day-balance.good{background:#dcfce7;color:#166534}.day-balance.bad{background:#fee2e2;color:#991b1b}.timebank-box{padding:12px;border-radius:12px;background:#e0f2fe;color:#075985;font-weight:800;margin:10px 0}
+
+    .photo-preview-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin-top:12px}
+    .photo-preview-item{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#f9fafb;aspect-ratio:4/3}
+    .photo-preview-item img{width:100%;height:100%;object-fit:cover;display:block}
+    .photo-preview-remove{position:absolute;right:5px;top:5px;border:0;border-radius:999px;width:32px;height:32px;font-weight:900;background:rgba(17,24,39,.88);color:#fff}
+    .signature-wrap{position:relative}.signature-wrap canvas{pointer-events:none}.signature-wrap.active canvas{pointer-events:auto}
+    .signature-lock{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:18px;border-radius:12px;background:rgba(243,244,246,.92);border:2px dashed #93c5fd;color:#1d4ed8;font-weight:800;z-index:2;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+    .signature-wrap.active .signature-lock{display:none}.signature-hint{font-size:12px;color:var(--muted);margin-top:5px}
     @media(max-width:700px){.boss-compact-head,.boss-compact-row{grid-template-columns:minmax(105px,1.4fr) repeat(3,minmax(55px,.7fr)) 30px minmax(72px,.8fr);gap:4px;font-size:11px}.boss-compact-value{font-size:12px}.grid2,.button-row,.tabs,.admin-grid{grid-template-columns:1fr}.weekday-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.screen{padding:9px}.head-row{align-items:flex-start;flex-direction:column}.head-row button{width:100%}.radio-row{grid-template-columns:minmax(125px,1fr) 64px 64px;gap:5px}.radio-row label{white-space:nowrap}.additional-hours-row{grid-template-columns:1fr 95px}.boss-month-head,.boss-month-row{grid-template-columns:minmax(120px,1.25fr) repeat(3,minmax(76px,.8fr));gap:5px}.boss-month-head{font-size:11px;padding-left:4px;padding-right:4px}.boss-month-row{padding-left:4px;padding-right:4px}.boss-month-value{font-size:15px}.adjustment-grid{grid-template-columns:1fr 1fr}.adjustment-grid .btn{width:100%}.adjustment-item{align-items:flex-start;flex-direction:column}}
   </style>
 </head>
@@ -121,14 +129,14 @@
           <div id="cameraLive" class="camera-live hidden"><video id="cameraVideo" autoplay playsinline muted></video><div class="button-row" style="margin-top:8px"><button type="button" class="btn success" onclick="captureCameraPhoto()">📸 Foto aufnehmen</button><button type="button" class="btn secondary" onclick="stopCamera()">Kamera schließen</button></div></div>
           <input id="cameraPhoto" class="hidden" type="file" accept="image/*" capture="environment" onchange="addPhotos(this.files,'cameraPhoto')">
           <input id="galleryPhotos" class="hidden" type="file" accept="image/*" multiple onchange="addPhotos(this.files,'galleryPhotos')">
-          <div id="photoStatus" class="muted small">Noch keine Bilder hinzugefügt.</div><button id="clearPhotosBtn" type="button" class="btn secondary hidden" style="width:100%;margin-top:8px" onclick="clearPhotos()">Bilder entfernen</button>
+          <div id="photoStatus" class="muted small">Noch keine Bilder hinzugefügt.</div><div id="photoPreview" class="photo-preview-grid"></div><button id="clearPhotosBtn" type="button" class="btn secondary hidden" style="width:100%;margin-top:8px" onclick="clearPhotos()">Bilder entfernen</button>
         </div>
 
         <div class="radio-row"><strong>Material verbaut?</strong><label><input type="radio" name="materialUsed" value="no" checked onchange="toggleMaterial()">Nein</label><label><input type="radio" name="materialUsed" value="yes" onchange="toggleMaterial()">Ja</label></div>
         <div id="materialBox" class="hidden"><label for="material">Verbautes Material</label><textarea id="material" placeholder="Menge und Bezeichnung"></textarea></div>
 
         <h3 style="margin-top:20px">Kundenunterschrift</h3><div class="muted small">Bei vorhandener Unterschrift wird der Auftrag nach der Übertragung automatisch ans Büro gesendet.</div>
-        <canvas id="customerSignature"></canvas>
+        <div id="customerSignatureWrap" class="signature-wrap"><canvas id="customerSignature"></canvas><div class="signature-lock">Zum Unterschreiben zweimal tippen</div></div><div class="signature-hint">Beim Scrollen bleibt das Feld gesperrt.</div>
         <div class="button-row"><button class="btn secondary" onclick="clearCustomerSignature()">Unterschrift löschen</button><button class="btn secondary" onclick="markNoCustomer()">Kein Kunde vor Ort</button></div>
         <button class="btn primary" style="width:100%;margin-top:14px" data-enter-default onclick="saveEntry()">Eintrag speichern</button><div id="entryStatus"></div>
       </div>
@@ -144,8 +152,8 @@
           <option value="2.00">2,00 Std.</option><option value="2.25">2,25 Std.</option><option value="2.50">2,50 Std.</option><option value="2.75">2,75 Std.</option><option value="3.00">3,00 Std.</option>
         </select>
         <div id="netTotal" class="total">Arbeitszeit netto: 0,00 Std.</div>
-        <h3>Mitarbeiter-Unterschrift</h3><canvas id="employeeSignature"></canvas>
-        <div class="button-row"><button class="btn secondary" onclick="employeePad.clear()">Unterschrift löschen</button><button class="btn success" onclick="closeDay()">Tag abschließen & E-Mail senden</button></div><div id="closeStatus"></div>
+        <h3>Mitarbeiter-Unterschrift</h3><div id="employeeSignatureWrap" class="signature-wrap"><canvas id="employeeSignature"></canvas><div class="signature-lock">Zum Unterschreiben zweimal tippen</div></div><div class="signature-hint">Beim Scrollen bleibt das Feld gesperrt.</div>
+        <div class="button-row"><button class="btn secondary" onclick="clearEmployeeSignature()">Unterschrift löschen</button><button class="btn success" onclick="closeDay()">Tag abschließen</button></div><div id="closeStatus"></div>
       </div>
 
       <div class="card">
@@ -546,11 +554,15 @@ function openNavigation(location){
   window.open('https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(location),'_blank');
 }
 
-function calculateHours(){const s=$('start').value,e=$('end').value;if(!s||!e){$('hours').value='';return}const a=s.split(':').map(Number),b=e.split(':').map(Number);let sm=a[0]*60+a[1],em=b[0]*60+b[1];if(em<sm)em+=1440;const mins=em-sm;$('hours').value=mins>0?(mins/60).toFixed(2):''}
+function parseTimeMinutes(value){const m=String(value||'').trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);if(!m)return null;const h=Number(m[1]),min=Number(m[2]);if(h<0||h>23||min<0||min>59)return null;return h*60+min}
+function normalizeTimeInput(value){const mins=parseTimeMinutes(value);if(mins===null)return '';return String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0')}
+function calculateHours(){const s=normalizeTimeInput($('start').value),e=normalizeTimeInput($('end').value);if(!s||!e){$('hours').value='';return 0}$('start').value=s;$('end').value=e;let sm=parseTimeMinutes(s),em=parseTimeMinutes(e);if(em<=sm)em+=1440;const mins=em-sm,h=mins>0&&mins<=1440?mins/60:0;$('hours').value=h>0?h.toFixed(2):'';return h}
 function toggleMaterial(){const yes=document.querySelector('input[name="materialUsed"]:checked').value==='yes';$('materialBox').classList.toggle('hidden',!yes);if(!yes)$('material').value=''}
 
 function togglePhotos(){const yes=document.querySelector('input[name="photosUsed"]:checked').value==='yes';$('photoBox').classList.toggle('hidden',!yes);if(!yes){stopCamera();clearPhotos()}}
-function updatePhotoStatus(){$('photoStatus').textContent=preparedPhotos.length?preparedPhotos.length+' von 6 Bild(ern) bereit. Du kannst direkt weitere Fotos aufnehmen.':'Noch keine Bilder hinzugefügt.';$('clearPhotosBtn').classList.toggle('hidden',preparedPhotos.length===0)}
+function renderPhotoPreview(){const box=$('photoPreview');if(!box)return;box.innerHTML=preparedPhotos.map((p,i)=>'<div class="photo-preview-item"><img src="'+p.dataUrl+'" alt="Foto '+(i+1)+'"><button type="button" class="photo-preview-remove" onclick="removePreparedPhoto('+i+')">×</button></div>').join('')}
+function updatePhotoStatus(){$('photoStatus').textContent=preparedPhotos.length?preparedPhotos.length+' von 6 Bild(ern) bereit. Bitte Vorschau kontrollieren.':'Noch keine Bilder hinzugefügt.';$('clearPhotosBtn').classList.toggle('hidden',preparedPhotos.length===0);renderPhotoPreview()}
+function removePreparedPhoto(i){preparedPhotos.splice(i,1);updatePhotoStatus()}
 function clearPhotos(){preparedPhotos=[];$('cameraPhoto').value='';$('galleryPhotos').value='';updatePhotoStatus()}
 async function startCamera(){
   if(preparedPhotos.length>=6){setMessage('entryStatus','Maximal 6 Bilder möglich.','warn');return}
@@ -570,21 +582,23 @@ function captureCameraPhoto(){
 async function addPhotos(files,inputId){const remaining=6-preparedPhotos.length;if(remaining<=0)return;const list=Array.from(files||[]).slice(0,remaining);$('photoStatus').textContent='Bilder werden vorbereitet ...';try{for(const f of list)preparedPhotos.push({dataUrl:await resizeImage(f)});updatePhotoStatus()}catch(e){$('photoStatus').textContent='Bild konnte nicht vorbereitet werden.'}$(inputId).value=''}
 function resizeImage(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onerror=reject;r.onload=()=>{const img=new Image();img.onerror=reject;img.onload=()=>{const max=1200;let w=img.width,h=img.height;if(w>max||h>max){const f=Math.min(max/w,max/h);w=Math.round(w*f);h=Math.round(h*f)}const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);resolve(c.toDataURL('image/jpeg',0.68))};img.src=r.result};r.readAsDataURL(file)})}
 
-function initPad(id){const canvas=$(id),ctx=canvas.getContext('2d');let drawing=false,signed=false;function resize(){const ratio=devicePixelRatio||1,rect=canvas.getBoundingClientRect();canvas.width=Math.max(1,Math.round(rect.width*ratio));canvas.height=Math.round(180*ratio);ctx.setTransform(ratio,0,0,ratio,0,0);ctx.lineWidth=2;ctx.lineCap='round';ctx.strokeStyle='#111827'}function pt(ev){const r=canvas.getBoundingClientRect(),s=ev.touches?ev.touches[0]:ev;return{x:s.clientX-r.left,y:s.clientY-r.top}}function start(ev){drawing=true;signed=true;const p=pt(ev);ctx.beginPath();ctx.moveTo(p.x,p.y);ev.preventDefault()}function move(ev){if(!drawing)return;const p=pt(ev);ctx.lineTo(p.x,p.y);ctx.stroke();ev.preventDefault()}function end(ev){drawing=false;if(ev)ev.preventDefault()}canvas.addEventListener('mousedown',start);canvas.addEventListener('mousemove',move);window.addEventListener('mouseup',end);canvas.addEventListener('touchstart',start,{passive:false});canvas.addEventListener('touchmove',move,{passive:false});canvas.addEventListener('touchend',end,{passive:false});resize();return{resize,clear(){ctx.clearRect(0,0,canvas.getBoundingClientRect().width,180);signed=false},hasSignature(){return signed},dataUrl(){return signed?canvas.toDataURL('image/png'):''}}}
+function initPad(id){const canvas=$(id),ctx=canvas.getContext('2d'),wrap=$(id+'Wrap');let drawing=false,signed=false,active=false,lastTap=0;function setActive(v){active=!!v;if(wrap)wrap.classList.toggle('active',active)}function resize(){const ratio=devicePixelRatio||1,rect=canvas.getBoundingClientRect();canvas.width=Math.max(1,Math.round(rect.width*ratio));canvas.height=Math.round(180*ratio);ctx.setTransform(ratio,0,0,ratio,0,0);ctx.lineWidth=2;ctx.lineCap='round';ctx.strokeStyle='#111827'}function pt(ev){const r=canvas.getBoundingClientRect(),p=ev.touches?ev.touches[0]:ev;return{x:p.clientX-r.left,y:p.clientY-r.top}}function start(ev){if(!active)return;drawing=true;signed=true;const p=pt(ev);ctx.beginPath();ctx.moveTo(p.x,p.y);ev.preventDefault()}function move(ev){if(!drawing||!active)return;const p=pt(ev);ctx.lineTo(p.x,p.y);ctx.stroke();ev.preventDefault()}function end(ev){if(!drawing)return;drawing=false;if(ev)ev.preventDefault()}canvas.addEventListener('mousedown',start);canvas.addEventListener('mousemove',move);window.addEventListener('mouseup',end);canvas.addEventListener('touchstart',start,{passive:false});canvas.addEventListener('touchmove',move,{passive:false});canvas.addEventListener('touchend',end,{passive:false});if(wrap){const lock=wrap.querySelector('.signature-lock');const tap=ev=>{const now=Date.now();if(ev.type==='dblclick'||now-lastTap<550){setActive(true);lastTap=0;if(ev.preventDefault)ev.preventDefault()}else lastTap=now};lock.addEventListener('dblclick',tap);lock.addEventListener('touchend',tap,{passive:false});lock.addEventListener('click',tap)}resize();setActive(false);return{resize,lock(){setActive(false)},clear(){ctx.clearRect(0,0,canvas.getBoundingClientRect().width,180);signed=false;setActive(false)},hasSignature(){return signed},dataUrl(){return signed?canvas.toDataURL('image/png'):''}}}
 function clearCustomerSignature(){customerPad.clear();noCustomerPresent=false}
+function clearEmployeeSignature(){employeePad.clear()}
 function markNoCustomer(){customerPad.clear();noCustomerPresent=true;setMessage('entryStatus','Kundenunterschrift wird ausgelassen.','info')}
 
 async function saveEntry(){
-  const a=auth(),date=$('date').value,customer=$('customer').value.trim(),activity=$('activity').value.trim(),hours=Number($('hours').value),materialUsed=document.querySelector('input[name="materialUsed"]:checked').value==='yes',material=$('material').value.trim();
+  const a=auth(),date=$('date').value,customer=$('customer').value.trim(),activity=$('activity').value.trim(),materialUsed=document.querySelector('input[name="materialUsed"]:checked').value==='yes',material=$('material').value.trim();const startTime=normalizeTimeInput($('start').value),endTime=normalizeTimeInput($('end').value);
   if(!customer){setMessage('entryStatus','Bitte Kunde / Baustelle eintragen.','error');return}
-  if(!$('start').value||!$('end').value){setMessage('entryStatus','Von und Bis müssen ausgefüllt werden.','error');return}
-  if(!(hours>0)){setMessage('entryStatus','Arbeitszeit konnte nicht berechnet werden.','error');return}
+  if(!startTime||!endTime){setMessage('entryStatus','Bitte gültige Von-/Bis-Zeit eintragen.','error');return}
+  $('start').value=startTime;$('end').value=endTime;const hours=calculateHours();
+  if(!(hours>0&&hours<=24)){setMessage('entryStatus','Arbeitszeit konnte nicht berechnet werden. Bitte Von/Bis prüfen.','error');return}
   if(!activity){setMessage('entryStatus','Bitte die ausgeführte Tätigkeit eintragen.','error');return}
   if(materialUsed&&!material){setMessage('entryStatus','Bitte Material eintragen.','error');return}
 
   if(navigator.onLine&&!selectedAssignmentId){
     try{
-      const check=await api({action:'checkEntryConflict',employee:a.employee,pin:a.pin,date,customer,start:$('start').value,end:$('end').value});
+      const check=await api({action:'checkEntryConflict',employee:a.employee,pin:a.pin,date,customer,start:startTime,end:endTime});
       const conflicts=(check&&check.conflicts)||[];
       if(conflicts.length){
         const c=conflicts[0];
@@ -594,7 +608,7 @@ async function saveEntry(){
     }catch(e){setMessage('entryStatus','Konfliktprüfung nicht möglich: '+e.message,'warn');return}
   }
 
-  const entry={clientId:uid(),employee:a.employee,employeePin:a.pin,date,customer,start:$('start').value,end:$('end').value,hours,activity,syncCalendar:false,materialUsed,material,additionalEmployeesUsed:false,additionalEmployees:[],additionalEmployeeHours:[],photos:preparedPhotos.slice(),customerSignature:noCustomerPresent?'':customerPad.dataUrl(),sourceCalendarEventId:selectedCalendarEventId,replacementAssignmentId:selectedAssignmentId};
+  const entry={clientId:uid(),employee:a.employee,employeePin:a.pin,date,customer,start:startTime,end:endTime,hours,activity,syncCalendar:false,materialUsed,material,additionalEmployeesUsed:false,additionalEmployees:[],additionalEmployeeHours:[],photos:preparedPhotos.slice(),customerSignature:noCustomerPresent?'':customerPad.dataUrl(),sourceCalendarEventId:selectedCalendarEventId,replacementAssignmentId:selectedAssignmentId};
   const item={type:'saveEntry',createdAt:Date.now(),payload:{action:'saveEntry',employee:a.employee,pin:a.pin,entry}};
   if(!navigator.onLine){await queuePut(item);setMessage('entryStatus','🟠 Offline gespeichert. Automatische Übertragung folgt bei Internetverbindung.','warn');resetEntry();await refreshQueueCount();return}
   try{setMessage('entryStatus','Eintrag wird übertragen ...','info');const day=await api(item.payload);lastDayData=day;renderDay();resetEntry();await loadCalendarEvents();setMessage('entryStatus','✅ Eintrag gespeichert. Der Auftrag steht jetzt im Chefbereich unter Regieberichte.','ok')}catch(e){await queuePut(item);setMessage('entryStatus','🟠 Verbindung fehlgeschlagen. Auftrag wurde sicher offline vorgemerkt.','warn');resetEntry();await refreshQueueCount()}
