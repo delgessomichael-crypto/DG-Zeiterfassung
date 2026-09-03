@@ -87,7 +87,7 @@
 
     <div class="hero">
       <img class="logo" src="dg_icon_512.png" alt="Del Gesso Gebäudetechnik">
-      <div class="head-row"><div><strong>Zeiterfassung · v29</strong><br><span id="employeeLabel"></span></div><button class="btn secondary" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
+      <div class="head-row"><div><strong>Zeiterfassung · v30</strong><br><span id="employeeLabel"></span></div><button class="btn secondary" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
     </div>
 
     <div class="tabs"><button id="employeeTab" class="tab active" onclick="showEmployee()">Mitarbeiter</button><button id="bossTab" class="tab" onclick="showBoss()">Büro / Chef</button></div>
@@ -574,7 +574,7 @@ function openNavigation(location){
 function parseTimeMinutes(value){const m=String(value||'').trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);if(!m)return null;const h=Number(m[1]),min=Number(m[2]);if(h<0||h>23||min<0||min>59)return null;return h*60+min}
 function normalizeTimeInput(value){const mins=parseTimeMinutes(value);if(mins===null)return '';return String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0')}
 function timeInputMinutes(id){const el=$(id);if(!el)return null;const n=Number(el.valueAsNumber);if(Number.isFinite(n)&&n>=0)return Math.round(n/60000);return parseTimeMinutes(el.value)}
-function calculateHours(){const s=normalizeTimeInput($('start').value),e=normalizeTimeInput($('end').value);if(!s||!e){$('hours').value='';return 0}$('start').value=s;$('end').value=e;let sm=parseTimeMinutes(s),em=parseTimeMinutes(e);if(em<=sm)em+=1440;const mins=em-sm,h=mins>0&&mins<=1440?mins/60:0;$('hours').value=h>0?h.toFixed(2):'';return h}
+function calculateHours(){const s=normalizeTimeInput($('start').value),e=normalizeTimeInput($('end').value);if(!s||!e){$('hours').value='';return 0}$('start').value=s;$('end').value=e;let sm=parseTimeMinutes(s),em=parseTimeMinutes(e);if(em<=sm)em+=1440;const mins=em-sm,h=mins>0&&mins<=1440?mins/60:0;$('hours').value=h>0?h.toFixed(2):'';const status=$('entryStatus');if(h>0&&status&&status.textContent.includes('Termin übernommen. Tatsächliche Von/Bis-Zeit'))clearMessage('entryStatus');return h}
 function toggleMaterial(){const yes=document.querySelector('input[name="materialUsed"]:checked').value==='yes';$('materialBox').classList.toggle('hidden',!yes);if(!yes)$('material').value=''}
 
 function togglePhotos(){const yes=document.querySelector('input[name="photosUsed"]:checked').value==='yes';$('photoBox').classList.toggle('hidden',!yes);if(!yes){stopCamera();clearPhotos()}}
