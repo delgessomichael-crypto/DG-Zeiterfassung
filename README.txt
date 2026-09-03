@@ -1,17 +1,21 @@
-DG Zeiterfassung - PWA Schritt 2
+DG ZEITERFASSUNG - ARBEITSSTAND v25
+Stand: 03.09.2026
 
-Diese Dateien bilden die installierbare PWA-Hülle:
-- index.html
-- manifest.json
-- sw.js
-- dg_icon_192.png
-- dg_icon_512.png
+Aenderungen v25:
+- Auswahl "Weitere Mitarbeiter" aus der Mitarbeiteransicht entfernt.
+- Jeder Mitarbeiter erfasst kuenftig ausschliesslich seine eigenen Stunden.
+- Neue Eintraege erzeugen keine Mitarbeiterzuordnungen mehr.
+- Chefbereich Regieberichte gruppiert automatisch nach Objekt-ID.
+- Pro Objekt werden Gesamtstunden aller Mitarbeiter, beteiligte Mitarbeiter und Anzahl der Berichte angezeigt.
+- Einzelberichte bleiben aufklappbar mit Taetigkeit, Material, Bildern und Unterschrift.
+- "Objekt als abgerechnet markieren" markiert alle aktuell offenen Regieberichte dieses Objekts gemeinsam als abgerechnet.
+- Objekt-ID wird automatisch im Hintergrund vergeben; keine Eingabe durch Mitarbeiter notwendig.
+- Historische v22/v24 Mitarbeiterzuordnungen bleiben fuer alte Daten erhalten, werden aber fuer neue Eintraege nicht mehr erzeugt.
 
-WICHTIG:
-Diese PWA startet bereits offline und zeigt das Del-Gesso-Icon.
-Die produktive Zeiterfassungsmaske aus Google Apps Script ist noch NICHT eingebaut.
-Für vollständige Offline-Erfassung muss im nächsten Teil die bestehende Oberfläche
-in diese PWA übertragen und das Google-Apps-Script-Backend über eine geeignete
-Online-Schnittstelle angebunden werden.
-
-Die Dateien müssen über HTTPS auf einer normalen Webdomain gehostet werden.
+Installation:
+1. Code_FINAL_PWA_v25.txt komplett in Google Apps Script einsetzen.
+2. Speichern.
+3. updateExistingSheet() einmal ausfuehren (sicherer Migrationscheck).
+4. Bestehende Web-App-Bereitstellung auf eine neue Version aktualisieren.
+5. index.html im GitHub Repository ersetzen und committen.
+6. App mit ?v=25 neu laden.
