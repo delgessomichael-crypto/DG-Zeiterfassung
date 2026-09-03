@@ -59,7 +59,7 @@
   <div class="login-wrap">
     <div class="login-card">
       <img class="logo" src="dg_icon_512.png" alt="Del Gesso Gebäudetechnik">
-      <h2 class="center">Mitarbeiter-Anmeldung</h2><div class="center muted small" style="margin-top:-8px;margin-bottom:10px">Version 29</div>
+      <h2 class="center">Mitarbeiter-Anmeldung</h2><div class="center muted small" style="margin-top:-8px;margin-bottom:10px">Version 30</div>
       <div id="loginNet" class="status"></div>
       <label for="loginEmployee">Mitarbeiter</label>
       <select id="loginEmployee" onkeydown="loginEnter(event)"><option value="">Mitarbeiter werden geladen ...</option></select>
@@ -74,7 +74,16 @@
 <div id="mainScreen" class="screen hidden">
   <div class="app">
     <div id="connectionBar" class="status offlinebar"></div>
-    <div id="queueBar" class="status info queue hidden"><span id="queueText"></span><button class="btn secondary" onclick="syncQueue()">Jetzt übertragen</button></div>
+    <div id="queueBar" class="status warn queue hidden">
+      <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap">
+        <strong id="queueText"></strong>
+        <div class="button-row" style="margin:0">
+          <button class="btn secondary" type="button" onclick="toggleQueueDetails()">Details</button>
+          <button class="btn primary" type="button" onclick="syncQueue(true)">Alle jetzt übertragen</button>
+        </div>
+      </div>
+      <div id="queueDetails" class="hidden" style="margin-top:10px"></div>
+    </div>
 
     <div class="hero">
       <img class="logo" src="dg_icon_512.png" alt="Del Gesso Gebäudetechnik">
@@ -267,16 +276,24 @@ function clearMessage(id){const el=$(id);el.className='';el.textContent=''}
 function updateConnection(){const online=navigator.onLine;setMessage('connectionBar',online?'🟢 Online':'🟠 Offline – Eingaben werden auf diesem Gerät gespeichert.',online?'ok':'warn');if($('loginNet'))setMessage('loginNet',online?'🟢 Online':'🟠 Offline',online?'ok':'warn');refreshQueueCount()}
 window.addEventListener('online',async()=>{updateConnection();await syncQueue();await loadCalendarEvents()});window.addEventListener('offline',updateConnection);
 
+function dgError(message,type){const e=new Error(message);e.dgType=type;return e}
 async function api(payload){
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),45000);
+  let response;
   try{
-    const response=await fetch(API_URL,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload),signal:controller.signal});
-    const text=await response.text();let data;try{data=JSON.parse(text)}catch(e){throw new Error('Ungültige Antwort vom Server.')}
-    if(!data.ok)throw new Error(data.error||'Serverfehler.');return data.data!==undefined?data.data:data;
-  }catch(e){
-    if(e&&e.name==='AbortError')throw new Error('Server antwortet zu langsam. Bitte erneut versuchen.');
-    throw e;
+    try{
+      response=await fetch(API_URL,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload),signal:controller.signal});
+    }catch(e){
+      if(e&&e.name==='AbortError')throw dgError('Server antwortet zu langsam. Bitte erneut versuchen.','network');
+      throw dgError('Keine Verbindung zum Server.','network');
+    }
+    if(!response.ok)throw dgError('Server nicht erreichbar (HTTP '+response.status+').','network');
+    const text=await response.text();
+    let data;
+    try{data=JSON.parse(text)}catch(e){throw dgError('Ungültige Antwort vom Server.','server')}
+    if(!data.ok)throw dgError(data.error||'Serverfehler.','server');
+    return data.data!==undefined?data.data:data;
   }finally{clearTimeout(timer)}
 }
 
@@ -604,7 +621,20 @@ async function saveEntry(){
   const entry={clientId:uid(),employee:a.employee,employeePin:a.pin,date,customer,start:startTime,end:endTime,startMinutes,endMinutes,hours,activity,syncCalendar:false,materialUsed,material,additionalEmployeesUsed:false,additionalEmployees:[],additionalEmployeeHours:[],photos:preparedPhotos.slice(),customerSignature:noCustomerPresent?'':customerPad.dataUrl(),sourceCalendarEventId:selectedCalendarEventId,replacementAssignmentId:''};
   const item={type:'saveEntry',createdAt:Date.now(),payload:{action:'saveEntry',employee:a.employee,pin:a.pin,entry}};
   if(!navigator.onLine){await queuePut(item);setMessage('entryStatus','🟠 Offline gespeichert. Automatische Übertragung folgt bei Internetverbindung.','warn');resetEntry();await refreshQueueCount();return}
-  try{setMessage('entryStatus','Eintrag wird übertragen ...','info');const day=await api(item.payload);lastDayData=day;renderDay();resetEntry();await loadCalendarEvents();setMessage('entryStatus','✅ Eintrag gespeichert. Der Auftrag steht jetzt im Chefbereich unter Regieberichte.','ok')}catch(e){await queuePut(item);setMessage('entryStatus','🟠 Verbindung fehlgeschlagen. Auftrag wurde sicher offline vorgemerkt.','warn');resetEntry();await refreshQueueCount()}
+  try{
+    setMessage('entryStatus','Eintrag wird übertragen ...','info');
+    const day=await api(item.payload);
+    lastDayData=day;renderDay();resetEntry();await loadCalendarEvents();
+    setMessage('entryStatus','✅ Eintrag gespeichert. Der Auftrag steht jetzt im Chefbereich unter Regieberichte.','ok');
+  }catch(e){
+    if(e&&e.dgType==='network'){
+      await queuePut(item);
+      setMessage('entryStatus','🟠 Keine Serververbindung. Auftrag wurde lokal gespeichert und ist unter „Ausstehende Übertragungen“ sichtbar.','warn');
+      resetEntry();await refreshQueueCount();
+    }else{
+      setMessage('entryStatus','❌ Auftrag nicht gespeichert: '+(e&&e.message?e.message:'Unbekannter Serverfehler.'),'error');
+    }
+  }
 }
 
 function resetEntry(){stopCamera();selectedCalendarEventId='';$('customer').value='';$('start').value='';$('end').value='';$('hours').value='';$('activity').value='';document.querySelector('input[name="materialUsed"][value="no"]').checked=true;toggleMaterial();document.querySelector('input[name="photosUsed"][value="no"]').checked=true;togglePhotos();clearCustomerSignature();noCustomerPresent=false}
@@ -758,8 +788,50 @@ function openDb(){return new Promise((resolve,reject)=>{const req=indexedDB.open
 async function queuePut(item){const db=await openDb();return new Promise((resolve,reject)=>{const tx=db.transaction('queue','readwrite');tx.objectStore('queue').add(item);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)})}
 async function queueAll(){const db=await openDb();return new Promise((resolve,reject)=>{const req=db.transaction('queue','readonly').objectStore('queue').getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error)})}
 async function queueDelete(id){const db=await openDb();return new Promise((resolve,reject)=>{const tx=db.transaction('queue','readwrite');tx.objectStore('queue').delete(id);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)})}
-async function refreshQueueCount(){const q=await queueAll().catch(()=>[]);$('queueBar').classList.toggle('hidden',q.length===0);$('queueText').textContent=q.length+' Übertragung(en) ausstehend.'}
-async function syncQueue(){if(!navigator.onLine)return;const items=(await queueAll()).sort((a,b)=>a.createdAt-b.createdAt);for(const item of items){try{await api(item.payload);await queueDelete(item.id)}catch(e){break}}await refreshQueueCount();await loadDay()}
+function queuedItemInfo(item){
+  const p=(item&&item.payload)||{},e=p.entry||{};
+  if(item&&item.type==='saveEntry')return {title:e.customer||'Auftrag',date:e.date||'',time:(e.start||'')+(e.end?'–'+e.end:''),hours:Number(e.hours||0),activity:e.activity||''};
+  if(item&&item.type==='closeDay')return {title:'Tagesabschluss',date:p.date||'',time:'',hours:0,activity:''};
+  return {title:(item&&item.type)||'Übertragung',date:'',time:'',hours:0,activity:''};
+}
+async function renderQueueDetails(){
+  const box=$('queueDetails');if(!box)return;
+  const q=(await queueAll().catch(()=>[])).sort((a,b)=>a.createdAt-b.createdAt);
+  if(!q.length){box.innerHTML='<div class="muted">Keine ausstehenden Übertragungen.</div>';return}
+  box.innerHTML=q.map(item=>{const x=queuedItemInfo(item);return `<div class="entry"><strong>🟠 ${esc(x.title)}</strong><br><span>${x.date?formatDateDE(x.date):''}${x.time?' · '+esc(x.time):''}${x.hours?' · <strong>'+formatHours(x.hours)+' Std.</strong>':''}</span>${x.activity?'<br><span class="muted">'+esc(x.activity)+'</span>':''}<div class="button-row" style="margin-top:8px"><button class="btn primary" type="button" onclick="retryQueueItem(${Number(item.id)})">Jetzt übertragen</button></div></div>`}).join('');
+}
+function toggleQueueDetails(){const box=$('queueDetails');box.classList.toggle('hidden');if(!box.classList.contains('hidden'))renderQueueDetails()}
+async function refreshQueueCount(){
+  const q=await queueAll().catch(()=>[]),bar=$('queueBar'),text=$('queueText');
+  bar.classList.toggle('hidden',q.length===0);
+  text.textContent=q.length===1?'1 Auftrag/Abschluss wartet auf Übertragung.':q.length+' Aufträge/Abschlüsse warten auf Übertragung.';
+  if(q.length&&!$('queueDetails').classList.contains('hidden'))await renderQueueDetails();
+}
+async function retryQueueItem(id){
+  if(!navigator.onLine){setMessage('entryStatus','🟠 Gerät ist offline. Übertragung ist momentan nicht möglich.','warn');return}
+  const item=(await queueAll()).find(x=>Number(x.id)===Number(id));if(!item)return refreshQueueCount();
+  try{await api(item.payload);await queueDelete(item.id);setMessage('entryStatus','✅ Ausstehender Auftrag wurde übertragen.','ok');await refreshQueueCount();await loadDay()}
+  catch(e){
+    if(e&&e.dgType==='network')setMessage('entryStatus','🟠 Übertragung weiterhin nicht möglich: '+e.message,'warn');
+    else setMessage('entryStatus','❌ Server lehnt diesen Auftrag ab: '+(e&&e.message?e.message:'Unbekannter Fehler.'),'error');
+  }
+}
+async function syncQueue(showMessage){
+  if(!navigator.onLine){if(showMessage)setMessage('entryStatus','🟠 Gerät ist offline.','warn');return}
+  const items=(await queueAll()).sort((a,b)=>a.createdAt-b.createdAt);let sent=0;
+  for(const item of items){
+    try{await api(item.payload);await queueDelete(item.id);sent++}
+    catch(e){
+      if(showMessage){
+        if(e&&e.dgType==='network')setMessage('entryStatus','🟠 Übertragung unterbrochen: '+e.message,'warn');
+        else setMessage('entryStatus','❌ Eine ausstehende Übertragung wurde vom Server abgelehnt: '+(e&&e.message?e.message:'Unbekannter Fehler.'),'error');
+      }
+      break;
+    }
+  }
+  await refreshQueueCount();await loadDay();
+  if(showMessage&&sent)setMessage('entryStatus','✅ '+sent+' ausstehende Übertragung(en) erfolgreich gesendet.','ok');
+}
 
 function initEnterSupport(){
   document.addEventListener('keydown',function(ev){
