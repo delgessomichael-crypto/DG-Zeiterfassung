@@ -177,6 +177,7 @@
         <div class="muted small">Offene Aufträge zuerst. Abgerechnete Aufträge werden nur bei Bedarf geladen.</div>
         <div id="regieDateFilter" class="admin-grid hidden"><div><label>Jahr</label><input id="regieYear" type="number"></div><div><label>Monat</label><select id="regieMonth"><option value="0">Alle Monate</option></select></div></div>
         <div class="button-row"><button class="btn success" onclick="loadRegieReports('Offen')">Offene Regieberichte</button><button class="btn danger" onclick="loadRegieReports('Abgerechnet')">Abgerechnete Aufträge</button></div>
+        <div id="regieMergeToolbar" class="hidden" style="margin-top:10px"><button class="btn primary" style="width:100%" onclick="mergeSelectedRegieReports()">Ausgewählte Regieberichte zusammenführen</button><div class="muted small" style="margin-top:6px">Nur offene Berichte können zusammengeführt werden. Markiere mindestens zwei Baustellen.</div></div>
         <div id="regieStatus"></div><div id="regieResult"></div>
       </div>
 
@@ -738,7 +739,7 @@ function regieCustomerKey(v){return String(v||'').toLowerCase().normalize('NFD')
 function mergeRegieGroups(groups){const map={};(groups||[]).forEach(g=>{const key=regieCustomerKey(g.customer)||('obj:'+String(g.objectId||''));if(!map[key])map[key]={objectId:g.objectId||'',customer:g.customer||'',status:g.status||'',totalHours:0,reportCount:0,employees:[],objectIds:[],reports:[],firstDate:g.firstDate||'',lastDate:g.lastDate||'',billedAt:g.billedAt||'',billedBy:g.billedBy||''};const x=map[key];x.totalHours+=Number(g.totalHours)||0;x.reportCount+=Number(g.reportCount)||0;x.employees=Array.from(new Set(x.employees.concat(g.employees||[]))).filter(Boolean).sort();x.objectIds=Array.from(new Set(x.objectIds.concat(g.objectIds||[],g.objectId||[]))).filter(Boolean);x.reports=x.reports.concat(g.reports||[]);if(g.firstDate&&(!x.firstDate||g.firstDate<x.firstDate))x.firstDate=g.firstDate;if(g.lastDate&&(!x.lastDate||g.lastDate>x.lastDate))x.lastDate=g.lastDate;if(g.billedAt)x.billedAt=g.billedAt;if(g.billedBy)x.billedBy=g.billedBy});return Object.values(map).map(x=>{x.totalHours=Math.round((x.totalHours+Number.EPSILON)*100)/100;x.reportCount=x.reports.length||x.reportCount;x.reports.sort((a,b)=>String((a.date||'')+' '+(a.start||'')).localeCompare(String((b.date||'')+' '+(b.start||''))));return x})}
 async function loadRegieReports(status){
   if(!navigator.onLine){setMessage('regieStatus','Regieberichte benötigen Internet.','warn');return}
-  const isOpen=status==='Offen';if($('regieDateFilter'))$('regieDateFilter').classList.toggle('hidden',isOpen);const year=isOpen?0:(Number($('regieYear').value)||0),month=isOpen?0:(Number($('regieMonth').value)||0);
+  const isOpen=status==='Offen';if($('regieDateFilter'))$('regieDateFilter').classList.toggle('hidden',isOpen);if($('regieMergeToolbar'))$('regieMergeToolbar').classList.toggle('hidden',!isOpen);const year=isOpen?0:(Number($('regieYear').value)||0),month=isOpen?0:(Number($('regieMonth').value)||0);
   try{
     setMessage('regieStatus',(status==='Offen'?'Offene':'Abgerechnete')+' Regieberichte werden geladen ...','info');
     const groups=mergeRegieGroups(await api(chefPayload({action:'getRegieReports',status,year,month})));window.__regieStatus=status;
@@ -746,11 +747,26 @@ async function loadRegieReports(status){
       const employeeText=(g.employees||[]).join(', ');
       const range=g.firstDate===g.lastDate?formatDateDE(g.firstDate):(formatDateDE(g.firstDate)+' bis '+formatDateDE(g.lastDate));
       const reports=(g.reports||[]).map(r=>'<div class="entry"><strong>'+formatDateDE(r.date)+' · '+esc(r.employee)+' · '+formatHours(r.hours)+' Std.</strong><div class="report-meta">'+esc(r.start)+'–'+esc(r.end)+'</div><div>'+esc(r.activity||'')+'</div>'+(r.materialUsed?'<div class="report-meta"><strong>Material:</strong> '+esc(r.material||'')+'</div>':'')+'<div class="report-actions">'+reportLinks(r)+'</div></div>').join('');
-      return '<div class="report-card '+(status==='Offen'?'open':'billed')+'"><strong>🏢 '+esc(g.customer||'Objekt')+'</strong><div class="report-meta">'+range+' · '+Number(g.reportCount||0)+' Bericht(e)</div><div class="total" style="margin:10px 0">Gesamt Personal: '+formatHours(g.totalHours)+' Std.</div><div class="report-meta"><strong>Mitarbeiter:</strong> '+esc(employeeText||'–')+'</div><details style="margin-top:10px"><summary>Einzelberichte anzeigen</summary>'+reports+'</details><div class="report-actions">'+(status==='Offen'?'<button class="btn success" onclick="markRegieObjectBilled(\''+esc((g.objectIds||[g.objectId]).filter(Boolean).join(','))+'\')">Objekt als abgerechnet markieren</button>':'')+'</div>'+(status==='Abgerechnet'?'<div class="status info">Abgerechnet am '+esc(g.billedAt||'')+' von '+esc(g.billedBy||'')+'</div>':'')+'</div>';
+      return '<div class="report-card '+(status==='Offen'?'open':'billed')+'">'+(status==='Offen'?'<label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-weight:700"><input type="checkbox" class="regie-merge-select" data-object-ids="'+esc((g.objectIds||[g.objectId]).filter(Boolean).join(','))+'" style="width:auto"> Zum Zusammenführen markieren</label>':'')+'<strong>🏢 '+esc(g.customer||'Objekt')+'</strong><div class="report-meta">'+range+' · '+Number(g.reportCount||0)+' Bericht(e)</div><div class="total" style="margin:10px 0">Gesamt Personal: '+formatHours(g.totalHours)+' Std.</div><div class="report-meta"><strong>Mitarbeiter:</strong> '+esc(employeeText||'–')+'</div><details style="margin-top:10px"><summary>Einzelberichte anzeigen</summary>'+reports+'</details><div class="report-actions">'+(status==='Offen'?'<button class="btn success" onclick="markRegieObjectBilled(\''+esc((g.objectIds||[g.objectId]).filter(Boolean).join(','))+'\')">Objekt als abgerechnet markieren</button>':'')+'</div>'+(status==='Abgerechnet'?'<div class="status info">Abgerechnet am '+esc(g.billedAt||'')+' von '+esc(g.billedBy||'')+'</div>':'')+'</div>';
     }).join('')||'<div class="status ok">Keine '+(status==='Offen'?'offenen':'abgerechneten')+' Regieberichte für diese Auswahl.</div>';
     setMessage('regieStatus',(groups||[]).length+' Objekt(e) geladen.','ok');
   }catch(e){$('regieResult').innerHTML='';setMessage('regieStatus',e.message,'error')}
 }
+async function mergeSelectedRegieReports(){
+  if(!navigator.onLine){setMessage('regieStatus','Zusammenführen benötigt Internet.','warn');return}
+  const selected=Array.from(document.querySelectorAll('.regie-merge-select:checked'));
+  if(selected.length<2){setMessage('regieStatus','Bitte mindestens zwei offene Regieberichte markieren.','warn');return}
+  const objectIds=Array.from(new Set(selected.flatMap(el=>String(el.dataset.objectIds||'').split(',').filter(Boolean))));
+  if(objectIds.length<2){setMessage('regieStatus','Die Auswahl enthält nicht mindestens zwei getrennte Objekte.','warn');return}
+  if(!confirm(selected.length+' Regieberichte wirklich zu einem gemeinsamen Regiebericht zusammenführen? Die Einzelstunden und Mitarbeiter bleiben vollständig erhalten.'))return;
+  try{
+    setMessage('regieStatus','Regieberichte werden zusammengeführt ...','info');
+    const r=await api(chefPayload({action:'mergeRegieObjects',objectIds}));
+    setMessage('regieStatus','✅ Regieberichte wurden zusammengeführt. '+Number(r.count||objectIds.length)+' Objekt(e) gehören jetzt zusammen.','ok');
+    await loadRegieReports('Offen');
+  }catch(e){setMessage('regieStatus','Zusammenführen nicht möglich: '+e.message,'error')}
+}
+
 async function markRegieObjectBilled(objectIds){const ids=String(objectIds||'').split(',').filter(Boolean);if(!ids.length){setMessage('regieStatus','Objekt-ID fehlt. Bitte Regieberichte neu laden.','error');return}if(!confirm('Alle offenen Regieberichte dieses Objekts wirklich als abgerechnet markieren? Eingeloggter Chef und aktueller Zeitpunkt werden automatisch gespeichert.'))return;try{let count=0;for(const objectId of ids){const r=await api(chefPayload({action:'markRegieObjectBilled',objectId}));count+=Number(r.count||0)}setMessage('regieStatus','✅ '+count+' Bericht(e) des Objekts als abgerechnet markiert.','ok');await loadRegieReports('Offen')}catch(e){setMessage('regieStatus',e.message,'error')}}
 
 function parseDecimalInput(value){const n=Number(String(value==null?'':value).trim().replace(',','.'));return Number.isFinite(n)?n:NaN}
