@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dg-zeiterfassung-v30';
+const CACHE_NAME = 'dg-zeiterfassung-v32';
 const APP_SHELL = ['./', './index.html', './manifest.json', './dg_icon_192.png', './dg_icon_512.png'];
 
 self.addEventListener('install', event => {
