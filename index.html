@@ -177,7 +177,7 @@
         <div class="muted small">Offene Aufträge zuerst. Abgerechnete Aufträge werden nur bei Bedarf geladen.</div>
         <div id="regieDateFilter" class="admin-grid hidden"><div><label>Jahr</label><input id="regieYear" type="number"></div><div><label>Monat</label><select id="regieMonth"><option value="0">Alle Monate</option></select></div></div>
         <div class="button-row"><button class="btn success" onclick="loadRegieReports('Offen')">Offene Regieberichte</button><button class="btn danger" onclick="loadRegieReports('Abgerechnet')">Abgerechnete Aufträge</button></div>
-        <div id="regieMergeToolbar" class="hidden" style="margin-top:10px"><button class="btn primary" style="width:100%" onclick="mergeSelectedRegieReports()">Ausgewählte Regieberichte zusammenführen</button><div class="muted small" style="margin-top:6px">Nur offene Berichte können zusammengeführt werden. Markiere mindestens zwei Baustellen.</div></div>
+        <div id="regieMergeToolbar" class="hidden" style="margin-top:10px;position:sticky;top:8px;z-index:20;background:#fff;padding:8px 0"><button id="regieMergeBtn" class="btn success" style="width:100%" onclick="requestMergeSelectedRegieReports()" disabled>Markierte Regieberichte jetzt zusammenführen</button><div id="regieMergeHint" class="muted small" style="margin-top:6px">Bitte mindestens zwei offene Regieberichte markieren.</div></div>
         <div id="regieStatus"></div><div id="regieResult"></div>
       </div>
 
@@ -257,6 +257,16 @@
   </div>
 </div>
 
+<div id="regieMergeConfirmModal" class="hidden" style="position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px">
+  <div style="background:#fff;border-radius:18px;max-width:560px;width:100%;padding:24px;box-shadow:0 18px 60px rgba(0,0,0,.28)">
+    <h2 style="margin-top:0">Regieberichte zusammenführen</h2>
+    <div id="regieMergeConfirmText" style="font-size:18px;line-height:1.45;margin:12px 0 20px">Möchtest du die ausgewählten Regieberichte wirklich zusammenführen?</div>
+    <div class="button-row">
+      <button class="btn success" style="flex:1" onclick="confirmMergeSelectedRegieReports()">Ja, zusammenführen</button>
+      <button class="btn danger" style="flex:1" onclick="closeRegieMergeConfirm()">Nein</button>
+    </div>
+  </div>
+</div>
 <script>
 const API_URL='https://script.google.com/macros/s/AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc/exec';
 let preparedPhotos=[],lastDayData={entries:[],total:0,closed:false},customerPad=null,employeePad=null,noCustomerPresent=false,employeeDirectory=[],cameraStream=null,selectedCalendarEventId='';
@@ -747,24 +757,41 @@ async function loadRegieReports(status){
       const employeeText=(g.employees||[]).join(', ');
       const range=g.firstDate===g.lastDate?formatDateDE(g.firstDate):(formatDateDE(g.firstDate)+' bis '+formatDateDE(g.lastDate));
       const reports=(g.reports||[]).map(r=>'<div class="entry"><strong>'+formatDateDE(r.date)+' · '+esc(r.employee)+' · '+formatHours(r.hours)+' Std.</strong><div class="report-meta">'+esc(r.start)+'–'+esc(r.end)+'</div><div>'+esc(r.activity||'')+'</div>'+(r.materialUsed?'<div class="report-meta"><strong>Material:</strong> '+esc(r.material||'')+'</div>':'')+'<div class="report-actions">'+reportLinks(r)+'</div></div>').join('');
-      return '<div class="report-card '+(status==='Offen'?'open':'billed')+'">'+(status==='Offen'?'<label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-weight:700"><input type="checkbox" class="regie-merge-select" data-object-ids="'+esc((g.objectIds||[g.objectId]).filter(Boolean).join(','))+'" style="width:auto"> Zum Zusammenführen markieren</label>':'')+'<strong>🏢 '+esc(g.customer||'Objekt')+'</strong><div class="report-meta">'+range+' · '+Number(g.reportCount||0)+' Bericht(e)</div><div class="total" style="margin:10px 0">Gesamt Personal: '+formatHours(g.totalHours)+' Std.</div><div class="report-meta"><strong>Mitarbeiter:</strong> '+esc(employeeText||'–')+'</div><details style="margin-top:10px"><summary>Einzelberichte anzeigen</summary>'+reports+'</details><div class="report-actions">'+(status==='Offen'?'<button class="btn success" onclick="markRegieObjectBilled(\''+esc((g.objectIds||[g.objectId]).filter(Boolean).join(','))+'\')">Objekt als abgerechnet markieren</button>':'')+'</div>'+(status==='Abgerechnet'?'<div class="status info">Abgerechnet am '+esc(g.billedAt||'')+' von '+esc(g.billedBy||'')+'</div>':'')+'</div>';
+      return '<div class="report-card '+(status==='Offen'?'open':'billed')+'">'+(status==='Offen'?'<label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-weight:700"><input type="checkbox" class="regie-merge-select" onchange="updateRegieMergeButton()" data-object-ids="'+esc((g.objectIds||[g.objectId]).filter(Boolean).join(','))+'" style="width:auto"> Zum Zusammenführen markieren</label>':'')+'<strong>🏢 '+esc(g.customer||'Objekt')+'</strong><div class="report-meta">'+range+' · '+Number(g.reportCount||0)+' Bericht(e)</div><div class="total" style="margin:10px 0">Gesamt Personal: '+formatHours(g.totalHours)+' Std.</div><div class="report-meta"><strong>Mitarbeiter:</strong> '+esc(employeeText||'–')+'</div><details style="margin-top:10px"><summary>Einzelberichte anzeigen</summary>'+reports+'</details><div class="report-actions">'+(status==='Offen'?'<button class="btn success" onclick="markRegieObjectBilled(\''+esc((g.objectIds||[g.objectId]).filter(Boolean).join(','))+'\')">Objekt als abgerechnet markieren</button>':'')+'</div>'+(status==='Abgerechnet'?'<div class="status info">Abgerechnet am '+esc(g.billedAt||'')+' von '+esc(g.billedBy||'')+'</div>':'')+'</div>';
     }).join('')||'<div class="status ok">Keine '+(status==='Offen'?'offenen':'abgerechneten')+' Regieberichte für diese Auswahl.</div>';
+    updateRegieMergeButton();
     setMessage('regieStatus',(groups||[]).length+' Objekt(e) geladen.','ok');
   }catch(e){$('regieResult').innerHTML='';setMessage('regieStatus',e.message,'error')}
 }
-async function mergeSelectedRegieReports(){
+let pendingRegieMergeObjectIds=[];
+function updateRegieMergeButton(){
+  const selected=Array.from(document.querySelectorAll('.regie-merge-select:checked'));
+  const btn=$('regieMergeBtn'),hint=$('regieMergeHint');
+  if(btn)btn.disabled=selected.length<2;
+  if(hint)hint.textContent=selected.length<2?'Bitte mindestens zwei offene Regieberichte markieren.':selected.length+' Regieberichte markiert – bereit zum Zusammenführen.';
+}
+function requestMergeSelectedRegieReports(){
   if(!navigator.onLine){setMessage('regieStatus','Zusammenführen benötigt Internet.','warn');return}
   const selected=Array.from(document.querySelectorAll('.regie-merge-select:checked'));
-  if(selected.length<2){setMessage('regieStatus','Bitte mindestens zwei offene Regieberichte markieren.','warn');return}
+  if(selected.length<2){setMessage('regieStatus','Bitte mindestens zwei offene Regieberichte markieren.','warn');updateRegieMergeButton();return}
   const objectIds=Array.from(new Set(selected.flatMap(el=>String(el.dataset.objectIds||'').split(',').filter(Boolean))));
   if(objectIds.length<2){setMessage('regieStatus','Die Auswahl enthält nicht mindestens zwei getrennte Objekte.','warn');return}
-  if(!confirm(selected.length+' Regieberichte wirklich zu einem gemeinsamen Regiebericht zusammenführen? Die Einzelstunden und Mitarbeiter bleiben vollständig erhalten.'))return;
+  pendingRegieMergeObjectIds=objectIds;
+  const text=$('regieMergeConfirmText');if(text)text.textContent='Möchtest du die '+selected.length+' ausgewählten Regieberichte wirklich zusammenführen? Mitarbeiter und Einzelstunden bleiben vollständig erhalten.';
+  const modal=$('regieMergeConfirmModal');if(modal){modal.classList.remove('hidden');modal.style.display='flex'}
+}
+function closeRegieMergeConfirm(){const modal=$('regieMergeConfirmModal');if(modal){modal.classList.add('hidden');modal.style.display='none'}pendingRegieMergeObjectIds=[]}
+async function confirmMergeSelectedRegieReports(){
+  const objectIds=pendingRegieMergeObjectIds.slice();
+  if(objectIds.length<2){closeRegieMergeConfirm();setMessage('regieStatus','Bitte mindestens zwei offene Regieberichte markieren.','warn');return}
+  const modal=$('regieMergeConfirmModal');if(modal){modal.classList.add('hidden');modal.style.display='none'}
   try{
     setMessage('regieStatus','Regieberichte werden zusammengeführt ...','info');
     const r=await api(chefPayload({action:'mergeRegieObjects',objectIds}));
+    pendingRegieMergeObjectIds=[];
     setMessage('regieStatus','✅ Regieberichte wurden zusammengeführt. '+Number(r.count||objectIds.length)+' Objekt(e) gehören jetzt zusammen.','ok');
     await loadRegieReports('Offen');
-  }catch(e){setMessage('regieStatus','Zusammenführen nicht möglich: '+e.message,'error')}
+  }catch(e){pendingRegieMergeObjectIds=[];setMessage('regieStatus','Zusammenführen nicht möglich: '+e.message,'error')}
 }
 
 async function markRegieObjectBilled(objectIds){const ids=String(objectIds||'').split(',').filter(Boolean);if(!ids.length){setMessage('regieStatus','Objekt-ID fehlt. Bitte Regieberichte neu laden.','error');return}if(!confirm('Alle offenen Regieberichte dieses Objekts wirklich als abgerechnet markieren? Eingeloggter Chef und aktueller Zeitpunkt werden automatisch gespeichert.'))return;try{let count=0;for(const objectId of ids){const r=await api(chefPayload({action:'markRegieObjectBilled',objectId}));count+=Number(r.count||0)}setMessage('regieStatus','✅ '+count+' Bericht(e) des Objekts als abgerechnet markiert.','ok');await loadRegieReports('Offen')}catch(e){setMessage('regieStatus',e.message,'error')}}
