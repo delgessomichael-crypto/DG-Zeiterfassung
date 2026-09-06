@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dg-zeiterfassung-v40';
+const CACHE_NAME = 'dg-zeiterfassung-v41';
 
 const APP_SHELL = [
   './',
@@ -52,7 +52,6 @@ self.addEventListener('fetch', event => {
       return response;
 
     } catch (err) {
-
       const cached = await caches.match(event.request);
 
       if (cached) {
