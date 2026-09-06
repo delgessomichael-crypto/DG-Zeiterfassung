@@ -1,71 +1,933 @@
-const CACHE_NAME = 'dg-zeiterfassung-v41';
 
-const APP_SHELL = [
-  './',
-  './index.html',
-  './manifest.json',
-  './dg_icon_192.png',
-  './dg_icon_512.png'
-];
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <meta name="application-name" content="DG Zeiterfassung">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="dg_icon_192.png">
+  <link rel="apple-touch-icon" href="dg_icon_192.png">
+  <title>DG Zeiterfassung v41.2</title>
+  <style>
+    :root{--brand:#0057a8;--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#111827;--ok:#166534;--okbg:#dcfce7;--warn:#9a3412;--warnbg:#ffedd5;--err:#991b1b;--errbg:#fee2e2}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}
+    button,input,select,textarea{font:inherit} button{cursor:pointer}.hidden{display:none!important}
+    .screen{min-height:100vh;padding:16px}.login-wrap{min-height:calc(100vh - 32px);display:flex;align-items:center;justify-content:center}
+    .login-card,.card{background:#fff;border-radius:20px;padding:20px;box-shadow:0 4px 18px rgba(0,0,0,.07)}.login-card{width:min(100%,480px)}
+    .logo{display:block;width:min(82%,360px);height:auto;margin:0 auto 18px}.center{text-align:center}.app{width:min(100%,1000px);margin:auto}
+    .hero{background:#111827;color:#fff;border-radius:18px;padding:16px;margin-bottom:14px}.hero .logo{background:#fff;border-radius:14px;padding:8px;max-width:330px}
+    .head-row{display:flex;justify-content:space-between;gap:12px;align-items:center}.tabs,.grid2,.button-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .tabs{margin-bottom:14px}.tab,.btn{border:0;border-radius:12px;padding:14px;font-weight:700}.tab{background:#e5e7eb}.tab.active,.primary{background:var(--brand);color:#fff}
+    .secondary{background:#e5e7eb;color:#111827}.success{background:#166534;color:#fff}.danger{background:#b91c1c;color:#fff}.tab.boss-tab,.tab.boss-tab.active{background:#166534;color:#fff}
+    .card{margin-bottom:14px}.card h2,.card h3,.login-card h2{color:var(--brand)}label{display:block;margin:12px 0 6px;font-weight:700}input,select,textarea{width:100%;padding:13px;border:1px solid var(--line);border-radius:12px;background:#fff}
+    textarea{min-height:88px;resize:vertical}.radio-row,.check-row{display:grid;grid-template-columns:minmax(150px,1fr) 72px 72px;gap:8px;align-items:center;margin-top:14px}.radio-row strong{min-width:0}.additional-hours{margin-top:10px}.additional-hours-row{display:grid;grid-template-columns:1fr 110px;gap:10px;align-items:center;margin-top:8px}.additional-hours-row label{margin:0;font-weight:600}.additional-hours-row input{padding:10px}
+    .radio-row label,.check-row label{display:flex;gap:7px;align-items:center;margin:0}.radio-row input,.check-row input{width:auto}
+    .status{padding:11px;border-radius:12px;font-weight:700;margin:10px 0}.ok{background:var(--okbg);color:var(--ok)}.warn{background:var(--warnbg);color:var(--warn)}
+    .error{background:var(--errbg);color:var(--err)}.info{background:#e0f2fe;color:#075985}.muted{color:var(--muted)}.small{font-size:13px}
+    .total{font-size:20px;font-weight:800;margin:12px 0}.entry{padding:13px 0;border-top:1px solid #e5e7eb}.entry:first-child{border-top:0}
+    canvas{width:100%;height:180px;border:2px solid #9ca3af;border-radius:12px;background:#fff;display:block;touch-action:none}.offlinebar{position:sticky;top:0;z-index:20;margin-bottom:12px}
+    .queue{display:flex;justify-content:space-between;align-items:center;gap:10px}.queue button{width:auto}
+    .multi-dropdown{position:relative;margin-top:8px}.multi-menu{border:1px solid var(--line);border-radius:12px;padding:8px;background:#fff;margin-top:6px}
+    .multi-menu label{display:flex;align-items:center;gap:9px;padding:9px;margin:0;border-radius:8px}.multi-menu label:hover{background:#f3f4f6}.multi-menu input{width:auto}
+    details{margin-top:8px}summary{font-weight:700;cursor:pointer}
+    .boss-month-head,.boss-month-row{display:grid;grid-template-columns:minmax(180px,1.5fr) repeat(3,minmax(110px,1fr));gap:8px;align-items:center}
+    .boss-month-head{font-size:13px;font-weight:800;color:var(--muted);padding:0 10px 7px}
+    .boss-month-row{padding:12px 10px;border-top:1px solid #e5e7eb}
+    .boss-month-value{font-size:18px;font-weight:800;text-align:right}.target-value{color:#b91c1c}.actual-value{color:#166534}.balance-plus{color:#166534}.balance-minus{color:#b91c1c}.balance-zero{color:#374151}
+    .boss-month-details{grid-column:1/-1;margin-top:4px}
+    .adjustment-box{border:1px solid #d1d5db;border-radius:12px;padding:12px;margin-top:10px;background:#f9fafb}.adjustment-grid{display:grid;grid-template-columns:120px 1fr auto auto;gap:8px;align-items:end}.adjustment-grid label{margin:0}.adjustment-grid input{padding:10px}.adjustment-history{margin-top:8px}.adjustment-item{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:7px 0;border-top:1px solid #e5e7eb}.adjustment-item:first-child{border-top:0}.adjustment-positive{color:#166534;font-weight:800}.adjustment-negative{color:#b91c1c;font-weight:800}
+    .admin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.admin-three-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:10px}.admin-three-actions .btn{padding:9px 5px;font-size:12px}.vac-green{color:#166534;font-weight:800}.vac-red{color:#b91c1c;font-weight:800}
+    .camera-live{margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:12px;background:#111827}.camera-live video{width:100%;max-height:420px;border-radius:10px;background:#000}.report-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.report-actions .btn{width:auto}.report-meta{font-size:13px;color:var(--muted);margin-top:5px}.report-card{border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin-top:10px}.report-card.open{border-left:5px solid #166534}.report-card.billed{border-left:5px solid #b91c1c}.weekday-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.weekday-grid label{font-size:12px}.admin-actions{display:flex;gap:8px;flex-wrap:wrap}.admin-actions .btn{width:auto}.badge{display:inline-block;padding:3px 8px;border-radius:999px;background:#e5e7eb;font-size:12px;font-weight:700}.admin-section{border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-top:14px}.admin-section h3{margin:0 0 8px}.save-bar{position:sticky;bottom:8px;background:#fff;padding-top:10px;z-index:5}.sum-box{margin-top:10px;padding:10px;border-radius:10px;background:#f3f4f6;font-weight:700}.field-hint{font-size:12px;color:var(--muted);margin-top:5px}
 
-self.addEventListener('install', event => {
-  self.skipWaiting();
+    .boss-compact-head,.boss-compact-row{display:grid;grid-template-columns:minmax(150px,1.5fr) repeat(3,minmax(80px,.8fr)) 48px minmax(100px,.8fr);gap:8px;align-items:center}.boss-compact-head{font-size:12px;font-weight:800;color:var(--muted);padding:0 8px 7px}.boss-compact-row{padding:11px 8px;border-top:1px solid #e5e7eb}.boss-compact-value{text-align:right;font-weight:800}.traffic{font-size:20px;text-align:center}.detail-toolbar{position:sticky;top:0;z-index:8;background:#fff;padding:8px 0;border-bottom:1px solid #e5e7eb;margin-bottom:10px}.detail-toolbar-inner{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}.detail-nav{display:flex;gap:8px;flex-wrap:wrap}.detail-nav .btn{width:auto}.action-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}.action-tabs .btn{width:auto;padding:10px}.object-summary{padding:12px;border-radius:12px;background:#f3f4f6;margin:10px 0}.filter-row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.filter-row .btn{width:auto;padding:10px}.filter-row .active{background:var(--brand);color:#fff}.closure-badge{display:inline-block;padding:4px 8px;border-radius:999px;font-weight:800;font-size:12px;background:#e5e7eb}.closure-badge.closed{background:#dcfce7;color:#166534}.job-status{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:999px;font-weight:800;font-size:12px}.job-status.running{background:#fee2e2;color:#991b1b}.job-status.completed{background:#dcfce7;color:#166534}.day-balance{padding:12px;border-radius:12px;font-size:18px;font-weight:800;margin:12px 0}.day-balance.good{background:#dcfce7;color:#166534}.day-balance.bad{background:#fee2e2;color:#991b1b}.timebank-box{padding:12px;border-radius:12px;background:#e0f2fe;color:#075985;font-weight:800;margin:10px 0}
 
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(APP_SHELL).catch(() => {}))
-  );
-});
+    .photo-preview-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin-top:12px}
+    .photo-preview-item{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#f9fafb;aspect-ratio:4/3}
+    .photo-preview-item img{width:100%;height:100%;object-fit:cover;display:block}
+    .photo-preview-remove{position:absolute;right:5px;top:5px;border:0;border-radius:999px;width:32px;height:32px;font-weight:900;background:rgba(17,24,39,.88);color:#fff}
+    .signature-wrap{position:relative}.signature-wrap canvas{pointer-events:none}.signature-wrap.active canvas{pointer-events:auto}
+    .signature-lock{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:18px;border-radius:12px;background:rgba(243,244,246,.92);border:2px dashed #93c5fd;color:#1d4ed8;font-weight:800;z-index:2;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+    .signature-wrap.active .signature-lock{display:none}.signature-hint{font-size:12px;color:var(--muted);margin-top:5px}
+    @media(max-width:700px){.boss-compact-head,.boss-compact-row{grid-template-columns:minmax(105px,1.4fr) repeat(3,minmax(55px,.7fr)) 30px minmax(72px,.8fr);gap:4px;font-size:11px}.boss-compact-value{font-size:12px}.grid2,.button-row,.tabs,.admin-grid{grid-template-columns:1fr}.weekday-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.screen{padding:9px}.head-row{align-items:flex-start;flex-direction:column}.head-row button{width:100%}.radio-row{grid-template-columns:minmax(125px,1fr) 64px 64px;gap:5px}.radio-row label{white-space:nowrap}.additional-hours-row{grid-template-columns:1fr 95px}.boss-month-head,.boss-month-row{grid-template-columns:minmax(120px,1.25fr) repeat(3,minmax(76px,.8fr));gap:5px}.boss-month-head{font-size:11px;padding-left:4px;padding-right:4px}.boss-month-row{padding-left:4px;padding-right:4px}.boss-month-value{font-size:15px}.adjustment-grid{grid-template-columns:1fr 1fr}.adjustment-grid .btn{width:100%}.adjustment-item{align-items:flex-start;flex-direction:column}}
+  </style>
+</head>
+<body>
+<div id="loginScreen" class="screen">
+  <div class="login-wrap">
+    <div class="login-card">
+      <img class="logo" src="dg_icon_512.png" alt="Del Gesso Gebäudetechnik">
+      <h2 class="center">Mitarbeiter-Anmeldung</h2><div class="center muted small" style="margin-top:-8px;margin-bottom:10px">Version 40</div>
+      <div id="loginNet" class="status"></div>
+      <label for="loginEmployee">Mitarbeiter</label>
+      <select id="loginEmployee" onkeydown="loginEnter(event)"><option value="">Mitarbeiter werden geladen ...</option></select>
+      <label for="loginPin">PIN</label>
+      <input id="loginPin" type="password" inputmode="numeric" maxlength="10" placeholder="PIN" onkeydown="loginEnter(event)">
+      <button class="btn primary" style="width:100%;margin-top:16px" data-enter-default onclick="loginEmployee()">Anmelden</button>
+      <div id="loginStatus"></div>
+    </div>
+  </div>
+</div>
 
-self.addEventListener('activate', event => {
-  event.waitUntil((async () => {
-    const keys = await caches.keys();
+<div id="mainScreen" class="screen hidden">
+  <div class="app">
+    <div id="connectionBar" class="status offlinebar"></div>
+    <div id="queueBar" class="status warn queue hidden">
+      <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap">
+        <strong id="queueText"></strong>
+        <div class="button-row" style="margin:0">
+          <button class="btn secondary" type="button" onclick="toggleQueueDetails()">Details</button>
+          <button class="btn primary" type="button" onclick="syncQueue(true)">Alle jetzt übertragen</button>
+        </div>
+      </div>
+      <div id="queueDetails" class="hidden" style="margin-top:10px"></div>
+    </div>
 
-    await Promise.all(
-      keys
-        .filter(k => k !== CACHE_NAME)
-        .map(k => caches.delete(k))
-    );
+    <div class="hero">
+      <img class="logo" src="dg_icon_512.png" alt="Del Gesso Gebäudetechnik">
+      <div class="head-row"><div><strong>Zeiterfassung · v41.2</strong><br><span id="employeeLabel"></span></div><button class="btn danger" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
+    </div>
 
-    await self.clients.claim();
-  })());
-});
+    <div class="tabs"><button id="employeeTab" class="tab active" onclick="showEmployee()">Mitarbeiter</button><button id="bossTab" class="tab boss-tab" onclick="showBoss()">Büro</button></div>
 
-self.addEventListener('fetch', event => {
-  if (event.request.method !== 'GET') return;
+    <section id="employeeView">
+      <div class="card">
+        <h2>Tagesstatus</h2>
+        <div class="muted small">Krank, Urlaub und Feiertag werden im Monatsbericht separat ausgewiesen; hinterlegte Sollstunden werden automatisch berücksichtigt.</div>
+        <div class="grid2">
+          <div>
+            <label for="dayStatus">Status für ausgewähltes Datum</label>
+            <select id="dayStatus">
+              <option value="Arbeiten">Arbeiten</option>
+              <option value="Krank">Krank</option>
+              <option value="Urlaub">Urlaub</option>
+              <option value="Feiertag">Feiertag</option>
+            </select>
+          </div>
+          <div style="display:flex;align-items:end">
+            <button id="dayStatusSaveBtn" class="btn primary" style="width:100%" data-enter-default onclick="saveDayStatus()">Status speichern</button>
+          </div>
+        </div>
+        <div id="dayStatusMessage"></div>
+      </div>
 
-  event.respondWith((async () => {
-    try {
-      const response = await fetch(event.request, {
-        cache: 'no-store'
-      });
+      <div class="card">
+        <div class="head-row">
+          <div>
+            <h2 style="margin-bottom:4px">Meine Termine</h2>
+            <div class="muted small">Heute, morgen und übermorgen aus deinem zugeordneten DG-Kalender.</div>
+          </div>
+          <button class="btn secondary" onclick="loadCalendarEvents()">Aktualisieren</button>
+        </div>
+        <div id="calendarStatus"></div>
+        <div id="calendarEvents" class="muted">Termine werden geladen ...</div>
+      </div>
 
-      if (response && response.ok) {
-        const cache = await caches.open(CACHE_NAME);
+      <div id="workEntryCard" class="card">
+        <h2>Arbeitszeit erfassen</h2>
+        <div class="grid2"><div><label for="date">Datum</label><input id="date" type="date" onchange="loadDay()"></div><div><label for="customer">Kunde / Baustelle</label><input id="customer" placeholder="z.B. Müller, Fürth"></div></div>
+        <div class="grid2"><div><label for="start">Von</label><input id="start" type="time" onchange="calculateHours()"></div><div><label for="end">Bis</label><input id="end" type="time" onchange="calculateHours()"></div></div>
+        <label for="hours">Stunden</label><input id="hours" readonly placeholder="Wird automatisch berechnet">
+        <label for="activity">Ausgeführte Tätigkeit</label><textarea id="activity" placeholder="Ausgeführte Arbeiten eintragen"></textarea>
 
-        cache.put(
-          event.request,
-          response.clone()
-        ).catch(() => {});
-      }
+        <div class="radio-row"><strong>Bilder hinzufügen?</strong><label><input type="radio" name="photosUsed" value="no" checked onchange="togglePhotos()">Nein</label><label><input type="radio" name="photosUsed" value="yes" onchange="togglePhotos()">Ja</label></div>
+        <div id="photoBox" class="hidden">
+          <div class="button-row"><button type="button" class="btn primary" onclick="startCamera()">📷 Kamera starten</button><button type="button" class="btn secondary" onclick="$('galleryPhotos').click()">🖼️ Vorhandene Bilder</button></div>
+          <div id="cameraLive" class="camera-live hidden"><video id="cameraVideo" autoplay playsinline muted></video><div class="button-row" style="margin-top:8px"><button type="button" class="btn success" onclick="captureCameraPhoto()">📸 Foto aufnehmen</button><button type="button" class="btn secondary" onclick="stopCamera()">Kamera schließen</button></div></div>
+          <input id="cameraPhoto" class="hidden" type="file" accept="image/*" capture="environment" onchange="addPhotos(this.files,'cameraPhoto')">
+          <input id="galleryPhotos" class="hidden" type="file" accept="image/*" multiple onchange="addPhotos(this.files,'galleryPhotos')">
+          <div id="photoStatus" class="muted small">Noch keine Bilder hinzugefügt.</div><div id="photoPreview" class="photo-preview-grid"></div><button id="clearPhotosBtn" type="button" class="btn secondary hidden" style="width:100%;margin-top:8px" onclick="clearPhotos()">Bilder entfernen</button>
+        </div>
 
-      return response;
+        <div class="radio-row"><strong>Material verbaut?</strong><label><input type="radio" name="materialUsed" value="no" checked onchange="toggleMaterial()">Nein</label><label><input type="radio" name="materialUsed" value="yes" onchange="toggleMaterial()">Ja</label></div>
+        <div id="materialBox" class="hidden"><label for="material">Verbautes Material</label><textarea id="material" placeholder="Menge und Bezeichnung"></textarea></div>
 
-    } catch (err) {
-      const cached = await caches.match(event.request);
+        <div class="radio-row"><strong>Auftrag abgeschlossen?</strong><label><input type="radio" name="jobCompleted" value="no">Nein</label><label><input type="radio" name="jobCompleted" value="yes" checked>Ja</label></div>
 
-      if (cached) {
-        return cached;
-      }
+        <h3 style="margin-top:20px">Kundenunterschrift</h3><div class="muted small">Bei vorhandener Unterschrift wird der Auftrag nach der Übertragung automatisch ans Büro gesendet.</div>
+        <div id="customerSignatureWrap" class="signature-wrap"><canvas id="customerSignature"></canvas><div class="signature-lock">Zum Unterschreiben zweimal tippen</div></div><div class="signature-hint">Beim Scrollen bleibt das Feld gesperrt.</div>
+        <div class="button-row"><button class="btn danger" onclick="clearCustomerSignature()">Unterschrift löschen</button><button class="btn success" onclick="markNoCustomer()">Kein Kunde vor Ort</button></div>
+        <button class="btn primary" style="width:100%;margin-top:14px" data-enter-default onclick="saveEntry()">Eintrag speichern</button><div id="entryStatus"></div>
+      </div>
 
-      if (event.request.mode === 'navigate') {
-        return (
-          (await caches.match('./index.html')) ||
-          (await caches.match('./'))
-        );
-      }
+      <div class="card"><h2>Einträge des Tages</h2><div id="entries" class="muted">Noch keine Tagesdaten geladen.</div><div id="dayTotal" class="day-balance bad">Heute: 0,00 Std.</div><div id="employeeTimeBank" class="timebank-box">Zeitguthaben: 0,00 Std.</div><button class="btn secondary" style="width:100%" onclick="loadDay()">Tag aktualisieren</button></div>
 
-      throw err;
+      <div id="dayCloseCard" class="card">
+        <h2>Tagesabschluss</h2>
+        <label for="pauseHours">Pause gesamt</label>
+        <select id="pauseHours" onchange="updateNetTotal()">
+          <option value="0">Keine Pause</option><option value="0.25">0,25 Std. (15 Min.)</option><option value="0.50">0,50 Std. (30 Min.)</option><option value="0.75">0,75 Std. (45 Min.)</option>
+          <option value="1.00">1,00 Std. (60 Min.)</option><option value="1.25">1,25 Std.</option><option value="1.50">1,50 Std.</option><option value="1.75">1,75 Std.</option>
+          <option value="2.00">2,00 Std.</option><option value="2.25">2,25 Std.</option><option value="2.50">2,50 Std.</option><option value="2.75">2,75 Std.</option><option value="3.00">3,00 Std.</option>
+        </select>
+        <div id="netTotal" class="total">Arbeitszeit netto: 0,00 Std.</div>
+        <button class="btn success" style="width:100%;margin-top:14px" onclick="closeDay()">Tag abschließen</button><div id="closeStatus"></div>
+      </div>
+
+      <div class="card">
+        <h2>Monatsübersicht</h2>
+        <div class="grid2"><div><label for="empYear">Jahr</label><input id="empYear" type="number"></div><div><label for="empMonth">Monat</label><select id="empMonth"></select></div></div>
+        <button class="btn secondary" style="width:100%" data-enter-default onclick="loadMonth()">Monat anzeigen</button><div id="monthStatus"></div><div id="monthResult"></div>
+      </div>
+    </section>
+
+    <section id="bossView" class="hidden">
+      <div class="card">
+        <h2>Regieberichte</h2>
+        <div class="muted small">Laufende Aufträge sind getrennt von fertiggestellten Aufträgen. Abgeschlossene Aufträge stehen direkt zur Abrechnung bereit.</div>
+        <div id="regieDateFilter" class="admin-grid hidden"><div><label>Jahr</label><input id="regieYear" type="number"></div><div><label>Monat</label><select id="regieMonth"><option value="0">Alle Monate</option></select></div></div>
+        <div class="button-row"><button class="btn danger" onclick="loadRegieReports('Laufend')">🔴 Laufende Aufträge</button><button class="btn success" onclick="loadRegieReports('Abgeschlossen')">🟢 Abgeschlossene Aufträge</button></div>
+        <button class="btn primary" style="width:100%;margin-top:8px" onclick="loadRegieReports('Abgerechnet')">Abgerechnete Aufträge</button>
+        <div id="regieMergeToolbar" class="hidden" style="margin-top:10px;position:sticky;top:8px;z-index:20;background:#fff;padding:8px 0"><button id="regieMergeBtn" class="btn success" style="width:100%" onclick="requestMergeSelectedRegieReports()" disabled>Markierte Regieberichte jetzt zusammenführen</button><div id="regieMergeHint" class="muted small" style="margin-top:6px">Bitte mindestens zwei offene Regieberichte markieren.</div></div>
+        <div id="regieStatus"></div><div id="regieResult"></div>
+      </div>
+
+      <div class="card">
+        <h2>Monatsübersicht aller Mitarbeiter</h2><div class="muted small">Zugriff über deine Mitarbeiter-Anmeldung mit Chefberechtigung.</div>
+        <div class="grid2"><div><label for="bossYear">Jahr</label><input id="bossYear" type="number"></div><div><label for="bossMonth">Monat</label><select id="bossMonth"></select></div></div>
+        <div class="button-row"><button class="btn primary" data-enter-default onclick="loadBossMonth()">Monatsübersicht laden</button><button class="btn danger" onclick="downloadTaxAdvisorPdf()">PDF Steuerberater</button></div><div class="filter-row"><button id="bossFilterAll" class="btn secondary active" onclick="setBossFilter('all')">Alle</button><button id="bossFilterAlerts" class="btn secondary" onclick="setBossFilter('alerts')">Auffälligkeiten</button><button id="bossFilterOpen" class="btn secondary" onclick="setBossFilter('open')">Noch zu prüfen</button></div><div id="bossStatus"></div><div id="bossResult"></div>
+      </div>
+
+      <div class="card">
+        <h2>Mitarbeiterverwaltung</h2>
+        <div class="muted small">Bestehenden Mitarbeiter auswählen und Daten laden – oder „Neuer Mitarbeiter“ wählen. Änderungen werden erst mit „Mitarbeiter speichern“ übernommen.</div>
+        <div class="admin-section">
+          <h3>1. Bestandsmitarbeiter oder neuer Mitarbeiter</h3>
+          <div class="admin-grid"><div><label>Bestandsmitarbeiter auswählen</label><select id="adminEmployeeSelect" onchange="loadSelectedEmployeeAdmin()"><option value="">Bitte Mitarbeiter wählen</option></select></div><div><label>Neuen Mitarbeiter anlegen</label><button type="button" class="btn success" style="width:100%" onclick="clearEmployeeAdminForm()">+ Neuer Mitarbeiter</button></div></div>
+        </div>
+        <input id="adminOriginalName" type="hidden">
+        <input id="adminOriginalActive" type="hidden" value="1">
+        <div class="admin-section">
+          <h3>2. Mitarbeiterverwaltung</h3>
+          <div class="admin-grid"><div><label>Name</label><input id="adminName" placeholder="Vorname Nachname"></div><div><label>PIN</label><input id="adminPin" inputmode="numeric" placeholder="bei bestehendem Mitarbeiter leer lassen"></div></div>
+          <div class="admin-grid"><div><label>Google Kalender-ID</label><input id="adminCalendarId" placeholder="…@group.calendar.google.com"><div class="field-hint">Kann leer bleiben, wenn noch kein Kalender zugeordnet ist.</div></div><div><label>Beschäftigungsart</label><select id="adminEmploymentType" onchange="employmentTypeChanged()"><option>Vollzeit</option><option>Teilzeit</option><option>Aushilfe</option></select></div></div>
+          <div class="check-row"><label><input id="adminHolidayCredit" type="checkbox" checked>Feiertagsstunden gutschreiben</label><label><input id="adminChefAccess" type="checkbox">Chefzugang</label></div>
+          <div id="adminActiveState" class="status info">Neuer Mitarbeiter</div>
+          <div class="admin-three-actions"><button id="adminDeactivateBtn" type="button" class="btn danger hidden" onclick="setSelectedEmployeeActiveUi(false)">Deaktivieren</button><button id="adminActivateBtn" type="button" class="btn success hidden" onclick="setSelectedEmployeeActiveUi(true)">Aktivieren</button><button id="adminDeleteBtn" type="button" class="btn danger hidden" onclick="deleteSelectedEmployeeUi()">Löschen</button></div>
+        </div>
+        <div class="admin-section">
+          <h3>3. Sollstunden</h3>
+          <label>Wochenstunden Montag–Freitag</label>
+          <div class="admin-grid"><div><input id="adminWeeklyHours" type="text" inputmode="decimal" placeholder="z. B. 40 oder 20"><div class="field-hint">Komma und Punkt sind erlaubt.</div></div><div style="display:flex;align-items:start"><button type="button" class="btn secondary" style="width:100%" onclick="distributeWeeklyHours()">Gleichmäßig auf Mo–Fr verteilen</button></div></div>
+          <div class="weekday-grid">
+            <div><label>Montag</label><input id="adminMon" type="text" inputmode="decimal" oninput="updateWeeklyHoursFromDays()"></div><div><label>Dienstag</label><input id="adminTue" type="text" inputmode="decimal" oninput="updateWeeklyHoursFromDays()"></div><div><label>Mittwoch</label><input id="adminWed" type="text" inputmode="decimal" oninput="updateWeeklyHoursFromDays()"></div><div><label>Donnerstag</label><input id="adminThu" type="text" inputmode="decimal" oninput="updateWeeklyHoursFromDays()"></div><div><label>Freitag</label><input id="adminFri" type="text" inputmode="decimal" oninput="updateWeeklyHoursFromDays()"></div>
+          </div>
+          <div id="adminHoursSum" class="sum-box">Summe Mo–Fr: 0,00 Std.</div>
+          <div class="field-hint">Die Tageswerte sind entscheidend für Urlaub, Krankheit und Feiertage. Die Wochenstunden werden daraus automatisch kontrolliert.</div>
+        </div>
+        <div class="admin-section">
+          <h3>5. Zeitkorrekturen</h3>
+          <div class="admin-grid"><div><label>Mitarbeiter</label><select id="adminTimeBankEmployee" onchange="loadSelectedTimeBankEmployee()"><option value="">Bitte Mitarbeiter wählen</option></select></div><div><label>Aktuelles Zeitkonto</label><div id="adminTimeBankBalance" class="timebank-box" style="margin:0">Zeitguthaben: 0,00 Std.</div></div></div>
+          <div class="muted small">Die Buchung gilt immer für den hier ausgewählten Mitarbeiter. Gutschriften erhöhen sein Zeitkonto, Abzüge vermindern es dauerhaft.</div>
+          <div class="admin-grid"><div><label>Stunden</label><input id="adminTimeBankHours" type="text" inputmode="decimal" placeholder="z. B. 2,5"></div><div><label>Grund</label><input id="adminTimeBankReason" placeholder="Grund ist Pflicht"></div></div>
+          <div class="button-row"><button type="button" class="btn success" onclick="saveTimeBankManualUi('Stunden Gutschreiben')">Stunden Gutschreiben</button><button type="button" class="btn danger" onclick="saveTimeBankManualUi('Stunden abziehen')">Stunden abziehen</button></div>
+          <div id="timeBankAdminStatus"></div><div id="timeBankHistory"></div>
+        </div>
+        <div class="save-bar"><button class="btn primary" style="width:100%" data-enter-default onclick="saveEmployeeAdminUi()">✓ Mitarbeiter speichern</button></div>
+        <div id="employeeAdminStatus"></div>
+      </div>
+
+      <div class="card">
+        <h2>Urlaub / Krankheit / Abwesenheiten eintragen</h2>
+        <div class="admin-grid"><div><label>Mitarbeiter</label><select id="absenceEmployee"></select></div><div><label>Art</label><select id="absenceType"><option>Urlaub</option><option>Krank</option><option>Freizeitausgleich</option></select></div></div>
+        <div class="grid2"><div><label>Von</label><input id="absenceStart" type="date"></div><div><label>Bis</label><input id="absenceEnd" type="date"></div></div><div class="field-hint">Bei Freizeitausgleich berechnet die App automatisch die Sollstunden des Zeitraums, zieht sie vom Zeitguthaben ab und schreibt sie dem Monat als bezahlte Stunden gut.</div>
+        <button class="btn primary" style="width:100%;margin-top:12px" data-enter-default onclick="saveAbsenceUi()">Zeitraum eintragen</button>
+        <div id="absenceStatus"></div><div id="absenceList"></div>
+      </div>
+
+
+      <div class="card">
+        <h2>Urlaubskonto</h2>
+        <div class="muted small">Urlaub zustehend wird von dir manuell pro Kalenderjahr eingetragen. Beansprucht und Resturlaub berechnet die App automatisch aus den erfassten Urlaubstagen.</div>
+        <div class="admin-grid"><div><label>Mitarbeiter</label><select id="vacationEmployee" onchange="loadVacationAccountUi()"></select></div><div><label>Jahr</label><input id="vacationYear" type="number" onchange="loadVacationAccountUi()"></div></div>
+        <label>Urlaub zustehend (Tage)</label><input id="vacationEntitlement" type="number" min="0" max="100" step="0.5" placeholder="manuell eintragen">
+        <div class="button-row"><button class="btn primary" data-enter-default onclick="saveVacationEntitlementUi()">Urlaubsanspruch speichern</button><button class="btn secondary" onclick="loadVacationAccountsUi()">Jahresübersicht laden</button></div>
+        <div id="vacationStatus"></div><div id="vacationAccountResult"></div><div id="vacationAccountsList"></div>
+      </div>
+
+      <div class="card">
+        <h2>Feiertage Bayern / Nürnberg</h2>
+        <div class="muted small">Gesetzliche Feiertage werden automatisch berücksichtigt. Eine Stundengutschrift erfolgt nur anhand der von dir hinterlegten Sollstunden. Bei Aushilfe ist die Feiertagsgutschrift standardmäßig aus.</div>
+        <div class="grid2"><div><label>Jahr</label><input id="holidayYear" type="number"></div><div style="display:flex;align-items:end"><button class="btn secondary" style="width:100%" data-enter-default onclick="syncHolidaysUi()">Feiertage aktualisieren</button></div></div>
+        <div id="holidayStatus"></div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div id="closeDayConfirmModal" class="hidden" style="position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px">
+  <div style="background:#fff;border-radius:18px;max-width:520px;width:100%;padding:24px;box-shadow:0 18px 60px rgba(0,0,0,.28)">
+    <h2 style="margin-top:0">Tag abschließen</h2>
+    <div style="font-size:20px;line-height:1.45;margin:12px 0 20px;font-weight:700">Tag wirklich abschließen?</div>
+    <div class="button-row">
+      <button class="btn success" style="flex:1" onclick="confirmCloseDay()">Ja</button>
+      <button class="btn danger" style="flex:1" onclick="cancelCloseDay()">Nein</button>
+    </div>
+  </div>
+</div>
+
+<div id="regieMergeConfirmModal" class="hidden" style="position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px">
+  <div style="background:#fff;border-radius:18px;max-width:560px;width:100%;padding:24px;box-shadow:0 18px 60px rgba(0,0,0,.28)">
+    <h2 style="margin-top:0">Regieberichte zusammenführen</h2>
+    <div id="regieMergeConfirmText" style="font-size:18px;line-height:1.45;margin:12px 0 20px">Möchtest du die ausgewählten Regieberichte wirklich zusammenführen?</div>
+    <div class="button-row">
+      <button class="btn success" style="flex:1" onclick="confirmMergeSelectedRegieReports()">Ja, zusammenführen</button>
+      <button class="btn danger" style="flex:1" onclick="closeRegieMergeConfirm()">Nein</button>
+    </div>
+  </div>
+</div>
+<script>
+const API_URL='https://script.google.com/macros/s/AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc/exec';
+let preparedPhotos=[],lastDayData={entries:[],total:0,closed:false},customerPad=null,employeePad=null,noCustomerPresent=false,employeeDirectory=[],cameraStream=null,selectedCalendarEventId='',bossFilter='all',bossDetailIndex=-1,bossDetailTab='overview';
+const $=id=>document.getElementById(id);
+const formatHours=v=>Number(v||0).toFixed(2).replace('.',',');
+const esc=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+function localDate(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function uid(){return 'pwa-'+Date.now()+'-'+Math.random().toString(36).slice(2)}
+function auth(){return{employee:localStorage.getItem('dg_employee')||'',pin:localStorage.getItem('dg_employee_pin')||''}}
+function canAccessBoss(){
+  const employee=auth().employee;
+  return localStorage.getItem('dg_chef_access')==='1';
+}
+function setMessage(id,text,type='info'){const el=$(id);el.className='status '+type;el.textContent=text}
+function clearMessage(id){const el=$(id);el.className='';el.textContent=''}
+
+function updateConnection(){const online=navigator.onLine;setMessage('connectionBar',online?'🟢 Online':'🟠 Offline – Eingaben werden auf diesem Gerät gespeichert.',online?'ok':'warn');if($('loginNet'))setMessage('loginNet',online?'🟢 Online':'🟠 Offline',online?'ok':'warn');refreshQueueCount()}
+window.addEventListener('online',async()=>{updateConnection();await syncQueue();await loadCalendarEvents()});window.addEventListener('offline',updateConnection);
+
+function dgError(message,type){const e=new Error(message);e.dgType=type;return e}
+async function api(payload){
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),45000);
+  let response;
+  try{
+    try{
+      response=await fetch(API_URL,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload),signal:controller.signal});
+    }catch(e){
+      if(e&&e.name==='AbortError')throw dgError('Server antwortet zu langsam. Bitte erneut versuchen.','network');
+      throw dgError('Keine Verbindung zum Server.','network');
     }
-  })());
-});
+    if(!response.ok)throw dgError('Server nicht erreichbar (HTTP '+response.status+').','network');
+    const text=await response.text();
+    let data;
+    try{data=JSON.parse(text)}catch(e){throw dgError('Ungültige Antwort vom Server.','server')}
+    if(!data.ok)throw dgError(data.error||'Serverfehler.','server');
+    return data.data!==undefined?data.data:data;
+  }finally{clearTimeout(timer)}
+}
+
+function loginEnter(ev){if(ev&&ev.key==='Enter'){ev.preventDefault();ev.stopPropagation();loginEmployee();}}
+async function loginEmployee(){const employee=$('loginEmployee').value,pin=$('loginPin').value;if(!employee){setMessage('loginStatus','Bitte Mitarbeiter auswählen.','error');return}if(!pin){setMessage('loginStatus','Bitte PIN eingeben.','error');return}if(!navigator.onLine){setMessage('loginStatus','Die erste Anmeldung muss online erfolgen.','error');return}try{setMessage('loginStatus','Anmeldung wird geprüft ...','info');const res=await api({action:'employeeLogin',employee,pin});localStorage.setItem('dg_employee',res.employee||employee);localStorage.setItem('dg_employee_pin',pin);localStorage.setItem('dg_chef_access',res.chefAccess?'1':'0');openMain()}catch(e){setMessage('loginStatus',e.message,'error')}}
+function logout(){localStorage.removeItem('dg_employee');localStorage.removeItem('dg_employee_pin');localStorage.removeItem('dg_chef_access');$('mainScreen').classList.add('hidden');$('loginScreen').classList.remove('hidden');$('loginPin').value=''}
+function openMain(){
+  const a=auth();
+  $('loginScreen').classList.add('hidden');
+  $('mainScreen').classList.remove('hidden');
+  $('employeeLabel').textContent='Angemeldet: '+a.employee;
+  $('date').value=localDate();
+
+  const bossAllowed=canAccessBoss();
+  $('bossTab').classList.toggle('hidden',!bossAllowed);
+  if(!bossAllowed)showEmployee();
+
+  loadEmployeeDirectory();
+  requestAnimationFrame(()=>{customerPad.resize();employeePad.resize()});
+  updateConnection();
+  loadDay();
+  loadCalendarEvents();
+}
+function showEmployee(){$('employeeView').classList.remove('hidden');$('bossView').classList.add('hidden');$('employeeTab').classList.add('active');$('bossTab').classList.remove('active')}
+function showBoss(){
+  if(!canAccessBoss()){
+    showEmployee();
+    setMessage('entryStatus','Der Bereich Büro ist für diesen Mitarbeiter nicht freigeschaltet.','error');
+    return;
+  }
+  $('employeeView').classList.add('hidden');
+  $('bossView').classList.remove('hidden');
+  $('employeeTab').classList.remove('active');
+  $('bossTab').classList.add('active');
+  if(navigator.onLine){ loadRegieReports('Abgeschlossen'); loadChefAdministration(); }
+}
+
+
+async function loadEmployeeDirectory(){
+  try{
+    employeeDirectory=await api({action:'getEmployees'});
+    const current=auth().employee;
+    $('loginEmployee').innerHTML='<option value="">Bitte auswählen</option>'+employeeDirectory.map(x=>'<option>'+esc(x)+'</option>').join('');
+    if(current&&employeeDirectory.includes(current))$('loginEmployee').value=current;
+    fillAbsenceEmployees();
+  }catch(e){ if($('loginEmployee'))$('loginEmployee').innerHTML='<option value="">Mitarbeiter konnten nicht geladen werden</option>'; }
+}
+function fillAbsenceEmployees(){const opts=(employeeDirectory||[]).map(x=>'<option>'+esc(x)+'</option>').join('');if($('absenceEmployee'))$('absenceEmployee').innerHTML=opts;if($('vacationEmployee'))$('vacationEmployee').innerHTML=opts}
+function chefPayload(extra={}){const a=auth();return Object.assign({employee:a.employee,employeePin:a.pin},extra)}
+async function loadChefAdministration(){
+  try{
+    const rows=await api(chefPayload({action:'getEmployeeAdminData'}));
+    renderEmployeeAdminList(rows||[]);
+    const abs=await api(chefPayload({action:'getAbsences'}));renderAbsenceList(abs||[]);
+    await loadVacationAccountsUi();
+    clearMessage('bossStatus');
+  }catch(e){setMessage('bossStatus',e.message,'error')}
+}
+function renderEmployeeAdminList(rows){
+  window.__employeeAdminRows=rows||[];
+  if($('adminEmployeeSelect')){
+    const previous=$('adminEmployeeSelect').value;
+    $('adminEmployeeSelect').innerHTML='<option value="">Bitte Mitarbeiter wählen</option>'+window.__employeeAdminRows.map((x,i)=>'<option value="'+i+'">'+esc(x.name)+(x.active?'':' (inaktiv)')+'</option>').join('');
+    if(previous!=='' && window.__employeeAdminRows[Number(previous)]) $('adminEmployeeSelect').value=previous;
+  }
+  if($('adminTimeBankEmployee')){
+    const previousName=$('adminTimeBankEmployee').value;
+    $('adminTimeBankEmployee').innerHTML='<option value="">Bitte Mitarbeiter wählen</option>'+window.__employeeAdminRows.map(x=>'<option value="'+esc(x.name)+'">'+esc(x.name)+(x.active?'':' (inaktiv)')+'</option>').join('');
+    if(window.__employeeAdminRows.some(x=>x.name===previousName)) $('adminTimeBankEmployee').value=previousName;
+  }
+}
+function parseHoursInput(v){const s=String(v==null?'':v).trim().replace(',','.');if(!s)return 0;const n=Number(s);return Number.isFinite(n)?n:NaN}
+function formatInputHours(v){return Number(v||0).toFixed(2).replace('.',',')}
+function loadSelectedEmployeeAdmin(){const v=$('adminEmployeeSelect').value;if(v==='')return;editEmployeeAdmin(Number(v))}
+function editEmployeeAdmin(i){const x=(window.__employeeAdminRows||[])[i];if(!x)return;$('adminOriginalName').value=x.name;$('adminOriginalActive').value=x.active?'1':'0';$('adminName').value=x.name;$('adminPin').value='';$('adminCalendarId').value=x.calendarId||'';$('adminEmploymentType').value=x.employmentType||'Vollzeit';$('adminWeeklyHours').value=formatInputHours(x.weeklyHours);$('adminMon').value=formatInputHours(x.monday);$('adminTue').value=formatInputHours(x.tuesday);$('adminWed').value=formatInputHours(x.wednesday);$('adminThu').value=formatInputHours(x.thursday);$('adminFri').value=formatInputHours(x.friday);$('adminHolidayCredit').checked=Boolean(x.holidayCredit);$('adminChefAccess').checked=Boolean(x.chefAccess);if($('adminEmployeeSelect'))$('adminEmployeeSelect').value=String(i);if($('adminTimeBankEmployee'))$('adminTimeBankEmployee').value=x.name;if($('adminActiveState')){$('adminActiveState').textContent=x.active?'Status: Aktiv':'Status: Inaktiv';$('adminActiveState').className='status '+(x.active?'ok':'warn')}if($('adminDeactivateBtn')){$('adminDeactivateBtn').classList.remove('hidden');$('adminDeactivateBtn').disabled=!x.active;$('adminDeactivateBtn').style.opacity=x.active?'1':'.45'}if($('adminActivateBtn')){$('adminActivateBtn').classList.remove('hidden');$('adminActivateBtn').disabled=!!x.active;$('adminActivateBtn').style.opacity=x.active?'.45':'1'}if($('adminDeleteBtn'))$('adminDeleteBtn').classList.remove('hidden');updateHoursSum();if($('adminTimeBankBalance'))$('adminTimeBankBalance').textContent='Zeitguthaben: '+formatHours(x.timeBankBalance||0)+' Std.';loadTimeBankAdmin(x.name);$('adminName').scrollIntoView({behavior:'smooth',block:'center'})}
+function clearEmployeeAdminForm(){$('adminOriginalName').value='';$('adminOriginalActive').value='1';if($('adminEmployeeSelect'))$('adminEmployeeSelect').value='';if($('adminTimeBankEmployee'))$('adminTimeBankEmployee').value='';$('adminName').value='';$('adminPin').value='';$('adminCalendarId').value='';$('adminEmploymentType').value='Vollzeit';$('adminWeeklyHours').value='';['adminMon','adminTue','adminWed','adminThu','adminFri'].forEach(id=>$(id).value='');$('adminHolidayCredit').checked=true;$('adminChefAccess').checked=false;if($('adminActiveState')){$('adminActiveState').textContent='Neuer Mitarbeiter';$('adminActiveState').className='status info'}if($('adminDeactivateBtn'))$('adminDeactivateBtn').classList.add('hidden');if($('adminActivateBtn'))$('adminActivateBtn').classList.add('hidden');if($('adminDeleteBtn'))$('adminDeleteBtn').classList.add('hidden');updateHoursSum();if($('adminTimeBankBalance'))$('adminTimeBankBalance').textContent='Zeitguthaben: 0,00 Std.';if($('timeBankHistory'))$('timeBankHistory').innerHTML='';if($('adminTimeBankHours'))$('adminTimeBankHours').value='';if($('adminTimeBankReason'))$('adminTimeBankReason').value='';clearMessage('employeeAdminStatus')}
+function updateHoursSum(){const vals=['adminMon','adminTue','adminWed','adminThu','adminFri'].map(id=>parseHoursInput($(id).value));const valid=vals.every(Number.isFinite);const sum=valid?vals.reduce((a,b)=>a+b,0):0;if($('adminHoursSum'))$('adminHoursSum').textContent=valid?'Summe Mo–Fr: '+formatHours(sum)+' Std.':'Bitte Stundenwerte prüfen.';return valid?sum:NaN}
+function updateWeeklyHoursFromDays(){const sum=updateHoursSum();if(Number.isFinite(sum))$('adminWeeklyHours').value=formatInputHours(sum)}
+function distributeWeeklyHours(){const w=parseHoursInput($('adminWeeklyHours').value);if(!Number.isFinite(w)||w<0||w>60){setMessage('employeeAdminStatus','Bitte gültige Wochenstunden zwischen 0 und 60 eingeben.','error');return}const d=Math.round((w/5)*100)/100;['adminMon','adminTue','adminWed','adminThu','adminFri'].forEach(id=>$(id).value=formatInputHours(d));updateHoursSum();clearMessage('employeeAdminStatus')}
+function employmentTypeChanged(){if($('adminEmploymentType').value==='Aushilfe')$('adminHolidayCredit').checked=false}
+async function saveEmployeeAdminUi(){
+  const dayIds=['adminMon','adminTue','adminWed','adminThu','adminFri'];const dayVals=dayIds.map(id=>parseHoursInput($(id).value));let weekly=parseHoursInput($('adminWeeklyHours').value);
+  if(!Number.isFinite(weekly)||weekly<0||weekly>60){setMessage('employeeAdminStatus','Wochenstunden sind ungültig. Erlaubt: 0 bis 60 Std.','error');return}
+  if(dayVals.some(v=>!Number.isFinite(v)||v<0||v>24)){setMessage('employeeAdminStatus','Bitte die Sollstunden Montag bis Freitag prüfen. Erlaubt sind 0 bis 24 Std. je Tag.','error');return}
+  if(dayVals.every(v=>v===0)&&weekly>0){const d=Math.round((weekly/5)*100)/100;dayVals.fill(d);dayIds.forEach((id,i)=>$(id).value=formatInputHours(dayVals[i]))}
+  const daySum=Math.round(dayVals.reduce((a,b)=>a+b,0)*100)/100;weekly=daySum;$('adminWeeklyHours').value=formatInputHours(weekly);updateHoursSum();
+  const item={originalName:$('adminOriginalName').value.trim(),name:$('adminName').value.trim(),pin:$('adminPin').value.trim(),calendarId:$('adminCalendarId').value.trim(),employmentType:$('adminEmploymentType').value,weeklyHours:weekly,monday:dayVals[0],tuesday:dayVals[1],wednesday:dayVals[2],thursday:dayVals[3],friday:dayVals[4],holidayCredit:$('adminHolidayCredit').checked,chefAccess:$('adminChefAccess').checked,active:$('adminOriginalActive').value!=='0'};
+  if(!item.name){setMessage('employeeAdminStatus','Bitte einen Namen eintragen oder bestehenden Mitarbeiter auswählen.','error');return}
+  if(!$('adminOriginalName').value&&!item.pin){setMessage('employeeAdminStatus','Für einen neuen Mitarbeiter bitte PIN eingeben.','error');return}
+  if($('adminOriginalName').value&&$('adminOriginalName').value!==item.name){setMessage('employeeAdminStatus','Den Namen eines bestehenden Mitarbeiters bitte nicht ändern. Neu anlegen und alten deaktivieren.','warn');return}
+  try{setMessage('employeeAdminStatus','Mitarbeiter wird gespeichert ...','info');const res=await api(chefPayload({action:'saveEmployeeAdmin',item}));renderEmployeeAdminList(res.employees||[]);await loadEmployeeDirectory();setMessage('employeeAdminStatus','✅ Gespeichert: '+item.name+' · '+formatHours(weekly)+' Std./Woche.','ok');const idx=(window.__employeeAdminRows||[]).findIndex(x=>x.name===item.name);if(idx>=0)editEmployeeAdmin(idx)}catch(e){setMessage('employeeAdminStatus','Speichern nicht möglich: '+e.message,'error')}
+}
+async function toggleEmployeeActiveUi(name,active){if(!confirm((active?'Mitarbeiter aktivieren: ':'Mitarbeiter deaktivieren: ')+name+'?'))return;try{await api(chefPayload({action:'setEmployeeActive',targetName:name,active}));await loadChefAdministration();await loadEmployeeDirectory()}catch(e){setMessage('employeeAdminStatus',e.message,'error')}}
+async function toggleSelectedEmployeeActiveUi(){const name=$('adminOriginalName').value;if(!name)return;const active=$('adminOriginalActive').value==='0';await toggleEmployeeActiveUi(name,active);const idx=(window.__employeeAdminRows||[]).findIndex(x=>x.name===name);if(idx>=0)editEmployeeAdmin(idx)}
+async function setSelectedEmployeeActiveUi(active){const current=$('adminOriginalActive').value==='1';if(current===active)return;await toggleSelectedEmployeeActiveUi()}
+
+async function deleteSelectedEmployeeUi(){
+  const name=$('adminOriginalName').value;if(!name)return;
+  if(!confirm('Mitarbeiter wirklich löschen: '+name+'?\n\nDie Mitarbeiter-Anmeldung wird entfernt. Historische Zeit- und Urlaubsdaten bleiben erhalten.'))return;
+  const confirmationPin=prompt('Zur Sicherheit bitte deinen eigenen PIN erneut eingeben:');
+  if(confirmationPin===null)return;
+  if(!/^\d{4,10}$/.test(String(confirmationPin).trim())){setMessage('employeeAdminStatus','Bitte einen gültigen PIN eingeben.','error');return}
+  try{
+    setMessage('employeeAdminStatus','Mitarbeiter wird gelöscht ...','info');
+    const res=await api(chefPayload({action:'deleteEmployeeAdmin',targetName:name,confirmationPin:String(confirmationPin).trim()}));
+    clearEmployeeAdminForm();
+    renderEmployeeAdminList(res.employees||[]);
+    await loadEmployeeDirectory();fillAbsenceEmployees();
+    setMessage('employeeAdminStatus','✅ '+name+' wurde aus der Mitarbeiterverwaltung gelöscht. Historische Daten bleiben erhalten.','ok');
+  }catch(e){setMessage('employeeAdminStatus','Löschen nicht möglich: '+e.message,'error')}
+}
+function loadSelectedTimeBankEmployee(){const name=$('adminTimeBankEmployee')?$('adminTimeBankEmployee').value:'';if(!name){if($('adminTimeBankBalance'))$('adminTimeBankBalance').textContent='Zeitguthaben: 0,00 Std.';if($('timeBankHistory'))$('timeBankHistory').innerHTML='';return}loadTimeBankAdmin(name)}
+async function loadTimeBankAdmin(name){if(!name||!navigator.onLine)return;try{const x=await api(chefPayload({action:'getTimeBankAccount',targetEmployee:name}));if($('adminTimeBankBalance'))$('adminTimeBankBalance').textContent='Zeitguthaben: '+formatHours(x.balance||0)+' Std.';if($('timeBankHistory'))$('timeBankHistory').innerHTML=(x.transactions||[]).slice(0,12).map(t=>'<div class="entry"><strong>'+(Number(t.hours)>0?'+':'')+formatHours(t.hours)+' Std. · '+esc(t.art)+'</strong><br><span class="muted small">'+esc(t.reason||'')+' · '+esc(t.createdAt||'')+' · '+esc(t.createdBy||'')+'</span></div>').join('')||'<div class="muted small">Noch keine Buchungen.</div>'}catch(e){setMessage('timeBankAdminStatus',e.message,'error')}}
+async function saveTimeBankManualUi(action){const name=($('adminTimeBankEmployee')&&$('adminTimeBankEmployee').value)||$('adminOriginalName').value||$('adminName').value.trim(),hours=parseHoursInput($('adminTimeBankHours').value),reason=$('adminTimeBankReason').value.trim();if(!name){setMessage('timeBankAdminStatus','Bitte zuerst einen bestehenden Mitarbeiter auswählen.','error');return}if(!(hours>0)){setMessage('timeBankAdminStatus','Bitte gültige Stunden eingeben.','error');return}if(!reason){setMessage('timeBankAdminStatus','Bitte einen Grund eintragen.','error');return}try{const r=await api(chefPayload({action:'saveTimeBankManual',targetEmployee:name,hours,timeBankAction:action,reason}));setMessage('timeBankAdminStatus','✅ Gebucht. Neues Zeitguthaben: '+formatHours(r.balanceAfter)+' Std.','ok');$('adminTimeBankHours').value='';$('adminTimeBankReason').value='';await loadTimeBankAdmin(name);const row=(window.__employeeAdminRows||[]).find(x=>x.name===name);if(row)row.timeBankBalance=r.balanceAfter}catch(e){setMessage('timeBankAdminStatus',e.message,'error')}}
+async function saveAbsenceUi(){const target=$('absenceEmployee').value,type=$('absenceType').value,startDate=$('absenceStart').value,endDate=$('absenceEnd').value;if(!target||!startDate||!endDate){setMessage('absenceStatus','Bitte Mitarbeiter und Zeitraum auswählen.','error');return}try{const r=await api(chefPayload({action:'saveAbsence',targetEmployee:target,type,startDate,endDate}));setMessage('absenceStatus','✅ '+type+' eingetragen: '+r.days+' Arbeitstag(e) · '+formatHours(r.creditedHours||0)+' Std. Gutschrift.'+(type==='Freizeitausgleich'?' Zeitguthaben danach: '+formatHours(r.timeBankBalance)+' Std.':''),'ok');const abs=await api(chefPayload({action:'getAbsences'}));renderAbsenceList(abs||[])}catch(e){setMessage('absenceStatus',e.message,'error')}}
+function renderAbsenceList(rows){$('absenceList').innerHTML=(rows||[]).map(x=>`<div class="entry"><strong>${esc(x.employee)}</strong> · ${esc(x.type)}<br><span class="muted">${formatDateDE(x.start)} bis ${formatDateDE(x.end)} · ${formatHours(x.creditedHours||0)} Std.</span><br><button class="btn danger" style="margin-top:8px" data-id="${esc(x.id)}" onclick="deleteAbsenceUi(this.dataset.id)">Eintrag löschen</button></div>`).join('')||'<div class="muted">Keine geplanten Abwesenheiten.</div>'}
+async function deleteAbsenceUi(id){if(!confirm('Abwesenheit wirklich löschen?'))return;try{await api(chefPayload({action:'deleteAbsence',id}));const abs=await api(chefPayload({action:'getAbsences'}));renderAbsenceList(abs||[]);setMessage('absenceStatus','Abwesenheit gelöscht.','ok')}catch(e){setMessage('absenceStatus',e.message,'error')}}
+async function syncHolidaysUi(){try{const y=Number($('holidayYear').value);await api(chefPayload({action:'syncHolidays',year:y}));setMessage('holidayStatus','✅ Feiertage für '+y+' aktualisiert.','ok')}catch(e){setMessage('holidayStatus',e.message,'error')}}
+
+async function loadVacationAccountUi(){
+  if(!$('vacationEmployee')||!$('vacationEmployee').value||!$('vacationYear').value)return;
+  try{
+    const x=await api(chefPayload({action:'getVacationAccount',targetEmployee:$('vacationEmployee').value,year:Number($('vacationYear').value)}));
+    $('vacationEntitlement').value=Number(x.vacationEntitlement||0)||'';
+    $('vacationAccountResult').innerHTML='<div class="entry"><strong>'+esc(x.employee)+' · '+x.year+'</strong><br>Urlaub zustehend: <span class="vac-green">'+formatHours(x.vacationEntitlement)+' Tage</span> · Urlaub genommen: <span class="vac-red">'+Number(x.vacationUsed||0)+' Tage</span> · Rest: <span class="vac-green">'+formatHours(x.vacationRemaining)+' Tage</span> · Krank: <span class="vac-red">'+Number(x.sickDays||0)+' Tage</span></div>';
+    clearMessage('vacationStatus');
+  }catch(e){setMessage('vacationStatus',e.message,'error')}
+}
+async function saveVacationEntitlementUi(){
+  const target=$('vacationEmployee').value,year=Number($('vacationYear').value),entitlement=Number($('vacationEntitlement').value);
+  if(!target||!year||!(entitlement>=0)){setMessage('vacationStatus','Bitte Mitarbeiter, Jahr und Urlaubsanspruch eintragen.','error');return}
+  try{const x=await api(chefPayload({action:'saveVacationEntitlement',targetEmployee:target,year,entitlement}));setMessage('vacationStatus','✅ Urlaubsanspruch gespeichert.','ok');await loadVacationAccountUi();await loadVacationAccountsUi()}catch(e){setMessage('vacationStatus',e.message,'error')}
+}
+async function loadVacationAccountsUi(){
+  if(!$('vacationYear')||!$('vacationYear').value)return;
+  try{const rows=await api(chefPayload({action:'getVacationAccounts',year:Number($('vacationYear').value)}));$('vacationAccountsList').innerHTML=(rows||[]).map(x=>'<div class="entry"><strong>'+esc(x.employee)+'</strong>'+(!x.active?' <span class="badge">inaktiv</span>':'')+'<br>Urlaub zustehend: <span class="vac-green">'+formatHours(x.vacationEntitlement)+' Tage</span> · Urlaub genommen: <span class="vac-red">'+Number(x.vacationUsed||0)+' Tage</span> · Rest: <span class="vac-green">'+formatHours(x.vacationRemaining)+' Tage</span> · Krank: <span class="vac-red">'+Number(x.sickDays||0)+' Tage</span></div>').join('')||'<div class="muted">Keine Daten.</div>'}catch(e){setMessage('vacationStatus',e.message,'error')}
+}
+
+async function saveDayStatus(){
+  const a=auth();
+  const date=$('date').value;
+  const status=$('dayStatus').value;
+
+  if(!date){
+    setMessage('dayStatusMessage','Bitte Datum auswählen.','error');
+    return;
+  }
+
+  if(!navigator.onLine){
+    setMessage('dayStatusMessage','Tagesstatus kann nur online geändert werden.','warn');
+    return;
+  }
+
+  if(status!=='Arbeiten'){
+    if(!confirm('Tag wirklich als '+status+' markieren? Für diesen Tag werden dann keine Arbeitszeiten erfasst.'))return;
+  }
+
+  try{
+    await api({
+      action:'setDayStatus',
+      employee:a.employee,
+      pin:a.pin,
+      date:date,
+      status:status
+    });
+
+    setMessage('dayStatusMessage','✅ Tagesstatus gespeichert: '+status,'ok');
+    await loadDay();
+  }catch(e){
+    setMessage('dayStatusMessage',e.message,'error');
+  }
+}
+
+function applyDayStatus(status){
+  status=status||'Arbeiten';
+  $('dayStatus').value=status;
+  const chef=canAccessBoss();
+  const managed=lastDayData.statusSource==='Chef Abwesenheit'||lastDayData.statusSource==='Automatisch Feiertag';
+  const blocked=status!=='Arbeiten'&&!chef;
+  $('workEntryCard').classList.toggle('hidden',blocked);
+  $('dayCloseCard').classList.toggle('hidden',blocked);
+  $('dayStatus').disabled=Boolean(managed&&!chef);
+  if($('dayStatusSaveBtn'))$('dayStatusSaveBtn').disabled=Boolean(managed&&!chef);
+  if(status!=='Arbeiten'){
+    const credit=Number(lastDayData.creditedHours||0);
+    const lockText=blocked?' Eingaben und Übermittlungen sind für diesen Tag deaktiviert.':'';
+    setMessage('dayStatusMessage','Dieser Tag ist als '+status+' markiert.'+(credit>0?' Gutschrift: '+formatHours(credit)+' Std.':'')+lockText,'info');
+  } else {
+    $('dayStatus').disabled=false;if($('dayStatusSaveBtn'))$('dayStatusSaveBtn').disabled=false;
+  }
+}
+
+function formatDateDE(value){
+  const p=String(value||'').split('-');
+  return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:String(value||'');
+}
+
+async function loadCalendarEvents(){
+  const a=auth();
+  if(!a.employee||!a.pin)return;
+
+  if(!navigator.onLine){
+    const cached=localStorage.getItem('dg_calendar_'+a.employee);
+    if(cached){
+      renderCalendarEvents(JSON.parse(cached));
+      setMessage('calendarStatus','🟠 Offline – zuletzt geladene Termine werden angezeigt.','warn');
+    }else{
+      setMessage('calendarStatus','🟠 Offline – Termine wurden auf diesem Gerät noch nicht geladen.','warn');
+      $('calendarEvents').innerHTML='<div class="muted">Keine zwischengespeicherten Termine vorhanden.</div>';
+    }
+    return;
+  }
+
+  try{
+    setMessage('calendarStatus','Termine werden geladen ...','info');
+    const events=await api({
+      action:'getEmployeeCalendarEvents',
+      employee:a.employee,
+      pin:a.pin,
+      startDate:localDate(),
+      days:3
+    });
+    localStorage.setItem('dg_calendar_'+a.employee,JSON.stringify(events||[]));
+    renderCalendarEvents(events||[]);
+    clearMessage('calendarStatus');
+  }catch(e){
+    setMessage('calendarStatus',e.message,'error');
+  }
+}
+
+function renderCalendarEvents(events){
+  if(!events.length){
+    $('calendarEvents').innerHTML='<div class="muted">Keine Termine für heute, morgen oder übermorgen.</div>';
+    return;
+  }
+
+  $('calendarEvents').innerHTML=events.map((event,index)=>{
+    const location=event.location?'<br><span class="muted">📍 '+esc(event.location)+'</span>':'';
+    const description=event.description?'<br><span class="muted">'+esc(event.description)+'</span>':'';
+    const time=event.allDay?'Ganztägig':esc(event.startTime)+' - '+esc(event.endTime);
+
+    return `<div class="entry">
+      <strong>${formatDateDE(event.startDate)} · ${time}</strong><br>
+      <strong>${esc(event.title||'Termin')}</strong>
+      ${location}
+      ${description}
+      <div class="button-row" style="margin-top:8px">
+        <button class="btn primary" data-index="${index}" onclick="takeCalendarEvent(Number(this.dataset.index))">Auftrag übernehmen</button>
+        ${event.location?`<button class="btn secondary" data-location="${esc(event.location)}" onclick="openNavigation(this.dataset.location)">Navigation</button>`:''}
+      </div>
+    </div>`;
+  }).join('');
+
+  window.__dgCalendarEvents=events;
+}
+
+function takeCalendarEvent(index){
+  const events=window.__dgCalendarEvents||[];
+  const event=events[index];
+  if(!event)return;
+  selectedCalendarEventId=event.id||'';
+
+  $('date').value=event.startDate||localDate();
+
+  let customer=event.title||'';
+  if(event.location){
+    customer+=(customer?' - ':'')+event.location;
+  }
+  $('customer').value=customer;
+
+  if(!$('activity').value.trim()&&event.description){
+    $('activity').value=event.description;
+  }
+
+  showEmployee();
+  $('customer').scrollIntoView({behavior:'smooth',block:'center'});
+  setMessage('entryStatus','✅ Termin übernommen. Tatsächliche Von/Bis-Zeit bitte beim Einsatz eintragen.','ok');
+  loadDay();
+}
+
+function openNavigation(location){
+  if(!location)return;
+  window.open('https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(location),'_blank');
+}
+
+function parseTimeMinutes(value){const m=String(value||'').trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);if(!m)return null;const h=Number(m[1]),min=Number(m[2]);if(h<0||h>23||min<0||min>59)return null;return h*60+min}
+function normalizeTimeInput(value){const mins=parseTimeMinutes(value);if(mins===null)return '';return String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0')}
+function timeInputMinutes(id){const el=$(id);if(!el)return null;const n=Number(el.valueAsNumber);if(Number.isFinite(n)&&n>=0)return Math.round(n/60000);return parseTimeMinutes(el.value)}
+function calculateHours(){const s=normalizeTimeInput($('start').value),e=normalizeTimeInput($('end').value);if(!s||!e){$('hours').value='';return 0}$('start').value=s;$('end').value=e;let sm=parseTimeMinutes(s),em=parseTimeMinutes(e);if(em<=sm)em+=1440;const mins=em-sm,h=mins>0&&mins<=1440?mins/60:0;$('hours').value=h>0?h.toFixed(2):'';const status=$('entryStatus');if(h>0&&status&&status.textContent.includes('Termin übernommen. Tatsächliche Von/Bis-Zeit'))clearMessage('entryStatus');return h}
+function toggleMaterial(){const yes=document.querySelector('input[name="materialUsed"]:checked').value==='yes';$('materialBox').classList.toggle('hidden',!yes);if(!yes)$('material').value=''}
+
+function togglePhotos(){const yes=document.querySelector('input[name="photosUsed"]:checked').value==='yes';$('photoBox').classList.toggle('hidden',!yes);if(!yes){stopCamera();clearPhotos()}}
+function renderPhotoPreview(){const box=$('photoPreview');if(!box)return;box.innerHTML=preparedPhotos.map((p,i)=>'<div class="photo-preview-item"><img src="'+p.dataUrl+'" alt="Foto '+(i+1)+'"><button type="button" class="photo-preview-remove" onclick="removePreparedPhoto('+i+')">×</button></div>').join('')}
+function updatePhotoStatus(){$('photoStatus').textContent=preparedPhotos.length?preparedPhotos.length+' von 6 Bild(ern) bereit. Bitte Vorschau kontrollieren.':'Noch keine Bilder hinzugefügt.';$('clearPhotosBtn').classList.toggle('hidden',preparedPhotos.length===0);renderPhotoPreview()}
+function removePreparedPhoto(i){preparedPhotos.splice(i,1);updatePhotoStatus()}
+function clearPhotos(){preparedPhotos=[];$('cameraPhoto').value='';$('galleryPhotos').value='';updatePhotoStatus()}
+async function startCamera(){
+  if(preparedPhotos.length>=6){setMessage('entryStatus','Maximal 6 Bilder möglich.','warn');return}
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){$('cameraPhoto').click();return}
+  try{
+    stopCamera();
+    cameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+    $('cameraVideo').srcObject=cameraStream;$('cameraLive').classList.remove('hidden');
+  }catch(e){$('cameraLive').classList.add('hidden');$('cameraPhoto').click()}
+}
+function stopCamera(){if(cameraStream){cameraStream.getTracks().forEach(t=>t.stop());cameraStream=null}if($('cameraVideo'))$('cameraVideo').srcObject=null;if($('cameraLive'))$('cameraLive').classList.add('hidden')}
+function captureCameraPhoto(){
+  if(!cameraStream||preparedPhotos.length>=6){if(preparedPhotos.length>=6)stopCamera();return}
+  const v=$('cameraVideo');if(!v.videoWidth||!v.videoHeight)return;
+  const max=1200,f=Math.min(1,max/v.videoWidth,max/v.videoHeight),c=document.createElement('canvas');c.width=Math.round(v.videoWidth*f);c.height=Math.round(v.videoHeight*f);c.getContext('2d').drawImage(v,0,0,c.width,c.height);preparedPhotos.push({dataUrl:c.toDataURL('image/jpeg',0.68)});updatePhotoStatus();if(preparedPhotos.length>=6)stopCamera();
+}
+async function addPhotos(files,inputId){const remaining=6-preparedPhotos.length;if(remaining<=0)return;const list=Array.from(files||[]).slice(0,remaining);$('photoStatus').textContent='Bilder werden vorbereitet ...';try{for(const f of list)preparedPhotos.push({dataUrl:await resizeImage(f)});updatePhotoStatus()}catch(e){$('photoStatus').textContent='Bild konnte nicht vorbereitet werden.'}$(inputId).value=''}
+function resizeImage(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onerror=reject;r.onload=()=>{const img=new Image();img.onerror=reject;img.onload=()=>{const max=1200;let w=img.width,h=img.height;if(w>max||h>max){const f=Math.min(max/w,max/h);w=Math.round(w*f);h=Math.round(h*f)}const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);resolve(c.toDataURL('image/jpeg',0.68))};img.src=r.result};r.readAsDataURL(file)})}
+
+function initPad(id){const canvas=$(id),ctx=canvas.getContext('2d'),wrap=$(id+'Wrap');let drawing=false,signed=false,active=false,lastTap=0;function setActive(v){active=!!v;if(wrap)wrap.classList.toggle('active',active)}function resize(){const ratio=devicePixelRatio||1,rect=canvas.getBoundingClientRect();canvas.width=Math.max(1,Math.round(rect.width*ratio));canvas.height=Math.round(180*ratio);ctx.setTransform(ratio,0,0,ratio,0,0);ctx.lineWidth=2;ctx.lineCap='round';ctx.strokeStyle='#111827'}function pt(ev){const r=canvas.getBoundingClientRect(),p=ev.touches?ev.touches[0]:ev;return{x:p.clientX-r.left,y:p.clientY-r.top}}function start(ev){if(!active)return;drawing=true;signed=true;const p=pt(ev);ctx.beginPath();ctx.moveTo(p.x,p.y);ev.preventDefault()}function move(ev){if(!drawing||!active)return;const p=pt(ev);ctx.lineTo(p.x,p.y);ctx.stroke();ev.preventDefault()}function end(ev){if(!drawing)return;drawing=false;if(ev)ev.preventDefault()}canvas.addEventListener('mousedown',start);canvas.addEventListener('mousemove',move);window.addEventListener('mouseup',end);canvas.addEventListener('touchstart',start,{passive:false});canvas.addEventListener('touchmove',move,{passive:false});canvas.addEventListener('touchend',end,{passive:false});if(wrap){const lock=wrap.querySelector('.signature-lock');const tap=ev=>{const now=Date.now();if(ev.type==='dblclick'||now-lastTap<550){setActive(true);lastTap=0;if(ev.preventDefault)ev.preventDefault()}else lastTap=now};lock.addEventListener('dblclick',tap);lock.addEventListener('touchend',tap,{passive:false});lock.addEventListener('click',tap)}resize();setActive(false);return{resize,lock(){setActive(false)},clear(){ctx.clearRect(0,0,canvas.getBoundingClientRect().width,180);signed=false;setActive(false)},hasSignature(){return signed},dataUrl(){return signed?canvas.toDataURL('image/png'):''}}}
+function clearCustomerSignature(){customerPad.clear();noCustomerPresent=false}
+function clearEmployeeSignature(){employeePad.clear()}
+function markNoCustomer(){customerPad.clear();noCustomerPresent=true;setMessage('entryStatus','Kundenunterschrift wird ausgelassen.','info')}
+
+async function saveEntry(){
+  const a=auth(),date=$('date').value,customer=$('customer').value.trim(),activity=$('activity').value.trim(),materialUsed=document.querySelector('input[name="materialUsed"]:checked').value==='yes',material=$('material').value.trim(),jobCompleted=document.querySelector('input[name="jobCompleted"]:checked').value==='yes';
+  const startMinutes=timeInputMinutes('start'),endMinutes=timeInputMinutes('end');
+  if(!customer){setMessage('entryStatus','Bitte Kunde / Baustelle eintragen.','error');return}
+  if(startMinutes===null||endMinutes===null){setMessage('entryStatus','Bitte gültige Von-/Bis-Zeit eintragen.','error');return}
+  const startTime=String(Math.floor(startMinutes/60)).padStart(2,'0')+':'+String(startMinutes%60).padStart(2,'0');
+  const endTime=String(Math.floor(endMinutes/60)).padStart(2,'0')+':'+String(endMinutes%60).padStart(2,'0');
+  $('start').value=startTime;$('end').value=endTime;const hours=calculateHours();
+  if(!(hours>0&&hours<=24)){setMessage('entryStatus','Arbeitszeit konnte nicht berechnet werden. Bitte Von/Bis prüfen.','error');return}
+  if(!activity){setMessage('entryStatus','Bitte die ausgeführte Tätigkeit eintragen.','error');return}
+  if(materialUsed&&!material){setMessage('entryStatus','Bitte Material eintragen.','error');return}
+
+
+  const entry={clientId:uid(),employee:a.employee,employeePin:a.pin,date,customer,start:startTime,end:endTime,startMinutes,endMinutes,hours,activity,syncCalendar:false,materialUsed,material,additionalEmployeesUsed:false,additionalEmployees:[],additionalEmployeeHours:[],photos:preparedPhotos.slice(),customerSignature:noCustomerPresent?'':customerPad.dataUrl(),sourceCalendarEventId:selectedCalendarEventId,replacementAssignmentId:'',jobStatus:jobCompleted?'Abgeschlossen':'Laufend'};
+  const item={type:'saveEntry',createdAt:Date.now(),payload:{action:'saveEntry',employee:a.employee,pin:a.pin,entry}};
+  if(!navigator.onLine){await queuePut(item);setMessage('entryStatus','🟠 Offline gespeichert. Automatische Übertragung folgt bei Internetverbindung.','warn');resetEntry();await refreshQueueCount();return}
+  try{
+    setMessage('entryStatus','Eintrag wird übertragen ...','info');
+    const day=await api(item.payload);
+    lastDayData=day;renderDay();resetEntry();await loadCalendarEvents();
+    setMessage('entryStatus','✅ Eintrag gespeichert. Der Auftrag steht jetzt im Chefbereich unter Regieberichte.','ok');
+  }catch(e){
+    if(e&&e.dgType==='network'){
+      await queuePut(item);
+      setMessage('entryStatus','🟠 Keine Serververbindung. Auftrag wurde lokal gespeichert und ist unter „Ausstehende Übertragungen“ sichtbar.','warn');
+      resetEntry();await refreshQueueCount();
+    }else{
+      setMessage('entryStatus','❌ Auftrag nicht gespeichert: '+(e&&e.message?e.message:'Unbekannter Serverfehler.'),'error');
+    }
+  }
+}
+
+function resetEntry(){stopCamera();selectedCalendarEventId='';$('customer').value='';$('start').value='';$('end').value='';$('hours').value='';$('activity').value='';document.querySelector('input[name="materialUsed"][value="no"]').checked=true;toggleMaterial();document.querySelector('input[name="photosUsed"][value="no"]').checked=true;togglePhotos();document.querySelector('input[name="jobCompleted"][value="yes"]').checked=true;clearCustomerSignature();noCustomerPresent=false}
+
+async function loadDay(){const a=auth(),date=$('date').value;if(!a.employee||!date)return;if(!navigator.onLine){const cached=localStorage.getItem('dg_day_'+a.employee+'_'+date);if(cached){lastDayData=JSON.parse(cached);renderDay()}return}try{lastDayData=await api({action:'getDayData',employee:a.employee,pin:a.pin,date});localStorage.setItem('dg_day_'+a.employee+'_'+date,JSON.stringify(lastDayData));renderDay()}catch(e){setMessage('entryStatus',e.message,'error')}}
+function renderDay(){
+  const entries=lastDayData.entries||[];
+  if(!entries.length){$('entries').innerHTML='<div class="muted">Keine Einträge für diesen Tag.</div>'}
+  else{
+    $('entries').innerHTML=entries.map(e=>`<div class="entry">
+      <strong>${esc(e.customer)}</strong>${e.isAdditionalAssignment?' <span class="badge">BEREITS ERFASST · Mitarbeit</span>':''}<br>
+      ${esc(e.start)} - ${esc(e.end)} · <strong>${formatHours(e.hours)} Std.</strong><br>
+      ${e.isAdditionalAssignment?`<div class="status ${e.assignmentStatus==='Abweichung'?'warn':e.assignmentStatus==='Bestätigt'?'ok':'info'}">Diese Stunden sind bereits deinem Stundenkonto zugeordnet.<br>Eingetragen von ${esc(e.assignedBy||'')} · Status: ${esc(e.assignmentStatus||'Zugeordnet')}${e.assignmentNote?'<br>Hinweis: '+esc(e.assignmentNote):''}</div>`:''}
+      <span class="muted">${esc(e.activity)}</span><br>
+      ${e.isAdditionalAssignment?`<div class="admin-actions" style="margin-top:8px"><button class="btn success" onclick="confirmAssignment('${esc(e.assignmentId)}')">✓ Stimmt</button><button class="btn secondary" onclick="takeAssignment('${esc(e.assignmentId)}')">Eigene Angaben erfassen</button><button class="btn danger" onclick="reportAssignmentIssue('${esc(e.assignmentId)}')">Stimmt nicht</button></div>`:`<span class="muted">Material: ${e.materialUsed?esc(e.material||'Ja'):'Nein'} · Bilder: ${Number(e.photoCount||0)}</span>`}
+      ${lastDayData.closed||e.isAdditionalAssignment?'':`<br><button class="btn danger" style="margin-top:8px" data-id="${esc(e.id)}" onclick="deleteEntry(this.dataset.id)">Eintrag löschen</button>`}
+    </div>`).join('');
+  }
+  const total=Number(lastDayData.total||0),target=Number(lastDayData.targetHours||0),diff=total-target;
+  const dayEl=$('dayTotal');
+  if(dayEl){dayEl.className='day-balance '+(target>0&&total+0.001<target?'bad':'good');dayEl.textContent='Heute: '+formatHours(total)+' Std.'+(target>0?' / Soll: '+formatHours(target)+' Std. · '+(diff>=0?(diff>0?'+'+formatHours(diff)+' Std. über Soll':'Tagessoll erreicht ✓'):'Noch offen: '+formatHours(Math.abs(diff))+' Std.'):'');}
+  if($('employeeTimeBank'))$('employeeTimeBank').textContent='Zeitguthaben: '+formatHours(lastDayData.timeBankBalance||0)+' Std.';
+  updateNetTotal();
+  applyDayStatus(lastDayData.status||'Arbeiten');
+  if(lastDayData.closed)setMessage('closeStatus','Dieser Tag ist bereits abgeschlossen.','ok');else clearMessage('closeStatus')
+}
+
+async function confirmAssignment(id){
+  if(!navigator.onLine){setMessage('entryStatus','Bestätigung benötigt Internet.','warn');return}
+  const a=auth();try{await api({action:'confirmEmployeeAssignment',employee:a.employee,pin:a.pin,assignmentId:id});await loadDay();setMessage('entryStatus','✓ Mitarbeit bestätigt.','ok')}catch(e){setMessage('entryStatus',e.message,'error')}
+}
+function takeAssignment(id){
+  const e=(lastDayData.entries||[]).find(x=>x.assignmentId===id);if(!e)return;
+  selectedAssignmentId=id;$('customer').value=e.customer||'';$('start').value=e.start||'';$('end').value=e.end||'';$('activity').value=e.activity||'';calculateHours();
+  $('customer').scrollIntoView({behavior:'smooth',block:'center'});setMessage('entryStatus','Du bearbeitest jetzt eine bereits zugeordnete Mitarbeit. Beim Speichern wird sie ersetzt – nicht doppelt gezählt.','info');
+}
+async function reportAssignmentIssue(id){
+  if(!navigator.onLine){setMessage('entryStatus','Abweichung melden benötigt Internet.','warn');return}
+  const note=prompt('Was stimmt an dieser Mitarbeit-Zuordnung nicht?');if(note===null)return;if(!note.trim()){setMessage('entryStatus','Bitte einen kurzen Hinweis eingeben.','error');return}
+  const a=auth();try{await api({action:'reportEmployeeAssignmentIssue',employee:a.employee,pin:a.pin,assignmentId:id,note:note.trim()});await loadDay();setMessage('entryStatus','⚠ Abweichung wurde für das Büro markiert.','warn')}catch(e){setMessage('entryStatus',e.message,'error')}
+}
+
+async function deleteEntry(id){if(!navigator.onLine){setMessage('entryStatus','Löschen ist offline erst nach der Synchronisierung möglich.','warn');return}if(!confirm('Eintrag wirklich löschen?'))return;const a=auth();try{lastDayData=await api({action:'deleteEntry',id,employee:a.employee,date:$('date').value,pin:a.pin});renderDay();setMessage('entryStatus','Eintrag gelöscht.','ok')}catch(e){setMessage('entryStatus',e.message,'error')}}
+function updateNetTotal(){const pause=Number($('pauseHours').value)||0;$('netTotal').textContent='Arbeitszeit netto: '+formatHours(Math.max(0,Number(lastDayData.total||0)-pause))+' Std.'}
+
+function closeDay(){const modal=$('closeDayConfirmModal');if(modal){modal.classList.remove('hidden');modal.style.display='flex'}}
+function cancelCloseDay(){const modal=$('closeDayConfirmModal');if(modal){modal.classList.add('hidden');modal.style.display='none'}}
+async function confirmCloseDay(){cancelCloseDay();await performCloseDay()}
+async function performCloseDay(){const a=auth(),date=$('date').value;const item={type:'closeDay',createdAt:Date.now(),payload:{action:'closeDay',employee:a.employee,pin:a.pin,date,signatureDataUrl:'',pauseHours:Number($('pauseHours').value)||0}};if(!navigator.onLine){await queuePut(item);setMessage('closeStatus','🟠 Tagesabschluss offline gespeichert. Wird automatisch übertragen.','warn');await refreshQueueCount();return}try{const res=await api(item.payload);setMessage('closeStatus',res.alreadyClosed?'Tag war bereits abgeschlossen.':'✅ Tag abgeschlossen. Der Abschluss ist im Chefbereich verfügbar.','ok');await loadDay()}catch(e){await queuePut(item);setMessage('closeStatus','🟠 Tagesabschluss wurde offline vorgemerkt.','warn');await refreshQueueCount()}}
+
+async function loadMonth(){const a=auth();if(!navigator.onLine){setMessage('monthStatus','Monatsübersicht benötigt Internet.','warn');return}try{const data=await api({action:'getMonthData',employee:a.employee,pin:a.pin,year:Number($('empYear').value),month:Number($('empMonth').value)});const ms=data.monthSummary||{},ys=data.yearSummary||{};let html='<div class="total">Gesamt: '+formatHours(data.total)+' Std.</div><div class="status info">Dieser Monat: Urlaub '+Number(ms.vacationDays||0)+' Tag(e) · Krank '+Number(ms.sickDays||0)+' Tag(e) · Feiertage '+Number(ms.holidayDays||0)+' Tag(e) · Freizeitausgleich '+formatHours(ms.compensatoryHours||0)+' Std. · Zeitguthaben '+formatHours(data.timeBankBalance||0)+' Std.</div><div class="status info">Jahr '+Number(ys.year||$('empYear').value)+': Urlaub '+Number(ys.vacationUsed||0)+' Tag(e) · Krank '+Number(ys.sickDays||0)+' Tag(e) · Urlaub zustehend '+formatHours(ys.vacationEntitlement)+' · Resturlaub '+formatHours(ys.vacationRemaining)+' Tage</div>';const days={};(data.rows||[]).forEach(r=>{const d=r.date||'';if(!days[d])days[d]={date:d,total:0,rows:[],closed:true};days[d].total+=Number(r.hours)||0;days[d].rows.push(r);if(!r.closed)days[d].closed=false});html+=Object.keys(days).sort().map(d=>{const x=days[d];const details=x.rows.map(r=>'<div class="entry" style="margin:8px 0 0"><strong>'+esc(r.customer)+'</strong> · '+formatHours(r.hours)+' Std. '+(r.closed?'✓':'(offen)')+(r.isAdditionalAssignment?' <span class="muted">· Mitarbeit, eingetragen von '+esc(r.assignedBy||'')+' · '+esc(r.assignmentStatus||'Zugeordnet')+'</span>':'')+'</div>').join('');const resend=x.closed?'':' <button type="button" class="btn primary" style="padding:8px 10px;margin-left:8px" onclick="event.preventDefault();event.stopPropagation();transmitOpenDay(\''+esc(x.date)+'\')">Jetzt übermitteln</button>';const light=x.closed?'🟢':'🔴';const state=x.closed?'übermittelt':'offen';return '<details class="entry"><summary style="cursor:pointer"><span style="font-size:18px;margin-right:5px" aria-label="'+state+'">'+light+'</span><strong>'+formatDateDE(x.date)+'</strong> · <strong>'+formatHours(x.total)+' Std.</strong> <span class="muted">('+state+')</span>'+resend+'</summary><div style="margin-top:8px">'+details+'</div></details>'}).join('');if((data.statuses||[]).length){html+='<h3 style="margin-top:16px">Urlaub / Krank / Feiertag</h3>';html+=(data.statuses||[]).map(s=>'<div class="entry"><strong>'+formatDateDE(s.date)+'</strong> · '+esc(s.status)+(Number(s.creditedHours||0)?' · '+formatHours(s.creditedHours)+' Std. Gutschrift':'')+'</div>').join('')}$('monthResult').innerHTML=html;clearMessage('monthStatus')}catch(e){setMessage('monthStatus',e.message,'error')}}
+async function transmitOpenDay(date){if(!navigator.onLine){setMessage('monthStatus','🟠 Keine Internetverbindung. Bitte später erneut versuchen.','warn');return}if(!confirm('Tag '+formatDateDE(date)+' jetzt ans Büro übermitteln?'))return;const a=auth();try{setMessage('monthStatus','Tag '+formatDateDE(date)+' wird übermittelt ...','info');const q=(await queueAll().catch(()=>[])).sort((x,y)=>x.createdAt-y.createdAt);const sameDay=q.filter(item=>{const p=item&&item.payload||{},e=p.entry||{};return (item.type==='saveEntry'&&e.date===date)||(item.type==='closeDay'&&p.date===date)});for(const item of sameDay){await api(item.payload);await queueDelete(item.id)}const hadClose=sameDay.some(item=>item.type==='closeDay');if(!hadClose)await api({action:'closeDay',employee:a.employee,pin:a.pin,date:date,signatureDataUrl:'',pauseHours:0});await refreshQueueCount();setMessage('monthStatus','✅ Tag '+formatDateDE(date)+' wurde ans Büro übermittelt.','ok');await loadMonth();if($('date').value===date)await loadDay()}catch(e){setMessage('monthStatus','Übermittlung nicht möglich: '+(e&&e.message?e.message:'Unbekannter Fehler.'),'error')}}
+function bossOpenIssues(x){return (x.overlapConflicts||[]).filter(c=>!c.reviewed).length+(x.assignmentIssues||[]).length}
+function bossTraffic(x){if(bossOpenIssues(x)>0)return '🔴';if(x.closureStatus!=='Abgeschlossen')return '🟠';return '🟢'}
+function setBossFilter(v){bossFilter=v;['All','Alerts','Open'].forEach(k=>{const el=$('bossFilter'+k);if(el)el.classList.toggle('active',v===(k==='All'?'all':k==='Alerts'?'alerts':'open'))});renderBossCompact()}
+function renderBossCompact(){
+  const rows=window.__bossMonthRows||[];let grandTarget=0,grandActual=0;
+  rows.forEach(x=>{grandTarget+=Number(x.targetTotal||0);grandActual+=Number(x.actualTotal||0)});
+  const visible=rows.map((x,i)=>({x,i})).filter(o=>bossFilter==='all'||(bossFilter==='alerts'&&((o.x.overlapConflicts||[]).length||(o.x.assignmentIssues||[]).length))||(bossFilter==='open'&&bossOpenIssues(o.x)>0));
+  let html='<div class="boss-compact-head"><div>Mitarbeiter</div><div style="text-align:right">Soll</div><div style="text-align:right">Ist</div><div style="text-align:right">+ / −</div><div></div><div></div></div>';
+  html+=visible.map(o=>{const x=o.x,b=Number(x.balance||0),bc=b>0?'balance-plus':b<0?'balance-minus':'balance-zero';return '<div class="boss-compact-row"><div><strong>'+esc(x.employee)+'</strong>'+(x.active===false?' <span class="muted small">(inaktiv)</span>':'')+'</div><div class="boss-compact-value target-value">'+formatHours(x.targetTotal)+' </div><div class="boss-compact-value actual-value">'+formatHours(x.actualTotal)+'</div><div class="boss-compact-value '+bc+'">'+(b>0?'+':'')+formatHours(b)+'</div><div class="traffic" title="Status">'+bossTraffic(x)+'</div><div><button class="btn secondary" style="width:100%;padding:10px" onclick="openBossActions('+o.i+')">Aktionen</button></div></div>'}).join('')||'<div class="status info">Für diesen Filter keine Mitarbeiter.</div>';
+  const gb=grandActual-grandTarget;html+='<div class="boss-compact-row" style="border-top:2px solid #9ca3af"><div><strong>Gesamt</strong></div><div class="boss-compact-value target-value">'+formatHours(grandTarget)+'</div><div class="boss-compact-value actual-value">'+formatHours(grandActual)+'</div><div class="boss-compact-value '+(gb>0?'balance-plus':gb<0?'balance-minus':'balance-zero')+'">'+(gb>0?'+':'')+formatHours(gb)+'</div><div></div><div></div></div>';
+  $('bossResult').innerHTML=html;
+}
+async function loadBossMonth(){
+  if(!navigator.onLine){setMessage('bossStatus','Chefansicht benötigt Internet.','warn');return}
+  const year=Number($('bossYear').value),month=Number($('bossMonth').value);if(!(year>0&&month>=1&&month<=12)){setMessage('bossStatus','Bitte Jahr und Monat prüfen.','error');return}
+  try{setMessage('bossStatus','Monatsübersicht wird geladen ...','info');const rows=await api({action:'getBossMonthData',employee:auth().employee,employeePin:auth().pin,year,month});window.__bossMonthRows=rows||[];bossDetailIndex=-1;renderBossCompact();clearMessage('bossStatus')}catch(e){$('bossResult').innerHTML='';setMessage('bossStatus','Monatsübersicht konnte nicht geladen werden: '+e.message,'error')}
+}
+function bossToolbar(x){return '<div class="detail-toolbar"><div class="detail-toolbar-inner"><button class="btn secondary" onclick="backBossOverview()">← Zurück</button><strong>'+esc(x.employee)+' · '+$('bossMonth').selectedOptions[0].text+' '+esc($('bossYear').value)+'</strong><div class="detail-nav"><button class="btn secondary" onclick="bossPrevEmployee()">← Vorheriger</button><button class="btn secondary" onclick="bossNextEmployee()">Nächster →</button></div></div></div>'}
+function backBossOverview(){bossDetailIndex=-1;renderBossCompact()}
+function bossPrevEmployee(){const r=window.__bossMonthRows||[];if(!r.length)return;bossDetailIndex=(bossDetailIndex-1+r.length)%r.length;renderBossActions()}
+function bossNextEmployee(){const r=window.__bossMonthRows||[];if(!r.length)return;bossDetailIndex=(bossDetailIndex+1)%r.length;renderBossActions()}
+function openBossActions(i){bossDetailIndex=i;bossDetailTab='overview';renderBossActions();window.scrollTo({top:0,behavior:'smooth'})}
+function setBossDetailTab(t){bossDetailTab=t;renderBossActions()}
+function renderBossActions(){
+  const rows=window.__bossMonthRows||[],x=rows[bossDetailIndex];if(!x){renderBossCompact();return}
+  let html=bossToolbar(x)+'<div class="action-tabs"><button class="btn '+(bossDetailTab==='overview'?'primary':'secondary')+'" onclick="setBossDetailTab(\'overview\')">Monatsdetails</button><button class="btn '+(bossDetailTab==='entries'?'primary':'secondary')+'" onclick="setBossDetailTab(\'entries\')">Aufträge</button><button class="btn '+(bossDetailTab==='alerts'?'primary':'secondary')+'" onclick="setBossDetailTab(\'alerts\')">Auffälligkeiten</button><button class="btn '+(bossDetailTab==='adjust'?'primary':'secondary')+'" onclick="setBossDetailTab(\'adjust\')">± Stunden</button><button class="btn '+(bossDetailTab==='timebank'?'primary':'secondary')+'" onclick="setBossDetailTab(\'timebank\')">Zeitguthaben</button><button class="btn '+(bossDetailTab==='closure'?'primary':'secondary')+'" onclick="setBossDetailTab(\'closure\')">Monatsabschluss</button></div>';
+  if(bossDetailTab==='overview')html+=renderBossOverview(x);
+  if(bossDetailTab==='entries')html+=renderBossEntries(x);
+  if(bossDetailTab==='alerts')html+=renderBossAlerts(x);
+  if(bossDetailTab==='adjust')html+=renderBossAdjust(x,bossDetailIndex);
+  if(bossDetailTab==='timebank')html+=renderBossTimeBank(x);
+  if(bossDetailTab==='closure')html+=renderBossClosure(x);
+  $('bossResult').innerHTML=html;
+}
+function renderBossOverview(x){const b=Number(x.balance||0);return '<div class="status info"><strong>Soll '+formatHours(x.targetTotal)+' Std. · Ist '+formatHours(x.actualTotal)+' Std. · '+(b>=0?'+':'')+formatHours(b)+' Std.</strong></div><div class="entry">Arbeitszeit '+formatHours(x.workTotal)+' Std. · Gutschriften '+formatHours(x.creditedTotal)+' Std. · Freizeitausgleich '+formatHours(x.compensatoryHours||0)+' Std. · Korrekturen '+(Number(x.adjustmentTotal)>0?'+':'')+formatHours(x.adjustmentTotal)+' Std.</div><div class="entry">Monat: Urlaub '+Number(x.vacationDays||0)+' · Krank '+Number(x.sickDays||0)+' · Feiertage '+Number(x.holidayDays||0)+'</div><div class="entry">Jahr: Urlaub beansprucht '+Number(x.yearVacationDays||0)+' · zustehend '+formatHours(x.vacationEntitlement)+' · Rest '+formatHours(x.vacationRemaining)+' Tage</div><div class="entry">Zeitguthaben: '+formatHours(x.timeBankBalance||0)+' Std. · Für Abrechnung: '+formatHours(x.payableHours||0)+' Std.</div><div class="entry">Prüfstatus: '+bossTraffic(x)+' · '+bossOpenIssues(x)+' offene Punkte · Monatsabschluss: <span class="closure-badge '+(x.closureStatus==='Abgeschlossen'?'closed':'')+'">'+esc(x.closureStatus||'Offen')+'</span></div>'}
+function renderBossEntries(x){return (x.entries||[]).map((e,i)=>'<div class="entry"><strong>'+formatDateDE(e.date)+' · '+esc(e.customer)+' · '+formatHours(e.hours)+' Std.</strong>'+(e.isAdditionalAssignment?' · Mitarbeit':'')+'<br><span class="muted">'+esc(e.activity||'')+'</span><div class="admin-actions" style="margin-top:8px"><button class="btn secondary" onclick="openObjectView('+i+')">🏢 Objekt aufrufen</button><button class="btn secondary" onclick="setBossDetailTab(\'adjust\')">± Stunden anpassen</button></div></div>').join('')||'<div class="muted">Keine Aufträge.</div>'}
+function renderBossAlerts(x){let h='';const cs=(x.overlapConflicts||[]);h+=cs.map(c=>'<div class="status '+(c.reviewed?'ok':'error')+'"><strong>'+(c.reviewed?'✓ Überprüft':'⚠ Doppelbelegung prüfen')+'</strong><br>'+formatDateDE(c.date)+' · '+esc(c.first)+' '+esc(c.start1)+'–'+esc(c.end1)+' / '+esc(c.second)+' '+esc(c.start2)+'–'+esc(c.end2)+(c.reviewed?'<br><span class="small">'+esc((c.reviewedInfo||{}).reviewedAt||'')+' · '+esc((c.reviewedInfo||{}).reviewedBy||'')+'</span>':'<br><button class="btn success" style="margin-top:8px" onclick="reviewBossConflict(\''+encodeURIComponent(c.id)+'\',\''+esc(c.date)+'\')">✓ Überprüft – korrekt</button>')+'</div>').join('');h+=(x.assignmentIssues||[]).map(c=>'<div class="status warn"><strong>⚠ Gemeldete Abweichung</strong><br>'+formatDateDE(c.date)+' · '+esc(c.customer)+' · '+esc(c.note||'')+'</div>').join('');return h||'<div class="status ok">Keine Auffälligkeiten.</div>'}
+function renderBossAdjust(x,i){return '<div class="adjustment-box"><h3>Stunden anpassen</h3><div class="muted small">Originalaufträge bleiben unverändert. Jede Korrektur ist nachvollziehbar.</div><div class="adjustment-grid"><label>Stunden<input id="adjHours_'+i+'" inputmode="decimal" placeholder="z.B. 2,5"></label><label>Grund<input id="adjReason_'+i+'" placeholder="Grund ist Pflicht"></label><button class="btn success" onclick="saveBossAdjustment('+i+',1)">+ Gutschreiben</button><button class="btn danger" onclick="saveBossAdjustment('+i+',-1)">− Abziehen</button></div><h3>Historie</h3><div class="adjustment-history">'+((x.adjustments||[]).length?(x.adjustments||[]).map(a=>'<div class="adjustment-item"><div><span class="'+(Number(a.hours)>=0?'adjustment-positive':'adjustment-negative')+'">'+(Number(a.hours)>0?'+':'')+formatHours(a.hours)+' Std.</span> · '+esc(a.reason||'')+'<div class="muted small">'+esc(a.createdAt||'')+' · '+esc(a.createdBy||'')+'</div></div><button class="btn secondary" onclick="deleteBossAdjustment(\''+esc(a.id)+'\')">Entfernen</button></div>').join(''):'<div class="muted">Keine Korrekturen.</div>')+'</div></div>'}
+function renderBossTimeBank(x){const deficit=Math.max(0,Number(x.targetTotal||0)-Number(x.actualTotal||0)),surplus=Math.max(0,Number(x.actualTotal||0)-Number(x.targetTotal||0));return '<div class="timebank-box">Aktuelles Zeitguthaben: '+formatHours(x.timeBankBalance||0)+' Std.</div><div class="entry">Monats-Soll '+formatHours(x.targetTotal)+' Std. · Ist '+formatHours(x.actualTotal)+' Std.'+(deficit>0?' · Fehlend '+formatHours(deficit)+' Std.':'')+(surplus>0?' · Monatsplus '+formatHours(surplus)+' Std.':'')+'</div>'+(deficit>0&&Number(x.timeBankBalance)>0?'<button class="btn success" style="width:100%;margin-top:8px" onclick="applyBankToCurrentMonth()">Zeitguthaben auf Monats-Soll anrechnen</button>':'')+(surplus>0&&!x.monthSurplusBanked?'<button class="btn secondary" style="width:100%;margin-top:8px" onclick="bankCurrentMonthSurplus()">Monatsplus ins Zeitguthaben übernehmen</button>':'')+(x.monthSurplusBanked?'<div class="status ok">✓ Monatsplus wurde bereits ins Zeitguthaben übernommen.</div>':'')+'<div id="bossTimeBankStatus"></div><div class="muted small" style="margin-top:10px">Zeitkorrekturen werden in der Mitarbeiterverwaltung pro Mitarbeiter gebucht. Freizeitausgleich wird unter Urlaub / Krankheit / Abwesenheiten eingetragen.</div>'}
+async function applyBankToCurrentMonth(){const x=(window.__bossMonthRows||[])[bossDetailIndex];if(!x)return;try{const r=await api(chefPayload({action:'applyTimeBankToMonth',targetEmployee:x.employee,year:Number($('bossYear').value),month:Number($('bossMonth').value)}));setMessage('bossTimeBankStatus','✅ '+formatHours(Math.abs(r.hours))+' Std. angerechnet. Zeitguthaben danach: '+formatHours(r.balanceAfter)+' Std.','ok');await reloadBossKeepDetail()}catch(e){setMessage('bossTimeBankStatus',e.message,'error')}}
+async function bankCurrentMonthSurplus(){const x=(window.__bossMonthRows||[])[bossDetailIndex];if(!x)return;if(!confirm('Monatsplus von '+x.employee+' wirklich ins Zeitguthaben übernehmen?'))return;try{const r=await api(chefPayload({action:'bankMonthSurplus',targetEmployee:x.employee,year:Number($('bossYear').value),month:Number($('bossMonth').value)}));setMessage('bossTimeBankStatus','✅ '+formatHours(r.hours)+' Std. ins Zeitguthaben übernommen.','ok');await reloadBossKeepDetail()}catch(e){setMessage('bossTimeBankStatus',e.message,'error')}}
+function renderBossClosure(x){const open=bossOpenIssues(x),closed=x.closureStatus==='Abgeschlossen';let h='<div class="status '+(open?'warn':'ok')+'">'+(open?'🟠 '+open+' offene Punkte vorhanden. Vor Abschluss bitte prüfen.':'🟢 Keine offenen Auffälligkeiten.')+'</div><div class="entry"><strong>Monatsabschluss: '+esc(x.closureStatus||'Offen')+'</strong>'+(x.closureLast?'<br><span class="muted">'+esc(x.closureLast.at||'')+' · '+esc(x.closureLast.by||'')+(x.closureLast.reason?' · '+esc(x.closureLast.reason):'')+'</span>':'')+'</div>';if(!closed)h+='<button class="btn success" style="width:100%" onclick="changeMonthClosure(\'Abgeschlossen\')">✓ Monat abschließen</button>';else h+='<button class="btn secondary" style="width:100%" onclick="changeMonthClosure(\'Wieder geöffnet\')">Monatsabschluss wieder öffnen</button>';if((x.closureHistory||[]).length)h+='<h3>Abschlusshistorie</h3>'+(x.closureHistory||[]).map(e=>'<div class="entry">'+esc(e.action)+' · '+esc(e.at)+' · '+esc(e.by)+(e.reason?' · '+esc(e.reason):'')+'</div>').join('');return h}
+async function reviewBossConflict(encodedId,date){const x=(window.__bossMonthRows||[])[bossDetailIndex];if(!x)return;try{await api(chefPayload({action:'markConflictReviewed',conflictId:decodeURIComponent(encodedId),targetEmployee:x.employee,year:Number($('bossYear').value),month:Number($('bossMonth').value),date}));await reloadBossKeepDetail();setMessage('bossStatus','✓ Doppelbelegung als überprüft gespeichert.','ok')}catch(e){setMessage('bossStatus',e.message,'error')}}
+async function changeMonthClosure(action){const x=(window.__bossMonthRows||[])[bossDetailIndex];if(!x)return;let reason='';if(action==='Wieder geöffnet'){reason=prompt('Grund für die Wiederöffnung:')||'';if(!reason.trim())return}else if(bossOpenIssues(x)>0&&!confirm('Es gibt noch offene Prüfpunkte. Monat trotzdem abschließen?'))return;try{await api(chefPayload({action:'setMonthClosureStatus',targetEmployee:x.employee,year:Number($('bossYear').value),month:Number($('bossMonth').value),closureAction:action,reason}));await reloadBossKeepDetail();setMessage('bossStatus','Monatsabschluss aktualisiert.','ok')}catch(e){setMessage('bossStatus',e.message,'error')}}
+async function reloadBossKeepDetail(){const old=bossDetailIndex,tab=bossDetailTab;const rows=await api({action:'getBossMonthData',employee:auth().employee,employeePin:auth().pin,year:Number($('bossYear').value),month:Number($('bossMonth').value)});window.__bossMonthRows=rows||[];bossDetailIndex=Math.min(old,(rows||[]).length-1);bossDetailTab=tab;renderBossActions()}
+async function openObjectView(entryIndex){const x=(window.__bossMonthRows||[])[bossDetailIndex],e=(x.entries||[])[entryIndex];if(!e)return;try{setMessage('bossStatus','Objekt wird geladen ...','info');const o=await api(chefPayload({action:'getObjectReports',objectId:e.objectId||'',customer:e.customer}));let h=bossToolbar(x)+'<button class="btn secondary" onclick="renderBossActions()">← Zurück zu '+esc(x.employee)+'</button><div class="object-summary"><strong>🏢 '+esc(o.displayName||e.customer)+'</strong><br>Berichte: '+Number(o.reportCount||0)+' · Gesamtstunden: '+formatHours(o.totalHours)+' · Mitarbeiter: '+esc((o.employees||[]).join(', '))+'</div>';h+=(o.reports||[]).map(r=>'<div class="report-card"><strong>'+formatDateDE(r.date)+' · '+esc(r.employee)+' · '+formatHours(r.hours)+' Std.</strong><div class="report-meta">'+esc(r.start)+'–'+esc(r.end)+' · '+esc(r.regieStatus)+'</div><div>'+esc(r.activity||'')+'</div>'+(r.materialUsed?'<div class="report-meta"><strong>Material:</strong> '+esc(r.material||'')+'</div>':'')+'<div class="report-actions">'+reportLinks(r)+'</div></div>').join('');$('bossResult').innerHTML=h;clearMessage('bossStatus')}catch(err){setMessage('bossStatus',err.message,'error')}}
+async function downloadTaxAdvisorPdf(){if(!navigator.onLine){setMessage('bossStatus','PDF-Erstellung benötigt Internet.','warn');return}try{setMessage('bossStatus','PDF für Steuerberater wird erstellt ...','info');const r=await api(chefPayload({action:'createTaxAdvisorPdf',year:Number($('bossYear').value),month:Number($('bossMonth').value)}));const bytes=Uint8Array.from(atob(r.base64),c=>c.charCodeAt(0)),blob=new Blob([bytes],{type:'application/pdf'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=r.fileName||'Monatsuebersicht.pdf';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);setMessage('bossStatus','✅ PDF erstellt.','ok')}catch(e){setMessage('bossStatus','PDF konnte nicht erstellt werden: '+e.message,'error')}}
+
+function reportLinks(r){let html='';if(r.customerSignatureUrl)html+='<a class="btn secondary" target="_blank" rel="noopener" href="'+esc(r.customerSignatureUrl)+'">Unterschrift öffnen</a>';const urls=String(r.photoUrls||'').split(' | ').filter(Boolean);urls.forEach((u,i)=>html+='<a class="btn secondary" target="_blank" rel="noopener" href="'+esc(u)+'">Bild '+(i+1)+'</a>');return html}
+function regieCustomerKey(v){let s=String(v||'').toLowerCase().replace(/ß/g,'ss').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');s=s.replace(/\bstr\b/g,'strasse').replace(/\bstrasse\b/g,'strasse').replace(/([a-z0-9]+)str\b/g,'$1strasse');return s}
+function mergeRegieGroups(groups){const map={};(groups||[]).forEach(g=>{const key=regieCustomerKey(g.customer)||('obj:'+String(g.objectId||''));if(!map[key])map[key]={objectId:g.objectId||'',customer:g.customer||'',status:g.status||'',jobStatus:g.jobStatus||'Abgeschlossen',totalHours:0,reportCount:0,employees:[],objectIds:[],reports:[],firstDate:g.firstDate||'',lastDate:g.lastDate||'',billedAt:g.billedAt||'',billedBy:g.billedBy||''};const x=map[key];x.totalHours+=Number(g.totalHours)||0;x.reportCount+=Number(g.reportCount)||0;x.employees=Array.from(new Set(x.employees.concat(g.employees||[]))).filter(Boolean).sort();x.objectIds=Array.from(new Set(x.objectIds.concat(g.objectIds||[],g.objectId||[]))).filter(Boolean);x.reports=x.reports.concat(g.reports||[]);if(g.firstDate&&(!x.firstDate||g.firstDate<x.firstDate))x.firstDate=g.firstDate;if(g.lastDate&&(!x.lastDate||g.lastDate>x.lastDate))x.lastDate=g.lastDate;if(g.billedAt)x.billedAt=g.billedAt;if(g.billedBy)x.billedBy=g.billedBy;if(g.jobStatus==='Abgeschlossen')x.jobStatus='Abgeschlossen';else if(x.jobStatus!=='Abgeschlossen')x.jobStatus='Laufend'});return Object.values(map).map(x=>{x.totalHours=Math.round((x.totalHours+Number.EPSILON)*100)/100;x.reportCount=x.reports.length||x.reportCount;x.reports.sort((a,b)=>String((a.date||'')+' '+(a.start||'')).localeCompare(String((b.date||'')+' '+(b.start||''))));return x})}
+async function loadRegieReports(view){
+  if(!navigator.onLine){setMessage('regieStatus','Regieberichte benötigen Internet.','warn');return}
+  const isBilled=view==='Abgerechnet',isRunning=view==='Laufend',isCompleted=view==='Abgeschlossen',isOpen=!isBilled;
+  if($('regieDateFilter'))$('regieDateFilter').classList.toggle('hidden',isOpen);
+  if($('regieMergeToolbar'))$('regieMergeToolbar').classList.toggle('hidden',!isOpen);
+  const year=isOpen?0:(Number($('regieYear').value)||0),month=isOpen?0:(Number($('regieMonth').value)||0);
+  try{
+    const label=isRunning?'Laufende Aufträge':isCompleted?'Abgeschlossene Aufträge':'Abgerechnete Aufträge';
+    setMessage('regieStatus',label+' werden geladen ...','info');
+    let groups=mergeRegieGroups(await api(chefPayload({action:'getRegieReports',status:isBilled?'Abgerechnet':'Offen',year,month})));
+    if(isRunning)groups=(groups||[]).filter(g=>(g.jobStatus||'Abgeschlossen')==='Laufend');
+    if(isCompleted)groups=(groups||[]).filter(g=>(g.jobStatus||'Abgeschlossen')==='Abgeschlossen');
+    window.__regieStatus=view;
+    $('regieResult').innerHTML=(groups||[]).map((g,gi)=>{
+      const employeeText=(g.employees||[]).join(', ');
+      const range=g.firstDate===g.lastDate?formatDateDE(g.firstDate):(formatDateDE(g.firstDate)+' bis '+formatDateDE(g.lastDate));
+      const running=(g.jobStatus||'Abgeschlossen')==='Laufend';
+      const statusBadge=running?'<span class="job-status running">🔴 Laufend</span>':'<span class="job-status completed">🟢 Abgeschlossen</span>';
+      const reports=(g.reports||[]).map(r=>'<div class="entry"><strong>'+formatDateDE(r.date)+' · '+esc(r.employee)+' · '+formatHours(r.hours)+' Std.</strong> '+((r.jobStatus||'Abgeschlossen')==='Laufend'?'<span class="job-status running">🔴 Laufend</span>':'<span class="job-status completed">🟢 Abgeschlossen</span>')+'<div class="report-meta">'+esc(r.start)+'–'+esc(r.end)+'</div><div>'+esc(r.activity||'')+'</div>'+(r.materialUsed?'<div class="report-meta"><strong>Material:</strong> '+esc(r.material||'')+'</div>':'')+'<div class="report-actions">'+reportLinks(r)+'</div></div>').join('');
+      const objectIds=(g.objectIds||[g.objectId]).filter(Boolean).join(',');
+      const mergeSelect=isOpen?'<label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-weight:700"><input type="checkbox" class="regie-merge-select" onchange="updateRegieMergeButton()" data-object-ids="'+esc(objectIds)+'" style="width:auto"> Zum Zusammenführen markieren</label>':'';
+      const completeBtn=(isRunning?'<button class="btn success" onclick="markRegieObjectCompleted(\''+esc(objectIds)+'\')">✓ Auftrag als abgeschlossen markieren</button>':'');
+      const billedBtn=(isCompleted?'<button class="btn success" onclick="markRegieObjectBilled(\''+esc(objectIds)+'\')">Objekt als abgerechnet markieren</button>':'');
+      return '<div class="report-card '+(isBilled?'billed':'open')+'">'+mergeSelect+'<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap"><strong>🏢 '+esc(g.customer||'Objekt')+'</strong>'+statusBadge+'</div><div class="report-meta">'+range+' · '+Number(g.reportCount||0)+' Bericht(e)</div><div class="total" style="margin:10px 0">Gesamt Personal: '+formatHours(g.totalHours)+' Std.</div><div class="report-meta"><strong>Mitarbeiter:</strong> '+esc(employeeText||'–')+'</div><details style="margin-top:10px"><summary>Einzelberichte anzeigen</summary>'+reports+'</details><div class="report-actions">'+completeBtn+billedBtn+'</div>'+(isBilled?'<div class="status info">Abgerechnet am '+esc(g.billedAt||'')+' von '+esc(g.billedBy||'')+'</div>':'')+'</div>';
+    }).join('')||'<div class="status ok">Keine '+label.toLowerCase()+' vorhanden.</div>';
+    updateRegieMergeButton();
+    setMessage('regieStatus',(groups||[]).length+' Objekt(e) geladen.','ok');
+  }catch(e){$('regieResult').innerHTML='';setMessage('regieStatus',e.message,'error')}
+}
+let pendingRegieMergeObjectIds=[];
+function updateRegieMergeButton(){
+  const selected=Array.from(document.querySelectorAll('.regie-merge-select:checked'));
+  const btn=$('regieMergeBtn'),hint=$('regieMergeHint');
+  if(btn)btn.disabled=selected.length<2;
+  if(hint)hint.textContent=selected.length<2?'Bitte mindestens zwei offene Regieberichte markieren.':selected.length+' Regieberichte markiert – bereit zum Zusammenführen.';
+}
+function requestMergeSelectedRegieReports(){
+  if(!navigator.onLine){setMessage('regieStatus','Zusammenführen benötigt Internet.','warn');return}
+  const selected=Array.from(document.querySelectorAll('.regie-merge-select:checked'));
+  if(selected.length<2){setMessage('regieStatus','Bitte mindestens zwei offene Regieberichte markieren.','warn');updateRegieMergeButton();return}
+  const objectIds=Array.from(new Set(selected.flatMap(el=>String(el.dataset.objectIds||'').split(',').filter(Boolean))));
+  if(objectIds.length<2){setMessage('regieStatus','Die Auswahl enthält nicht mindestens zwei getrennte Objekte.','warn');return}
+  pendingRegieMergeObjectIds=objectIds;
+  const text=$('regieMergeConfirmText');if(text)text.textContent='Möchtest du die '+selected.length+' ausgewählten Regieberichte wirklich zusammenführen? Mitarbeiter und Einzelstunden bleiben vollständig erhalten.';
+  const modal=$('regieMergeConfirmModal');if(modal){modal.classList.remove('hidden');modal.style.display='flex'}
+}
+function closeRegieMergeConfirm(){const modal=$('regieMergeConfirmModal');if(modal){modal.classList.add('hidden');modal.style.display='none'}pendingRegieMergeObjectIds=[]}
+async function confirmMergeSelectedRegieReports(){
+  const objectIds=pendingRegieMergeObjectIds.slice();
+  if(objectIds.length<2){closeRegieMergeConfirm();setMessage('regieStatus','Bitte mindestens zwei offene Regieberichte markieren.','warn');return}
+  const modal=$('regieMergeConfirmModal');if(modal){modal.classList.add('hidden');modal.style.display='none'}
+  try{
+    setMessage('regieStatus','Regieberichte werden zusammengeführt ...','info');
+    const r=await api(chefPayload({action:'mergeRegieObjects',objectIds}));
+    pendingRegieMergeObjectIds=[];
+    setMessage('regieStatus','✅ Regieberichte wurden zusammengeführt. '+Number(r.count||objectIds.length)+' Objekt(e) gehören jetzt zusammen.','ok');
+    await loadRegieReports(window.__regieStatus||'Abgeschlossen');
+  }catch(e){pendingRegieMergeObjectIds=[];setMessage('regieStatus','Zusammenführen nicht möglich: '+e.message,'error')}
+}
+
+async function markRegieObjectCompleted(objectIds){const ids=String(objectIds||'').split(',').filter(Boolean);if(!ids.length){setMessage('regieStatus','Objekt-ID fehlt. Bitte Regieberichte neu laden.','error');return}if(!confirm('Diesen laufenden Auftrag wirklich als abgeschlossen markieren?'))return;try{let count=0;for(const objectId of ids){const r=await api(chefPayload({action:'markRegieObjectCompleted',objectId}));count+=Number(r.count||0)}setMessage('regieStatus','✅ Auftrag abgeschlossen. '+count+' Bericht(e) aktualisiert.','ok');await loadRegieReports('Laufend')}catch(e){setMessage('regieStatus',e.message,'error')}}
+
+async function markRegieObjectBilled(objectIds){const ids=String(objectIds||'').split(',').filter(Boolean);if(!ids.length){setMessage('regieStatus','Objekt-ID fehlt. Bitte Regieberichte neu laden.','error');return}if(!confirm('Alle offenen Regieberichte dieses Objekts wirklich als abgerechnet markieren? Eingeloggter Chef und aktueller Zeitpunkt werden automatisch gespeichert.'))return;try{let count=0;for(const objectId of ids){const r=await api(chefPayload({action:'markRegieObjectBilled',objectId}));count+=Number(r.count||0)}setMessage('regieStatus','✅ '+count+' Bericht(e) des Objekts als abgerechnet markiert.','ok');await loadRegieReports('Abgeschlossen')}catch(e){setMessage('regieStatus',e.message,'error')}}
+
+function parseDecimalInput(value){const n=Number(String(value==null?'':value).trim().replace(',','.'));return Number.isFinite(n)?n:NaN}
+async function saveBossAdjustment(rowIndex,direction){
+  if(!navigator.onLine){setMessage('bossStatus','Stundenkorrekturen benötigen Internet.','warn');return}
+  const rows=window.__bossMonthRows||[],x=rows[rowIndex];if(!x)return;
+  const raw=parseDecimalInput($('adjHours_'+rowIndex).value),reason=$('adjReason_'+rowIndex).value.trim();
+  if(!(raw>0)){setMessage('bossStatus','Bitte eine positive Stundenanzahl eingeben, z.B. 2,5.','error');return}
+  if(!reason){setMessage('bossStatus','Bitte einen Grund für die Stundenkorrektur eintragen.','error');return}
+  const hours=Math.abs(raw)*(direction<0?-1:1);
+  const actionText=direction<0?'abziehen':'gutschreiben';
+  if(!confirm(formatHours(Math.abs(hours))+' Std. bei '+x.employee+' '+actionText+'?'))return;
+  try{
+    setMessage('bossStatus','Stundenkorrektur wird gespeichert ...','info');
+    await api({action:'saveMonthlyAdjustment',employee:auth().employee,employeePin:auth().pin,targetEmployee:x.employee,year:Number($('bossYear').value),month:Number($('bossMonth').value),hours,reason});
+    await reloadBossKeepDetail();
+    setMessage('bossStatus','✅ Stundenkorrektur gespeichert.','ok');
+  }catch(e){setMessage('bossStatus','Stundenkorrektur nicht möglich: '+e.message,'error')}
+}
+async function deleteBossAdjustment(adjustmentId){
+  if(!navigator.onLine){setMessage('bossStatus','Stundenkorrekturen benötigen Internet.','warn');return}
+  if(!confirm('Diese Stundenkorrektur wirklich entfernen?'))return;
+  try{
+    await api({action:'deleteMonthlyAdjustment',employee:auth().employee,employeePin:auth().pin,adjustmentId});
+    await reloadBossKeepDetail();
+    setMessage('bossStatus','✅ Stundenkorrektur entfernt.','ok');
+  }catch(e){setMessage('bossStatus','Korrektur konnte nicht entfernt werden: '+e.message,'error')}
+}
+
+function openDb(){return new Promise((resolve,reject)=>{const req=indexedDB.open('DGZeiterfassungOffline',2);req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains('queue'))req.result.createObjectStore('queue',{keyPath:'id',autoIncrement:true})};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
+async function queuePut(item){const db=await openDb();return new Promise((resolve,reject)=>{const tx=db.transaction('queue','readwrite');tx.objectStore('queue').add(item);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)})}
+async function queueAll(){const db=await openDb();return new Promise((resolve,reject)=>{const req=db.transaction('queue','readonly').objectStore('queue').getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error)})}
+async function queueDelete(id){const db=await openDb();return new Promise((resolve,reject)=>{const tx=db.transaction('queue','readwrite');tx.objectStore('queue').delete(id);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)})}
+function queuedItemInfo(item){
+  const p=(item&&item.payload)||{},e=p.entry||{};
+  if(item&&item.type==='saveEntry')return {title:e.customer||'Auftrag',date:e.date||'',time:(e.start||'')+(e.end?'–'+e.end:''),hours:Number(e.hours||0),activity:e.activity||''};
+  if(item&&item.type==='closeDay')return {title:'Tagesabschluss',date:p.date||'',time:'',hours:0,activity:''};
+  return {title:(item&&item.type)||'Übertragung',date:'',time:'',hours:0,activity:''};
+}
+async function renderQueueDetails(){
+  const box=$('queueDetails');if(!box)return;
+  const q=(await queueAll().catch(()=>[])).sort((a,b)=>a.createdAt-b.createdAt);
+  if(!q.length){box.innerHTML='<div class="muted">Keine ausstehenden Übertragungen.</div>';return}
+  box.innerHTML=q.map(item=>{const x=queuedItemInfo(item);return `<div class="entry"><strong>🟠 ${esc(x.title)}</strong><br><span>${x.date?formatDateDE(x.date):''}${x.time?' · '+esc(x.time):''}${x.hours?' · <strong>'+formatHours(x.hours)+' Std.</strong>':''}</span>${x.activity?'<br><span class="muted">'+esc(x.activity)+'</span>':''}<div class="button-row" style="margin-top:8px"><button class="btn primary" type="button" onclick="retryQueueItem(${Number(item.id)})">Jetzt übertragen</button></div></div>`}).join('');
+}
+function toggleQueueDetails(){const box=$('queueDetails');box.classList.toggle('hidden');if(!box.classList.contains('hidden'))renderQueueDetails()}
+async function refreshQueueCount(){
+  const q=await queueAll().catch(()=>[]),bar=$('queueBar'),text=$('queueText');
+  bar.classList.toggle('hidden',q.length===0);
+  text.textContent=q.length===1?'1 Auftrag/Abschluss wartet auf Übertragung.':q.length+' Aufträge/Abschlüsse warten auf Übertragung.';
+  if(q.length&&!$('queueDetails').classList.contains('hidden'))await renderQueueDetails();
+}
+async function retryQueueItem(id){
+  if(!navigator.onLine){setMessage('entryStatus','🟠 Gerät ist offline. Übertragung ist momentan nicht möglich.','warn');return}
+  const item=(await queueAll()).find(x=>Number(x.id)===Number(id));if(!item)return refreshQueueCount();
+  try{await api(item.payload);await queueDelete(item.id);setMessage('entryStatus','✅ Ausstehender Auftrag wurde übertragen.','ok');await refreshQueueCount();await loadDay()}
+  catch(e){
+    if(e&&e.dgType==='network')setMessage('entryStatus','🟠 Übertragung weiterhin nicht möglich: '+e.message,'warn');
+    else setMessage('entryStatus','❌ Server lehnt diesen Auftrag ab: '+(e&&e.message?e.message:'Unbekannter Fehler.'),'error');
+  }
+}
+async function syncQueue(showMessage){
+  if(!navigator.onLine){if(showMessage)setMessage('entryStatus','🟠 Gerät ist offline.','warn');return}
+  const items=(await queueAll()).sort((a,b)=>a.createdAt-b.createdAt);let sent=0;
+  for(const item of items){
+    try{await api(item.payload);await queueDelete(item.id);sent++}
+    catch(e){
+      if(showMessage){
+        if(e&&e.dgType==='network')setMessage('entryStatus','🟠 Übertragung unterbrochen: '+e.message,'warn');
+        else setMessage('entryStatus','❌ Eine ausstehende Übertragung wurde vom Server abgelehnt: '+(e&&e.message?e.message:'Unbekannter Fehler.'),'error');
+      }
+      break;
+    }
+  }
+  await refreshQueueCount();await loadDay();
+  if(showMessage&&sent)setMessage('entryStatus','✅ '+sent+' ausstehende Übertragung(en) erfolgreich gesendet.','ok');
+}
+
+function initEnterSupport(){
+  document.addEventListener('keydown',function(ev){
+    if(ev.key!=='Enter')return;
+    const target=ev.target;
+    if(!target)return;
+    if(target.tagName==='BUTTON'||target.type==='checkbox'||target.type==='radio'||target.type==='file')return;
+    if(target.tagName==='TEXTAREA' && !(ev.ctrlKey||ev.metaKey))return;
+    const card=target.closest('.card,.login-card');
+    if(!card)return;
+    const buttons=Array.from(card.querySelectorAll('[data-enter-default]'));
+    const btn=buttons.find(function(b){return !b.disabled && b.offsetParent!==null;});
+    if(!btn)return;
+    ev.preventDefault();
+    btn.click();
+  });
+}
+
+function fillMonths(id){const n=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];$(id).innerHTML=n.map((x,i)=>'<option value="'+(i+1)+'">'+x+'</option>').join('')}
+function init(){initEnterSupport();fillMonths('empMonth');fillMonths('bossMonth');fillMonths('regieMonth');$('regieMonth').insertAdjacentHTML('afterbegin','<option value="0">Alle Monate</option>');const d=new Date();loadEmployeeDirectory();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('regieYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);$('regieMonth').value=String(d.getMonth()+1);$('holidayYear').value=d.getFullYear();if($('vacationYear'))$('vacationYear').value=d.getFullYear();$('absenceStart').value=localDate();$('absenceEnd').value=localDate();clearEmployeeAdminForm();customerPad=initPad('customerSignature');employeePad=null;toggleMaterial();togglePhotos();updateConnection();const a=auth();if(a.employee&&a.pin)openMain();else $('loginScreen').classList.remove('hidden');if(navigator.onLine)syncQueue()}
+if('serviceWorker'in navigator)window.addEventListener('load',async()=>{try{const reg=await navigator.serviceWorker.register('./sw.js?v=28',{updateViaCache:'none'});await reg.update()}catch(e){console.log('Service Worker Update:',e)}});
+window.addEventListener('load',init);
+</script>
+</body>
+</html>
