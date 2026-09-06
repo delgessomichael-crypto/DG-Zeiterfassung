@@ -1,5 +1,4 @@
-const CACHE_NAME = 'dg-zeiterfassung-v41';
-
+const CACHE_NAME = 'dg-zeiterfassung-v42';
 const APP_SHELL = [
   './',
   './index.html',
@@ -10,7 +9,6 @@ const APP_SHELL = [
 
 self.addEventListener('install', event => {
   self.skipWaiting();
-
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => cache.addAll(APP_SHELL).catch(() => {}))
@@ -54,9 +52,7 @@ self.addEventListener('fetch', event => {
     } catch (err) {
       const cached = await caches.match(event.request);
 
-      if (cached) {
-        return cached;
-      }
+      if (cached) return cached;
 
       if (event.request.mode === 'navigate') {
         return (
