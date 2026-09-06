@@ -10,7 +10,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="dg_icon_192.png">
   <link rel="apple-touch-icon" href="dg_icon_192.png">
-  <title>DG Zeiterfassung v32</title>
+  <title>DG Zeiterfassung v40</title>
   <style>
     :root{--brand:#0057a8;--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#111827;--ok:#166534;--okbg:#dcfce7;--warn:#9a3412;--warnbg:#ffedd5;--err:#991b1b;--errbg:#fee2e2}
     *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}
@@ -59,7 +59,7 @@
   <div class="login-wrap">
     <div class="login-card">
       <img class="logo" src="dg_icon_512.png" alt="Del Gesso Gebäudetechnik">
-      <h2 class="center">Mitarbeiter-Anmeldung</h2><div class="center muted small" style="margin-top:-8px;margin-bottom:10px">Version 34</div>
+      <h2 class="center">Mitarbeiter-Anmeldung</h2><div class="center muted small" style="margin-top:-8px;margin-bottom:10px">Version 40</div>
       <div id="loginNet" class="status"></div>
       <label for="loginEmployee">Mitarbeiter</label>
       <select id="loginEmployee" onkeydown="loginEnter(event)"><option value="">Mitarbeiter werden geladen ...</option></select>
@@ -87,7 +87,7 @@
 
     <div class="hero">
       <img class="logo" src="dg_icon_512.png" alt="Del Gesso Gebäudetechnik">
-      <div class="head-row"><div><strong>Zeiterfassung · v36</strong><br><span id="employeeLabel"></span></div><button class="btn danger" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
+      <div class="head-row"><div><strong>Zeiterfassung · v40</strong><br><span id="employeeLabel"></span></div><button class="btn danger" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
     </div>
 
     <div class="tabs"><button id="employeeTab" class="tab active" onclick="showEmployee()">Mitarbeiter</button><button id="bossTab" class="tab boss-tab" onclick="showBoss()">Büro</button></div>
@@ -251,6 +251,17 @@
         <div id="holidayStatus"></div>
       </div>
     </section>
+  </div>
+</div>
+
+<div id="closeDayConfirmModal" class="hidden" style="position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px">
+  <div style="background:#fff;border-radius:18px;max-width:520px;width:100%;padding:24px;box-shadow:0 18px 60px rgba(0,0,0,.28)">
+    <h2 style="margin-top:0">Tag abschließen</h2>
+    <div style="font-size:20px;line-height:1.45;margin:12px 0 20px;font-weight:700">Tag wirklich abschließen?</div>
+    <div class="button-row">
+      <button class="btn success" style="flex:1" onclick="confirmCloseDay()">Ja</button>
+      <button class="btn danger" style="flex:1" onclick="cancelCloseDay()">Nein</button>
+    </div>
   </div>
 </div>
 
@@ -695,7 +706,10 @@ async function reportAssignmentIssue(id){
 async function deleteEntry(id){if(!navigator.onLine){setMessage('entryStatus','Löschen ist offline erst nach der Synchronisierung möglich.','warn');return}if(!confirm('Eintrag wirklich löschen?'))return;const a=auth();try{lastDayData=await api({action:'deleteEntry',id,employee:a.employee,date:$('date').value,pin:a.pin});renderDay();setMessage('entryStatus','Eintrag gelöscht.','ok')}catch(e){setMessage('entryStatus',e.message,'error')}}
 function updateNetTotal(){const pause=Number($('pauseHours').value)||0;$('netTotal').textContent='Arbeitszeit netto: '+formatHours(Math.max(0,Number(lastDayData.total||0)-pause))+' Std.'}
 
-async function closeDay(){const a=auth(),date=$('date').value;if(!confirm('Tag wirklich abschließen?'))return;const item={type:'closeDay',createdAt:Date.now(),payload:{action:'closeDay',employee:a.employee,pin:a.pin,date,signatureDataUrl:'',pauseHours:Number($('pauseHours').value)||0}};if(!navigator.onLine){await queuePut(item);setMessage('closeStatus','🟠 Tagesabschluss offline gespeichert. Wird automatisch übertragen.','warn');await refreshQueueCount();return}try{const res=await api(item.payload);setMessage('closeStatus',res.alreadyClosed?'Tag war bereits abgeschlossen.':'✅ Tag abgeschlossen. Der Abschluss ist im Chefbereich verfügbar.','ok');await loadDay()}catch(e){await queuePut(item);setMessage('closeStatus','🟠 Tagesabschluss wurde offline vorgemerkt.','warn');await refreshQueueCount()}}
+function closeDay(){const modal=$('closeDayConfirmModal');if(modal){modal.classList.remove('hidden');modal.style.display='flex'}}
+function cancelCloseDay(){const modal=$('closeDayConfirmModal');if(modal){modal.classList.add('hidden');modal.style.display='none'}}
+async function confirmCloseDay(){cancelCloseDay();await performCloseDay()}
+async function performCloseDay(){const a=auth(),date=$('date').value;const item={type:'closeDay',createdAt:Date.now(),payload:{action:'closeDay',employee:a.employee,pin:a.pin,date,signatureDataUrl:'',pauseHours:Number($('pauseHours').value)||0}};if(!navigator.onLine){await queuePut(item);setMessage('closeStatus','🟠 Tagesabschluss offline gespeichert. Wird automatisch übertragen.','warn');await refreshQueueCount();return}try{const res=await api(item.payload);setMessage('closeStatus',res.alreadyClosed?'Tag war bereits abgeschlossen.':'✅ Tag abgeschlossen. Der Abschluss ist im Chefbereich verfügbar.','ok');await loadDay()}catch(e){await queuePut(item);setMessage('closeStatus','🟠 Tagesabschluss wurde offline vorgemerkt.','warn');await refreshQueueCount()}}
 
 async function loadMonth(){const a=auth();if(!navigator.onLine){setMessage('monthStatus','Monatsübersicht benötigt Internet.','warn');return}try{const data=await api({action:'getMonthData',employee:a.employee,pin:a.pin,year:Number($('empYear').value),month:Number($('empMonth').value)});const ms=data.monthSummary||{},ys=data.yearSummary||{};let html='<div class="total">Gesamt: '+formatHours(data.total)+' Std.</div><div class="status info">Dieser Monat: Urlaub '+Number(ms.vacationDays||0)+' Tag(e) · Krank '+Number(ms.sickDays||0)+' Tag(e) · Feiertage '+Number(ms.holidayDays||0)+' Tag(e) · Freizeitausgleich '+formatHours(ms.compensatoryHours||0)+' Std. · Zeitguthaben '+formatHours(data.timeBankBalance||0)+' Std.</div><div class="status info">Jahr '+Number(ys.year||$('empYear').value)+': Urlaub '+Number(ys.vacationUsed||0)+' Tag(e) · Krank '+Number(ys.sickDays||0)+' Tag(e) · Urlaub zustehend '+formatHours(ys.vacationEntitlement)+' · Resturlaub '+formatHours(ys.vacationRemaining)+' Tage</div>';const days={};(data.rows||[]).forEach(r=>{const d=r.date||'';if(!days[d])days[d]={date:d,total:0,rows:[],closed:true};days[d].total+=Number(r.hours)||0;days[d].rows.push(r);if(!r.closed)days[d].closed=false});html+=Object.keys(days).sort().map(d=>{const x=days[d];const details=x.rows.map(r=>'<div class="entry" style="margin:8px 0 0"><strong>'+esc(r.customer)+'</strong> · '+formatHours(r.hours)+' Std. '+(r.closed?'✓':'(offen)')+(r.isAdditionalAssignment?' <span class="muted">· Mitarbeit, eingetragen von '+esc(r.assignedBy||'')+' · '+esc(r.assignmentStatus||'Zugeordnet')+'</span>':'')+'</div>').join('');const resend=x.closed?'':' <button type="button" class="btn primary" style="padding:8px 10px;margin-left:8px" onclick="event.preventDefault();event.stopPropagation();transmitOpenDay(\''+esc(x.date)+'\')">Jetzt übermitteln</button>';const light=x.closed?'🟢':'🔴';const state=x.closed?'übermittelt':'offen';return '<details class="entry"><summary style="cursor:pointer"><span style="font-size:18px;margin-right:5px" aria-label="'+state+'">'+light+'</span><strong>'+formatDateDE(x.date)+'</strong> · <strong>'+formatHours(x.total)+' Std.</strong> <span class="muted">('+state+')</span>'+resend+'</summary><div style="margin-top:8px">'+details+'</div></details>'}).join('');if((data.statuses||[]).length){html+='<h3 style="margin-top:16px">Urlaub / Krank / Feiertag</h3>';html+=(data.statuses||[]).map(s=>'<div class="entry"><strong>'+formatDateDE(s.date)+'</strong> · '+esc(s.status)+(Number(s.creditedHours||0)?' · '+formatHours(s.creditedHours)+' Std. Gutschrift':'')+'</div>').join('')}$('monthResult').innerHTML=html;clearMessage('monthStatus')}catch(e){setMessage('monthStatus',e.message,'error')}}
 async function transmitOpenDay(date){if(!navigator.onLine){setMessage('monthStatus','🟠 Keine Internetverbindung. Bitte später erneut versuchen.','warn');return}if(!confirm('Tag '+formatDateDE(date)+' jetzt ans Büro übermitteln?'))return;const a=auth();try{setMessage('monthStatus','Tag '+formatDateDE(date)+' wird übermittelt ...','info');const q=(await queueAll().catch(()=>[])).sort((x,y)=>x.createdAt-y.createdAt);const sameDay=q.filter(item=>{const p=item&&item.payload||{},e=p.entry||{};return (item.type==='saveEntry'&&e.date===date)||(item.type==='closeDay'&&p.date===date)});for(const item of sameDay){await api(item.payload);await queueDelete(item.id)}const hadClose=sameDay.some(item=>item.type==='closeDay');if(!hadClose)await api({action:'closeDay',employee:a.employee,pin:a.pin,date:date,signatureDataUrl:'',pauseHours:0});await refreshQueueCount();setMessage('monthStatus','✅ Tag '+formatDateDE(date)+' wurde ans Büro übermittelt.','ok');await loadMonth();if($('date').value===date)await loadDay()}catch(e){setMessage('monthStatus','Übermittlung nicht möglich: '+(e&&e.message?e.message:'Unbekannter Fehler.'),'error')}}
