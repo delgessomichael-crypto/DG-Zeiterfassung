@@ -60,7 +60,7 @@
   <div class="login-wrap">
     <div class="login-card">
       <img class="logo" src="dg_icon_512.png" alt="Del Gesso Gebäudetechnik">
-      <h2 class="center">Mitarbeiter-Anmeldung</h2><div class="center muted small" style="margin-top:-8px;margin-bottom:10px">Version 40</div>
+      <h2 class="center">Mitarbeiter-Anmeldung</h2><div class="center muted small" style="margin-top:-8px;margin-bottom:10px">Version 43</div>
       <div id="loginNet" class="status"></div>
       <label for="loginEmployee">Mitarbeiter</label>
       <select id="loginEmployee" onkeydown="loginEnter(event)"><option value="">Mitarbeiter werden geladen ...</option></select>
@@ -88,7 +88,7 @@
 
     <div class="hero">
       <img class="logo" src="dg_icon_512.png" alt="Del Gesso Gebäudetechnik">
-      <div class="head-row"><div><strong>Zeiterfassung · v42</strong><br><span id="employeeLabel"></span></div><button class="btn danger" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
+      <div class="head-row"><div><strong>Zeiterfassung · v43</strong><br><span id="employeeLabel"></span></div><button class="btn danger" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
     </div>
 
     <div class="tabs"><button id="employeeTab" class="tab active" onclick="showEmployee()">Mitarbeiter</button><button id="bossTab" class="tab boss-tab" onclick="showBoss()">Büro</button></div>
@@ -177,9 +177,9 @@
     <section id="bossView" class="hidden">
       <div class="card">
         <h2>Regieberichte</h2>
-        <div class="muted small">Laufende Aufträge sind getrennt von fertiggestellten Aufträgen. Abgeschlossene Aufträge stehen direkt zur Abrechnung bereit.</div>
+        <div class="muted small">Laufende Aufträge sind getrennt von offenen Regieberichten. Im Büro kann ein falsch gemeldeter Auftragsstatus jederzeit korrigiert werden. Abgeschlossene Aufträge wechseln zu „Offene Regieberichte“ und stehen dort zur Prüfung und Abrechnung bereit.</div>
         <div id="regieDateFilter" class="admin-grid hidden"><div><label>Jahr</label><input id="regieYear" type="number"></div><div><label>Monat</label><select id="regieMonth"><option value="0">Alle Monate</option></select></div></div>
-        <div class="button-row"><button class="btn danger" onclick="loadRegieReports('Laufend')">🔴 Laufende Aufträge</button><button class="btn success" onclick="loadRegieReports('Abgeschlossen')">🟢 Abgeschlossene Aufträge</button></div>
+        <div class="button-row"><button class="btn danger" onclick="loadRegieReports('Laufend')">🔴 Laufende Aufträge</button><button class="btn success" onclick="loadRegieReports('Abgeschlossen')">🟢 Offene Regieberichte</button></div>
         <button class="btn primary" style="width:100%;margin-top:8px" onclick="loadRegieReports('Abgerechnet')">Abgerechnete Aufträge</button>
         <div id="regieMergeToolbar" class="hidden" style="margin-top:10px;position:sticky;top:8px;z-index:20;background:#fff;padding:8px 0"><button id="regieMergeBtn" class="btn success" style="width:100%" onclick="requestMergeSelectedRegieReports()" disabled>Markierte Regieberichte jetzt zusammenführen</button><div id="regieMergeHint" class="muted small" style="margin-top:6px">Bitte mindestens zwei offene Regieberichte markieren.</div></div>
         <div id="regieStatus"></div><div id="regieResult"></div>
@@ -846,9 +846,10 @@ async function loadRegieReports(view){
       const reports=(g.reports||[]).map(r=>'<div class="entry"><strong>'+formatDateDE(r.date)+' · '+esc(r.employee)+' · '+formatHours(r.hours)+' Std.</strong> '+((r.jobStatus||'Abgeschlossen')==='Laufend'?'<span class="job-status running">🔴 Laufend</span>':'<span class="job-status completed">🟢 Abgeschlossen</span>')+'<div class="report-meta">'+esc(r.start)+'–'+esc(r.end)+'</div><div>'+esc(r.activity||'')+'</div>'+(r.materialUsed?'<div class="report-meta"><strong>Material:</strong> '+esc(r.material||'')+'</div>':'')+'<div class="report-actions">'+reportLinks(r)+'</div></div>').join('');
       const objectIds=(g.objectIds||[g.objectId]).filter(Boolean).join(',');
       const mergeSelect=isOpen?'<label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-weight:700"><input type="checkbox" class="regie-merge-select" onchange="updateRegieMergeButton()" data-object-ids="'+esc(objectIds)+'" style="width:auto"> Zum Zusammenführen markieren</label>':'';
-      const completeBtn=(isRunning?'<button class="btn success" onclick="markRegieObjectCompleted(\''+esc(objectIds)+'\')">✓ Auftrag als abgeschlossen markieren</button>':'');
-      const billedBtn=(isCompleted?'<button class="btn success" onclick="markRegieObjectBilled(\''+esc(objectIds)+'\')">Objekt als abgerechnet markieren</button>':'');
-      return '<div class="report-card '+(isBilled?'billed':'open')+'">'+mergeSelect+'<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap"><strong>🏢 '+esc(g.customer||'Objekt')+'</strong>'+statusBadge+'</div><div class="report-meta">'+range+' · '+Number(g.reportCount||0)+' Bericht(e)</div><div class="total" style="margin:10px 0">Gesamt Personal: '+formatHours(g.totalHours)+' Std.</div><div class="report-meta"><strong>Mitarbeiter:</strong> '+esc(employeeText||'–')+'</div><details style="margin-top:10px"><summary>Einzelberichte anzeigen</summary>'+reports+'</details><div class="report-actions">'+completeBtn+billedBtn+'</div>'+(isBilled?'<div class="status info">Abgerechnet am '+esc(g.billedAt||'')+' von '+esc(g.billedBy||'')+'</div>':'')+'</div>';
+      const completeBtn=(isRunning?'<button class="btn success" onclick="setRegieObjectJobStatus(\''+esc(objectIds)+'\',\'Abgeschlossen\')">✓ Auftrag abschließen → Offene Regieberichte</button>':'');
+      const reopenBtn=(isCompleted?'<button class="btn secondary" onclick="setRegieObjectJobStatus(\''+esc(objectIds)+'\',\'Laufend\')">↩ Falschmeldung korrigieren: wieder laufend</button>':'');
+      const billedBtn=(isCompleted?'<button class="btn success" onclick="markRegieObjectBilled(\''+esc(objectIds)+'\')">Regieberichte als abgerechnet markieren</button>':'');
+      return '<div class="report-card '+(isBilled?'billed':'open')+'">'+mergeSelect+'<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap"><strong>🏢 '+esc(g.customer||'Objekt')+'</strong>'+statusBadge+'</div><div class="report-meta">'+range+' · '+Number(g.reportCount||0)+' Bericht(e)</div><div class="total" style="margin:10px 0">Gesamt Personal: '+formatHours(g.totalHours)+' Std.</div><div class="report-meta"><strong>Mitarbeiter:</strong> '+esc(employeeText||'–')+'</div><details style="margin-top:10px"><summary>Einzelberichte anzeigen</summary>'+reports+'</details><div class="report-actions">'+completeBtn+reopenBtn+billedBtn+'</div>'+(isBilled?'<div class="status info">Abgerechnet am '+esc(g.billedAt||'')+' von '+esc(g.billedBy||'')+'</div>':'')+'</div>';
     }).join('')||'<div class="status ok">Keine '+label.toLowerCase()+' vorhanden.</div>';
     updateRegieMergeButton();
     setMessage('regieStatus',(groups||[]).length+' Objekt(e) geladen.','ok');
@@ -885,7 +886,8 @@ async function confirmMergeSelectedRegieReports(){
   }catch(e){pendingRegieMergeObjectIds=[];setMessage('regieStatus','Zusammenführen nicht möglich: '+e.message,'error')}
 }
 
-async function markRegieObjectCompleted(objectIds){const ids=String(objectIds||'').split(',').filter(Boolean);if(!ids.length){setMessage('regieStatus','Objekt-ID fehlt. Bitte Regieberichte neu laden.','error');return}if(!confirm('Diesen laufenden Auftrag wirklich als abgeschlossen markieren?'))return;try{let count=0;for(const objectId of ids){const r=await api(chefPayload({action:'markRegieObjectCompleted',objectId}));count+=Number(r.count||0)}setMessage('regieStatus','✅ Auftrag abgeschlossen. '+count+' Bericht(e) aktualisiert.','ok');await loadRegieReports('Laufend')}catch(e){setMessage('regieStatus',e.message,'error')}}
+async function setRegieObjectJobStatus(objectIds,jobStatus){const ids=String(objectIds||'').split(',').filter(Boolean);if(!ids.length){setMessage('regieStatus','Objekt-ID fehlt. Bitte Regieberichte neu laden.','error');return}const completed=jobStatus==='Abgeschlossen';const question=completed?'Diesen laufenden Auftrag wirklich als abgeschlossen markieren? Die noch offenen Regieberichte werden danach unter „Offene Regieberichte“ angezeigt.':'Diesen Auftrag wirklich wieder auf „Laufend“ setzen? Damit wird eine falsche Abschlussmeldung korrigiert.';if(!confirm(question))return;try{let count=0;for(const objectId of ids){const r=await api(chefPayload({action:'setRegieObjectJobStatus',objectId,jobStatus}));count+=Number(r.count||0)}setMessage('regieStatus',completed?'✅ Auftrag abgeschlossen. '+count+' offene Regiebericht(e) wurden zu „Offene Regieberichte“ verschoben.':'✅ Status korrigiert. '+count+' Regiebericht(e) sind wieder dem laufenden Auftrag zugeordnet.','ok');await loadRegieReports(completed?'Laufend':'Abgeschlossen')}catch(e){setMessage('regieStatus','Statusänderung nicht möglich: '+e.message,'error')}}
+async function markRegieObjectCompleted(objectIds){return setRegieObjectJobStatus(objectIds,'Abgeschlossen')}
 
 async function markRegieObjectBilled(objectIds){const ids=String(objectIds||'').split(',').filter(Boolean);if(!ids.length){setMessage('regieStatus','Objekt-ID fehlt. Bitte Regieberichte neu laden.','error');return}if(!confirm('Alle offenen Regieberichte dieses Objekts wirklich als abgerechnet markieren? Eingeloggter Chef und aktueller Zeitpunkt werden automatisch gespeichert.'))return;try{let count=0;for(const objectId of ids){const r=await api(chefPayload({action:'markRegieObjectBilled',objectId}));count+=Number(r.count||0)}setMessage('regieStatus','✅ '+count+' Bericht(e) des Objekts als abgerechnet markiert.','ok');await loadRegieReports('Abgeschlossen')}catch(e){setMessage('regieStatus',e.message,'error')}}
 
