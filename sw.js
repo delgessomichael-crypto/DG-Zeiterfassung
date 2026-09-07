@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dg-zeiterfassung-v42';
+const CACHE_NAME = 'dg-zeiterfassung-v43';
 
 const APP_SHELL = [
   './',
