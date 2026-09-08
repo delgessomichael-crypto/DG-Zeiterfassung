@@ -1,0 +1,108 @@
+(function(){
+  'use strict';
+  if(window.__DG_V48_PATCH__) return;
+  window.__DG_V48_PATCH__=true;
+
+  function el(id){return document.getElementById(id)}
+  function esc2(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+
+  function addStyles(){
+    if(el('dgV48Styles'))return;
+    const s=document.createElement('style');s.id='dgV48Styles';s.textContent=`
+      .dg48-head{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;user-select:none;margin:-4px 0 0;padding:4px 0 10px;border-bottom:1px solid #e5e7eb}
+      .dg48-head h2{margin:0;color:var(--brand)}
+      .dg48-toggle{border:0;border-radius:10px;background:#e5e7eb;color:#111827;font-weight:900;font-size:22px;line-height:1;width:44px;height:40px;flex:0 0 44px}
+      .dg48-body{padding-top:12px}.dg48-body.hidden{display:none!important}
+      .dg48-subsection{border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin:10px 0;background:#fff}
+      .dg48-subsection h3{color:var(--brand);margin:0 0 10px;font-size:22px}
+      .dg48-days-employee{border:1px solid #e5e7eb;border-radius:14px;padding:12px;margin-top:10px}
+      .dg48-day-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;margin-top:10px}
+      .dg48-day{border-radius:12px;padding:11px;border:1px solid #d1d5db;background:#fff}
+      .dg48-day.closed{border-left:6px solid #16a34a}.dg48-day.open{border-left:6px solid #dc2626}
+      .dg48-day-state{font-weight:800;margin-bottom:5px}.dg48-day-state.closed{color:#166534}.dg48-day-state.open{color:#991b1b}
+      .dg48-day .btn{width:100%;margin-top:8px}
+      .boss-compact-row button[data-dg-actions]{background:var(--brand)!important;color:#fff!important}
+      @media(max-width:700px){.dg48-day-grid{grid-template-columns:1fr}.dg48-head h2{font-size:19px}.dg48-subsection h3{font-size:18px}}
+    `;document.head.appendChild(s);
+  }
+
+  function findCard(root,title){return Array.from(root.querySelectorAll(':scope > .card')).find(function(c){const h=c.querySelector(':scope > h2');return h&&h.textContent.trim()===title})}
+
+  function collapse(card,title,open){
+    if(!card||card.dataset.dg48==='1')return card;
+    card.dataset.dg48='1';
+    const h=card.querySelector(':scope > h2');
+    const head=document.createElement('div');head.className='dg48-head';
+    head.innerHTML='<h2>'+esc2(title||(h?h.textContent:''))+'</h2><button type="button" class="dg48-toggle">'+(open?'−':'+')+'</button>';
+    const body=document.createElement('div');body.className='dg48-body'+(open?'':' hidden');
+    Array.from(card.childNodes).forEach(function(n){if(n!==h)body.appendChild(n)});if(h)h.remove();
+    card.appendChild(head);card.appendChild(body);
+    head.addEventListener('click',function(e){e.preventDefault();const show=body.classList.contains('hidden');body.classList.toggle('hidden',!show);head.querySelector('.dg48-toggle').textContent=show?'−':'+'});
+    return card;
+  }
+
+  function makeDaySection(){
+    const sec=document.createElement('div');sec.className='dg48-subsection';sec.id='dg48DayClosures';
+    sec.innerHTML='<h3>Tagesabschlüsse</h3><div class="muted small">Grün = vollständig übertragen/abgeschlossen. Rot = noch offen. Offene Arbeitstage können vom Büro manuell abgeschlossen werden.</div><div class="grid2"><div><label>Jahr</label><input id="dg48DayYear" type="number"></div><div><label>Monat</label><select id="dg48DayMonth"></select></div></div><button type="button" class="btn primary" style="width:100%;margin-top:10px" onclick="loadBossDayClosuresV48()">Tagesabschlüsse laden</button><div id="dg48DayStatus"></div><div id="dg48DayResult"></div>';
+    const now=new Date();const y=sec.querySelector('#dg48DayYear'),m=sec.querySelector('#dg48DayMonth');
+    y.value=(el('bossYear')&&el('bossYear').value)||now.getFullYear();
+    ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'].forEach(function(n,i){const o=document.createElement('option');o.value=String(i+1);o.textContent=n;m.appendChild(o)});
+    m.value=(el('bossMonth')&&el('bossMonth').value)||String(now.getMonth()+1);
+    return sec;
+  }
+
+  function buildLayout(){
+    const root=el('bossView');if(!root||root.dataset.dg48Layout==='1')return;root.dataset.dg48Layout='1';
+    const regie=findCard(root,'Regieberichte');
+    const month=findCard(root,'Monatsübersicht aller Mitarbeiter');
+    const employee=findCard(root,'Mitarbeiterverwaltung');
+    const absence=findCard(root,'Urlaub / Krankheit / Abwesenheiten eintragen');
+    const vacation=findCard(root,'Urlaubskonto');
+    const holiday=findCard(root,'Feiertage Bayern / Nürnberg');
+
+    if(regie)collapse(regie,'Regieberichte',true);
+
+    if(month){
+      const group=document.createElement('div');group.className='card';group.id='dg48EmployeeClosures';group.innerHTML='<h2>Mitarbeiterabschlüsse</h2>';
+      const inner=document.createElement('div');
+      inner.appendChild(makeDaySection());
+      month.classList.add('dg48-subsection');month.style.boxShadow='none';month.style.margin='10px 0';
+      const mh=month.querySelector(':scope > h2');if(mh)mh.textContent='Monatsabschlüsse';
+      inner.appendChild(month);group.appendChild(inner);
+      if(regie)regie.insertAdjacentElement('afterend',group);else root.insertBefore(group,root.firstChild);
+      collapse(group,'Mitarbeiterabschlüsse',false);
+    }
+
+    if(employee)collapse(employee,'Mitarbeiterverwaltung · Punkte 1–9',false);
+
+    if(absence||vacation||holiday){
+      const group=document.createElement('div');group.className='card';group.id='dg48AbsenceGroup';group.innerHTML='<h2>Urlaub / Abwesenheiten / Feiertage</h2>';
+      const inner=document.createElement('div');
+      [absence,vacation,holiday].forEach(function(c){if(c){c.classList.add('dg48-subsection');c.style.boxShadow='none';c.style.margin='10px 0';inner.appendChild(c)}});
+      group.appendChild(inner);root.appendChild(group);collapse(group,'Urlaub / Abwesenheiten / Feiertage',false);
+    }
+  }
+
+  function blueActions(){document.querySelectorAll('.boss-compact-row button').forEach(function(b){if((b.textContent||'').trim()==='Aktionen'){b.type='button';b.classList.remove('secondary');b.classList.add('primary');b.dataset.dgActions='1'}})}
+  if(typeof window.renderBossCompact==='function'){const old=window.renderBossCompact;window.renderBossCompact=function(){const r=old.apply(this,arguments);blueActions();return r}}
+  window.openBossActions=function(i){bossDetailIndex=i;bossDetailTab='overview';renderBossActions();const r=el('bossResult');if(r)r.scrollIntoView({behavior:'smooth',block:'start'})};
+
+  window.loadBossDayClosuresV48=async function(){
+    if(!navigator.onLine){setMessage('dg48DayStatus','Tagesabschlüsse benötigen Internet.','warn');return}
+    const year=Number(el('dg48DayYear').value),month=Number(el('dg48DayMonth').value);
+    try{setMessage('dg48DayStatus','Tagesabschlüsse werden geladen ...','info');const rows=await api(chefPayload({action:'getBossDayClosures',year:year,month:month}));renderBossDayClosuresV48(rows||[]);setMessage('dg48DayStatus','✓ Tagesabschlüsse geladen.','ok')}catch(e){setMessage('dg48DayStatus',e.message,'error')}
+  };
+
+  window.renderBossDayClosuresV48=function(rows){
+    const out=el('dg48DayResult');if(!out)return;if(!rows.length){out.innerHTML='<div class="status info">Für diesen Monat sind keine Arbeitstage vorhanden.</div>';return}
+    out.innerHTML=rows.map(function(emp){return '<div class="dg48-days-employee"><strong>'+esc2(emp.employee)+'</strong><div class="dg48-day-grid">'+(emp.days||[]).map(function(d){const c=!!d.closed;return '<div class="dg48-day '+(c?'closed':'open')+'"><div class="dg48-day-state '+(c?'closed':'open')+'">'+(c?'🟢 Vollständig übertragen':'🔴 Noch nicht abgeschlossen')+'</div><strong>'+esc2(formatDateDE(d.date))+'</strong><div class="muted small">'+esc2(formatHours(d.hours||0))+' Std. · '+Number(d.entryCount||0)+' Eintrag/Einträge</div>'+(c?'':'<button type="button" class="btn danger" data-employee="'+esc2(emp.employee)+'" data-date="'+esc2(d.date)+'" onclick="manualCloseBossDayV48(this.dataset.employee,this.dataset.date)">Tag manuell abschließen</button>')+'</div>'}).join('')+'</div></div>'}).join('');
+  };
+
+  window.manualCloseBossDayV48=async function(employee,date){
+    if(!confirm('Tag '+formatDateDE(date)+' für '+employee+' wirklich manuell abschließen?'))return;
+    try{setMessage('dg48DayStatus','Tag wird manuell abgeschlossen ...','info');const r=await api(chefPayload({action:'manualCloseBossDay',targetEmployee:employee,date:date}));setMessage('dg48DayStatus',r&&r.alreadyClosed?'Tag war bereits abgeschlossen.':'✓ Tag wurde manuell abgeschlossen.','ok');await loadBossDayClosuresV48();if(typeof loadBossMonth==='function')await loadBossMonth()}catch(e){setMessage('dg48DayStatus',e.message,'error')}
+  };
+
+  addStyles();buildLayout();blueActions();
+  document.title='DG Zeiterfassung v48';const lv=document.querySelector('.login-card .center.muted.small');if(lv)lv.textContent='Version 48';const hv=document.querySelector('.hero .head-row strong');if(hv)hv.textContent='Zeiterfassung · v48';
+})();
