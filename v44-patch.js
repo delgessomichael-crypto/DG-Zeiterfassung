@@ -14,7 +14,9 @@
       .dg-v44-modal{position:fixed;inset:0;z-index:10040;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px}
       .dg-v44-modal.hidden{display:none!important}.dg-v44-modal-card{background:#fff;border-radius:18px;max-width:620px;width:100%;padding:24px;box-shadow:0 18px 60px rgba(0,0,0,.28);max-height:90vh;overflow:auto}
       .dg-v44-modal-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px}
-      @media(max-width:700px){.dg-v44-modal-actions{grid-template-columns:1fr}}
+      .dg-report-choice{border:1px solid #d1d5db;border-radius:12px;padding:12px;margin-top:10px;display:flex;gap:12px;align-items:center;justify-content:space-between}
+      .dg-report-choice .btn{width:auto;flex:0 0 auto}
+      @media(max-width:700px){.dg-v44-modal-actions{grid-template-columns:1fr}.dg-report-choice{align-items:stretch;flex-direction:column}.dg-report-choice .btn{width:100%}}
     `;
     document.head.appendChild(style);
   }
@@ -26,6 +28,11 @@
     if(!byId('deleteEntryConfirmModal')){
       const wrap=document.createElement('div');wrap.id='deleteEntryConfirmModal';wrap.className='dg-v44-modal hidden';
       wrap.innerHTML='<div class="dg-v44-modal-card" style="max-width:480px"><h2 style="margin-top:0">Eintrag wirklich entfernen?</h2><div style="font-size:17px;line-height:1.45">Der ausgewählte Tageseintrag wird endgültig gelöscht.</div><div class="dg-v44-modal-actions"><button class="btn success" type="button" onclick="confirmDeleteEntryUi()">Ja</button><button class="btn danger" type="button" onclick="cancelDeleteEntryUi()">Nein</button></div></div>';
+      document.body.appendChild(wrap);
+    }
+    if(!byId('regieSelectEditModal')){
+      const wrap=document.createElement('div');wrap.id='regieSelectEditModal';wrap.className='dg-v44-modal hidden';
+      wrap.innerHTML='<div class="dg-v44-modal-card"><h2 style="margin-top:0">Bericht bearbeiten</h2><div class="muted">Dieser Auftrag enthält mehrere Einzelberichte. Bitte den Bericht auswählen, der geändert werden soll.</div><div id="regieSelectEditList"></div><div class="dg-v44-modal-actions" style="grid-template-columns:1fr"><button class="btn secondary" type="button" onclick="closeRegieSelectEdit()">Abbrechen</button></div></div>';
       document.body.appendChild(wrap);
     }
     if(!byId('regieEditModal')){
@@ -57,12 +64,13 @@
   const originalApi=window.api;
   if(typeof originalApi==='function'){
     window.api=async function(payload){
-      const action=String(payload&&payload.action||'');
-      const isWrite=WRITE_ACTIONS.has(action);
+      const action=String(payload&&.payload||'');
+      const actualAction=String(payload&&payload.action||'');
+      const isWrite=WRITE_ACTIONS.has(actualAction);
       if(isWrite) window.showGlobalActionStatus('Wird verarbeitet ...','info');
       try{
         const result=await originalApi(payload);
-        if(action==='getRegieReports') window.__dgV44LastRegieRaw=result||[];
+        if(actualAction==='getRegieReports') window.__dgV44LastRegieRaw=result||[];
         if(isWrite) window.showGlobalActionStatus('✓ Aktion erfolgreich abgeschlossen.','ok',1800);
         return result;
       }catch(e){
@@ -91,6 +99,7 @@
   };
 
   window.__regieReportById=window.__regieReportById||{};
+  window.__regieGroupReports=window.__regieGroupReports||{};
   function filteredRegieGroups(view){
     let groups=window.__dgV44LastRegieRaw||[];
     if(typeof mergeRegieGroups==='function') groups=mergeRegieGroups(groups);
@@ -107,10 +116,19 @@
     const cards=Array.from(root.children).filter(function(el){return el.classList&&el.classList.contains('report-card')});
     groups.forEach(function(g,gi){
       const card=cards[gi];if(!card)return;
+      const reports=(g.reports||[]).filter(function(r){return r&&r.id});
+      const groupKey='group-'+gi+'-'+String(g.objectId||'')+'-'+String(g.firstDate||'');
+      window.__regieGroupReports[groupKey]=reports.map(function(r){return String(r.id)});
+      reports.forEach(function(r){window.__regieReportById[String(r.id)]=r});
+
+      const mainActions=Array.from(card.children).find(function(el){return el.classList&&el.classList.contains('report-actions')});
+      if(mainActions && !mainActions.querySelector('[data-dg-group-edit="'+groupKey+'"]')){
+        const editBtn=document.createElement('button');editBtn.type='button';editBtn.className='btn primary';editBtn.textContent='Bericht bearbeiten';editBtn.dataset.dgGroupEdit=groupKey;editBtn.onclick=function(){window.requestRegieGroupEdit(groupKey)};mainActions.insertBefore(editBtn,mainActions.firstChild);
+      }
+
       const entries=Array.from(card.querySelectorAll('details .entry'));
-      (g.reports||[]).forEach(function(r,ri){
-        const id=String(r.id||'');if(!id)return;
-        window.__regieReportById[id]=r;
+      reports.forEach(function(r,ri){
+        const id=String(r.id||'');
         const entry=entries[ri];if(!entry)return;
         const actions=entry.querySelector('.report-actions');if(!actions||actions.querySelector('[data-dg-edit-report="'+CSS.escape(id)+'"]'))return;
         const btn=document.createElement('button');btn.type='button';btn.className='btn primary';btn.textContent='Bericht bearbeiten';btn.dataset.dgEditReport=id;btn.onclick=function(){window.openRegieReportEditById(id)};actions.appendChild(btn);
@@ -122,6 +140,20 @@
   if(typeof originalLoadRegie==='function'){
     window.loadRegieReports=async function(view){const r=await originalLoadRegie(view);enhanceRegie(view);return r};
   }
+
+  window.requestRegieGroupEdit=function(groupKey){
+    const ids=(window.__regieGroupReports||{})[groupKey]||[];
+    if(!ids.length){setMessage('regieStatus','Zu diesem Auftrag wurde kein bearbeitbarer Einzelbericht gefunden.','error');return}
+    if(ids.length===1){window.openRegieReportEditById(ids[0]);return}
+    const list=byId('regieSelectEditList');
+    list.innerHTML=ids.map(function(id){
+      const r=(window.__regieReportById||{})[id]||{};
+      return '<div class="dg-report-choice"><div><strong>'+formatDateDE(r.date||'')+' · '+esc(r.employee||'')+' · '+formatHours(r.hours||0)+' Std.</strong><div class="report-meta">'+esc((r.start||'')+'–'+(r.end||''))+'</div><div>'+esc(r.activity||'')+'</div></div><button class="btn primary" type="button" data-edit-id="'+esc(id)+'">Bearbeiten</button></div>';
+    }).join('');
+    list.querySelectorAll('[data-edit-id]').forEach(function(btn){btn.onclick=function(){window.closeRegieSelectEdit();window.openRegieReportEditById(btn.dataset.editId)}});
+    byId('regieSelectEditModal').classList.remove('hidden');
+  };
+  window.closeRegieSelectEdit=function(){const modal=byId('regieSelectEditModal');if(modal)modal.classList.add('hidden')};
 
   window.openRegieReportEditById=function(id){
     const r=(window.__regieReportById||{})[String(id||'')];
