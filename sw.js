@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dg-zeiterfassung-v53';
+const CACHE_NAME = 'dg-zeiterfassung-v53-1';
 const APP_SHELL = ['./','./index.html','./v45-patch.js','./v48-patch.js','./v49-patch.js','./v50-patch.js','./v51-patch.js','./v53-finish.js','./manifest.json','./dg_icon_192.png','./dg_icon_512.png'];
 self.addEventListener('install',event=>{self.skipWaiting();event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.addAll(APP_SHELL).catch(()=>{})))});
 self.addEventListener('activate',event=>{event.waitUntil((async()=>{const keys=await caches.keys();await Promise.all(keys.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)));await self.clients.claim()})())});
@@ -6,7 +6,7 @@ async function withV53Patches(response){
   if(!response||!response.ok)return response;const type=response.headers.get('content-type')||'';if(!type.includes('text/html'))return response;
   let html=await response.text();
   html=html.replace(/<script[^>]+v44-patch\.js[^>]*><\/script>\s*/g,'').replace(/<script[^>]+v47-patch\.js[^>]*><\/script>\s*/g,'');
-  [['v45-patch.js','45'],['v48-patch.js','48'],['v49-patch.js','49'],['v50-patch.js','50'],['v51-patch.js','51'],['v53-finish.js','53']].forEach(x=>{if(!html.includes(x[0]))html=html.replace('</body>','<script src="./'+x[0]+'?v='+x[1]+'"></script>\n</body>')});
+  [['v45-patch.js','45'],['v48-patch.js','48'],['v49-patch.js','49'],['v50-patch.js','50'],['v51-patch.js','51'],['v53-finish.js','53.1']].forEach(x=>{if(!html.includes(x[0]))html=html.replace('</body>','<script src="./'+x[0]+'?v='+x[1]+'"></script>\n</body>')});
   html=html.replace(/<title>DG Zeiterfassung v\d+<\/title>/,'<title>DG Zeiterfassung v53</title>');
   const headers=new Headers(response.headers);headers.delete('content-length');return new Response(html,{status:response.status,statusText:response.statusText,headers});
 }
