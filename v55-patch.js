@@ -1,0 +1,77 @@
+(function(){
+'use strict';
+if(window.__DG_V55_PATCH__)return;window.__DG_V55_PATCH__=true;
+const $=id=>document.getElementById(id);
+const esc55=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt55=v=>typeof formatHours==='function'?formatHours(v):Number(v||0).toFixed(2).replace('.',',');
+let supplementMode=false;
+
+function addCss(){if($('dg55css'))return;const s=document.createElement('style');s.id='dg55css';s.textContent=`
+.dg55-supplement{display:inline-block;margin-left:7px;padding:3px 8px;border-radius:999px;background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;font-size:12px;font-weight:800}.dg55-supplement-note{margin-top:5px;color:#9a3412;font-size:12px;font-weight:700}.dg55-after-close{margin:10px 0;padding:12px;border:1px solid #fed7aa;border-radius:12px;background:#fff7ed}.dg55-after-close .btn{width:100%;margin-top:8px}.dg55-active{border:2px solid #f59e0b!important;box-shadow:0 0 0 3px rgba(245,158,11,.12)}
+`;document.head.appendChild(s)}
+
+window.updateNetTotal=function(){};
+window.performCloseDay=async function(){
+  const a=auth(),date=$('date').value;
+  const item={type:'closeDay',createdAt:Date.now(),payload:{action:'closeDay',employee:a.employee,pin:a.pin,date,signatureDataUrl:'',pauseHours:0}};
+  if(!navigator.onLine){await queuePut(item);setMessage('closeStatus','🟠 Tagesabschluss offline gespeichert. Wird automatisch übertragen.','warn');await refreshQueueCount();return}
+  try{setMessage('closeStatus','Tagesabschluss wird übertragen …','info');const res=await api(item.payload);setMessage('closeStatus',res.alreadyClosed?'Tag war bereits abgeschlossen.':'✅ Tag abgeschlossen. Der Abschluss ist im Chefbereich verfügbar.','ok');await loadDay()}
+  catch(e){if(e&&e.dgType==='network'){await queuePut(item);setMessage('closeStatus','🟠 Tagesabschluss wurde offline vorgemerkt.','warn');await refreshQueueCount()}else setMessage('closeStatus','Tagesabschluss nicht möglich: '+(e&&e.message?e.message:'Unbekannter Fehler.'),'error')}
+};
+
+function addSupplementUi(){
+  const day=$('dayTotal');if(!day)return;
+  let box=$('dg55AfterClose');
+  if(lastDayData&&lastDayData.closed){
+    if(!box){box=document.createElement('div');box.id='dg55AfterClose';box.className='dg55-after-close';day.insertAdjacentElement('afterend',box)}
+    box.innerHTML='<strong>Tag bereits abgeschlossen</strong><div class="small">Ein ungeplanter weiterer Einsatz kann als nachvollziehbarer Nachtrag erfasst werden.</div><button type="button" class="btn secondary" onclick="dg55StartSupplement()">Nachtrag zu abgeschlossenem Tag erfassen</button>';
+    box.classList.toggle('dg55-active',supplementMode);
+    if(supplementMode)box.querySelector('button').textContent='Nachtragserfassung aktiv';
+  }else if(box){box.remove();supplementMode=false}
+}
+window.dg55StartSupplement=function(){
+  if(!lastDayData||!lastDayData.closed)return;
+  if(!confirm('Der Tag wurde bereits abgeschlossen. Wirklich einen zusätzlichen Einsatz als Nachtrag erfassen?'))return;
+  supplementMode=true;addSupplementUi();
+  const card=$('workEntryCard');if(card){card.classList.add('dg55-active');card.scrollIntoView({behavior:'smooth',block:'start'})}
+  setMessage('entryStatus','Nachtragserfassung aktiv. Der neue Eintrag wird mit Datum und Uhrzeit als Nachtrag gekennzeichnet.','warn');
+};
+
+function decorateEmployeeEntries(){
+  const rows=[...document.querySelectorAll('#entries > .entry')];
+  (lastDayData&&lastDayData.entries||[]).forEach((e,i)=>{if(!e.isSupplement||!rows[i])return;const first=rows[i].querySelector('strong');if(first&&!rows[i].querySelector('.dg55-supplement'))first.insertAdjacentHTML('afterend',' <span class="dg55-supplement">NACHTRAG</span>');if(e.supplementCreatedAt&&!rows[i].querySelector('.dg55-supplement-note'))rows[i].insertAdjacentHTML('beforeend','<div class="dg55-supplement-note">Nachtrag erfasst am '+esc55(e.supplementCreatedAt)+'</div>')});
+}
+const prevRenderDay=window.renderDay;
+if(typeof prevRenderDay==='function')window.renderDay=function(){const r=prevRenderDay.apply(this,arguments);const day=$('dayTotal');if(day){day.className='day-balance good';day.textContent='Heute: '+fmt55(Number(lastDayData&&lastDayData.total||0))+' Std.'}decorateEmployeeEntries();addSupplementUi();return r};
+
+window.saveEntry=async function(){
+  const a=auth(),date=$('date').value,customer=$('customer').value.trim(),activity=$('activity').value.trim(),materialUsed=document.querySelector('input[name="materialUsed"]:checked').value==='yes',material=$('material').value.trim(),jobCompleted=document.querySelector('input[name="jobCompleted"]:checked').value==='yes';
+  if(lastDayData&&lastDayData.closed&&!supplementMode){setMessage('entryStatus','Der Tag ist abgeschlossen. Bitte zuerst „Nachtrag zu abgeschlossenem Tag erfassen“ wählen.','warn');addSupplementUi();return}
+  const startMinutes=timeInputMinutes('start'),endMinutes=timeInputMinutes('end');
+  if(!customer){setMessage('entryStatus','Bitte Kunde / Baustelle eintragen.','error');return}
+  if(startMinutes===null||endMinutes===null){setMessage('entryStatus','Bitte gültige Von-/Bis-Zeit eintragen.','error');return}
+  const startTime=String(Math.floor(startMinutes/60)).padStart(2,'0')+':'+String(startMinutes%60).padStart(2,'0');const endTime=String(Math.floor(endMinutes/60)).padStart(2,'0')+':'+String(endMinutes%60).padStart(2,'0');$('start').value=startTime;$('end').value=endTime;const hours=calculateHours();
+  if(!(hours>0&&hours<=24)){setMessage('entryStatus','Arbeitszeit konnte nicht berechnet werden. Bitte Von/Bis prüfen.','error');return}if(!activity){setMessage('entryStatus','Bitte die ausgeführte Tätigkeit eintragen.','error');return}if(materialUsed&&!material){setMessage('entryStatus','Bitte Material eintragen.','error');return}
+  const entry={clientId:uid(),employee:a.employee,employeePin:a.pin,date,customer,start:startTime,end:endTime,startMinutes,endMinutes,hours,activity,syncCalendar:false,materialUsed,material,additionalEmployeesUsed:false,additionalEmployees:[],additionalEmployeeHours:[],photos:preparedPhotos.slice(),customerSignature:noCustomerPresent?'':customerPad.dataUrl(),sourceCalendarEventId:selectedCalendarEventId,replacementAssignmentId:'',jobStatus:jobCompleted?'Abgeschlossen':'Laufend',isSupplement:Boolean(supplementMode)};
+  const item={type:'saveEntry',createdAt:Date.now(),payload:{action:'saveEntry',employee:a.employee,pin:a.pin,entry}};
+  if(!navigator.onLine){await queuePut(item);setMessage('entryStatus',supplementMode?'🟠 Nachtrag offline gespeichert. Automatische Übertragung folgt bei Internetverbindung.':'🟠 Offline gespeichert. Automatische Übertragung folgt bei Internetverbindung.','warn');resetEntry();supplementMode=false;await refreshQueueCount();return}
+  try{setMessage('entryStatus',supplementMode?'Nachtrag wird übertragen …':'Eintrag wird übertragen …','info');const day=await api(item.payload);lastDayData=day;renderDay();resetEntry();supplementMode=false;const card=$('workEntryCard');if(card)card.classList.remove('dg55-active');await loadCalendarEvents();setMessage('entryStatus',entry.isSupplement?'✅ Nachtrag gespeichert und mit Zeitstempel gekennzeichnet.':'✅ Eintrag gespeichert. Der Auftrag steht jetzt im Chefbereich unter Regieberichte.','ok')}
+  catch(e){if(e&&e.dgType==='network'){await queuePut(item);setMessage('entryStatus','🟠 Keine Serververbindung. Eintrag wurde lokal gespeichert.','warn');resetEntry();supplementMode=false;await refreshQueueCount()}else setMessage('entryStatus','❌ Auftrag nicht gespeichert: '+(e&&e.message?e.message:'Unbekannter Serverfehler.'),'error')}
+};
+
+window.mergeRegieGroups=function(groups){const map={};(groups||[]).forEach(g=>{const status=g.jobStatus||'Abgeschlossen',base=typeof regieCustomerKey==='function'?regieCustomerKey(g.customer):String(g.customer||'').toLowerCase(),key=(base||('obj:'+String(g.objectId||'')))+'|'+status;if(!map[key])map[key]={objectId:g.objectId||'',customer:g.customer||'',status:g.status||'',jobStatus:status,totalHours:0,reportCount:0,employees:[],objectIds:[],reports:[],firstDate:g.firstDate||'',lastDate:g.lastDate||'',billedAt:g.billedAt||'',billedBy:g.billedBy||''};const x=map[key];x.totalHours+=Number(g.totalHours)||0;x.reportCount+=Number(g.reportCount)||0;x.employees=Array.from(new Set(x.employees.concat(g.employees||[]))).filter(Boolean).sort();x.objectIds=Array.from(new Set(x.objectIds.concat(g.objectIds||[],g.objectId||[]))).filter(Boolean);x.reports=x.reports.concat(g.reports||[]);if(g.firstDate&&(!x.firstDate||g.firstDate<x.firstDate))x.firstDate=g.firstDate;if(g.lastDate&&(!x.lastDate||g.lastDate>x.lastDate))x.lastDate=g.lastDate;if(g.billedAt)x.billedAt=g.billedAt;if(g.billedBy)x.billedBy=g.billedBy});return Object.values(map).map(x=>{x.totalHours=Math.round((x.totalHours+Number.EPSILON)*100)/100;x.reportCount=x.reports.length||x.reportCount;x.reports.sort((a,b)=>String((a.date||'')+' '+(a.start||'')).localeCompare(String((b.date||'')+' '+(b.start||''))));return x})};
+
+window.setRegieObjectJobStatus=async function(objectIds,jobStatus){const ids=String(objectIds||'').split(',').map(x=>x.trim()).filter(Boolean);if(!ids.length){setMessage('regieStatus','Objekt-ID fehlt. Bitte Regieberichte neu laden.','error');return}const completed=jobStatus==='Abgeschlossen';const question=completed?'Diesen laufenden Auftrag wirklich als abgeschlossen markieren? Er erscheint danach unter „Offene Regieberichte“.':'Diesen Auftrag wirklich wieder auf „Laufend“ setzen?';if(!confirm(question))return;try{setMessage('regieStatus','Auftragsstatus wird geändert …','info');let count=0;for(const objectId of ids){const r=await api(chefPayload({action:'setRegieObjectJobStatus',objectId,jobStatus}));count+=Number(r.count||0)}setMessage('regieStatus','✅ '+count+' Regiebericht(e) wurden auf „'+jobStatus+'“ gesetzt.','ok');await loadRegieReports(jobStatus==='Laufend'?'Laufend':'Abgeschlossen')}catch(e){setMessage('regieStatus','Statusänderung nicht möglich: '+e.message,'error')}};
+
+window.markRegieObjectBilled=async function(objectIds){const ids=String(objectIds||'').split(',').map(x=>x.trim()).filter(Boolean);if(!ids.length){setMessage('regieStatus','Objekt-ID fehlt. Bitte Regieberichte neu laden.','error');return}try{setMessage('regieStatus','Vor Abrechnung werden weitere offene/laufende Aufträge geprüft …','info');const risk=await api(chefPayload({action:'checkRegieBillingRisk',objectIds:ids}));const matches=(risk&&risk.matches)||[];let force=false;if(matches.length){const text=matches.slice(0,6).map(x=>'• '+(x.customer||'Objekt')+' ('+(x.jobStatus||'')+')').join('\n');if(!confirm('Weitere offene oder laufende Vorgänge dieses Kunden wurden gefunden:\n\n'+text+'\n\nDiesen ausgewählten Auftrag trotzdem als abgerechnet markieren?')){setMessage('regieStatus','Abrechnung abgebrochen. Weitere Vorgänge bitte prüfen.','warn');return}force=true}else if(!confirm('Keine weiteren passenden offenen/laufenden Vorgänge gefunden. Diesen Auftrag wirklich als abgerechnet markieren?'))return;setMessage('regieStatus','Regieberichte werden als abgerechnet gespeichert …','info');const r=await api(chefPayload({action:'markRegieObjectsBilled',objectIds:ids,force:force}));setMessage('regieStatus','✅ '+Number(r.count||0)+' Bericht(e) als abgerechnet markiert.','ok');await loadRegieReports('Abgeschlossen')}catch(e){setMessage('regieStatus','Abrechnung nicht möglich: '+e.message,'error')}};
+
+window.renderBossEntries=function(x){return (x.entries||[]).map((e,i)=>'<div class="entry"><strong>'+formatDateDE(e.date)+' · '+esc55(e.customer)+' · '+fmt55(e.hours)+' Std.</strong>'+(e.isAdditionalAssignment?' · Mitarbeit':'')+(e.isSupplement?' <span class="dg55-supplement">NACHTRAG</span>':'')+'<br><span class="muted">'+esc55(e.activity||'')+'</span>'+(e.isSupplement&&e.supplementCreatedAt?'<div class="dg55-supplement-note">Nachtrag erfasst am '+esc55(e.supplementCreatedAt)+'</div>':'')+'<div class="admin-actions" style="margin-top:8px"><button class="btn secondary" onclick="openObjectView('+i+')">🏢 Objekt aufrufen</button><button class="btn secondary" onclick="setBossDetailTab(\'adjust\')">± Stunden anpassen</button></div></div>').join('')||'<div class="muted">Keine Aufträge.</div>'};
+
+const prevOpenObject=window.openObjectView;
+window.openObjectView=async function(entryIndex){const x=(window.__bossMonthRows||[])[bossDetailIndex],e=(x&&x.entries||[])[entryIndex];if(!e){if(typeof prevOpenObject==='function')return prevOpenObject(entryIndex);return}try{setMessage('bossStatus','Objekt wird geladen …','info');const o=await api(chefPayload({action:'getObjectReports',objectId:e.objectId||'',customer:e.customer}));let h=bossToolbar(x)+'<button class="btn secondary" onclick="renderBossActions()">← Zurück zu '+esc55(x.employee)+'</button><div class="object-summary"><strong>🏢 '+esc55(o.displayName||e.customer)+'</strong><br>Berichte: '+Number(o.reportCount||0)+' · Gesamtstunden: '+fmt55(o.totalHours)+' · Mitarbeiter: '+esc55((o.employees||[]).join(', '))+'</div>';h+=(o.reports||[]).map(r=>'<div class="report-card"><strong>'+formatDateDE(r.date)+' · '+esc55(r.employee)+' · '+fmt55(r.hours)+' Std.</strong>'+(r.isSupplement?' <span class="dg55-supplement">NACHTRAG</span>':'')+'<div class="report-meta">'+esc55(r.start)+'–'+esc55(r.end)+' · '+esc55(r.regieStatus)+'</div><div>'+esc55(r.activity||'')+'</div>'+(r.isSupplement&&r.supplementCreatedAt?'<div class="dg55-supplement-note">Nachtrag erfasst am '+esc55(r.supplementCreatedAt)+'</div>':'')+(r.materialUsed?'<div class="report-meta"><strong>Material:</strong> '+esc55(r.material||'')+'</div>':'')+'<div class="report-actions">'+reportLinks(r)+'</div></div>').join('');$('bossResult').innerHTML=h;clearMessage('bossStatus')}catch(err){setMessage('bossStatus',err.message,'error')}};
+
+const prevLoadRegie=window.loadRegieReports;
+if(typeof prevLoadRegie==='function')window.loadRegieReports=async function(view){const r=await prevLoadRegie.apply(this,arguments);try{if(!navigator.onLine)return r;const isBilled=view==='Abgerechnet',isRunning=view==='Laufend';let groups=await api(chefPayload({action:'getRegieReports',status:isBilled?'Abgerechnet':'Offen',year:isBilled?(Number($('regieYear').value)||0):0,month:isBilled?(Number($('regieMonth').value)||0):0}));groups=mergeRegieGroups(groups||[]);if(!isBilled)groups=groups.filter(g=>isRunning?(g.jobStatus==='Laufend'):(g.jobStatus!=='Laufend'));const cards=[...document.querySelectorAll('#regieResult > .report-card')];groups.forEach((g,gi)=>{const card=cards[gi];if(!card)return;const rows=[...card.querySelectorAll('details .entry')];(g.reports||[]).forEach((rep,ri)=>{if(!rep.isSupplement||!rows[ri])return;const strong=rows[ri].querySelector('strong');if(strong&&!rows[ri].querySelector('.dg55-supplement'))strong.insertAdjacentHTML('afterend',' <span class="dg55-supplement">NACHTRAG</span>');if(rep.supplementCreatedAt&&!rows[ri].querySelector('.dg55-supplement-note'))rows[ri].insertAdjacentHTML('beforeend','<div class="dg55-supplement-note">Nachtrag erfasst am '+esc55(rep.supplementCreatedAt)+'</div>')})})}catch(_e){}return r};
+
+addCss();document.title='DG Zeiterfassung v55';const lv=document.querySelector('.login-card .center.muted.small');if(lv)lv.textContent='Version 55';const hv=document.querySelector('.hero .head-row strong');if(hv)hv.textContent='Zeiterfassung · v55';
+})();
