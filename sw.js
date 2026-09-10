@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dg-zeiterfassung-v61-1';
+const CACHE_NAME = 'dg-zeiterfassung-v61-2';
 const APP_SHELL = ['./','./index.html','./v45-patch.js','./v48-patch.js','./v49-patch.js','./v50-patch.js','./v51-patch.js','./v53-finish.js','./v54-patch.js','./v55-patch.js','./v56-patch.js','./v57-patch.js','./v58-patch.js','./v59-patch.js','./v60-patch.js','./v61-patch.js','./manifest.json','./dg_icon_192.png','./dg_icon_512.png'];
 self.addEventListener('install',event=>{self.skipWaiting();event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.addAll(APP_SHELL).catch(()=>{})))});
 self.addEventListener('activate',event=>{event.waitUntil((async()=>{const keys=await caches.keys();await Promise.all(keys.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)));await self.clients.claim()})())});
@@ -6,7 +6,7 @@ async function withV61Patches(response){
   if(!response||!response.ok)return response;const type=response.headers.get('content-type')||'';if(!type.includes('text/html'))return response;
   let html=await response.text();
   html=html.replace(/<script[^>]+v44-patch\.js[^>]*><\/script>\s*/g,'').replace(/<script[^>]+v47-patch\.js[^>]*><\/script>\s*/g,'');
-  [['v45-patch.js','45'],['v48-patch.js','48'],['v49-patch.js','49'],['v50-patch.js','50'],['v51-patch.js','51'],['v53-finish.js','53.1'],['v54-patch.js','54.1'],['v55-patch.js','55.1'],['v56-patch.js','56.1'],['v57-patch.js','57.1'],['v58-patch.js','58.1'],['v59-patch.js','59.1'],['v60-patch.js','60.1'],['v61-patch.js','61.1']].forEach(x=>{if(!html.includes(x[0]))html=html.replace('</body>','<script src="./'+x[0]+'?v='+x[1]+'"></script>\n</body>')});
+  [['v45-patch.js','45'],['v48-patch.js','48'],['v49-patch.js','49'],['v50-patch.js','50'],['v51-patch.js','51'],['v53-finish.js','53.1'],['v54-patch.js','54.1'],['v55-patch.js','55.1'],['v56-patch.js','56.1'],['v57-patch.js','57.1'],['v58-patch.js','58.1'],['v59-patch.js','59.1'],['v60-patch.js','60.1'],['v61-patch.js','61.2']].forEach(x=>{if(!html.includes(x[0]))html=html.replace('</body>','<script src="./'+x[0]+'?v='+x[1]+'"></script>\n</body>')});
   html=html.replace(/<title>DG Zeiterfassung v\d+<\/title>/,'<title>DG Zeiterfassung v61</title>');
   const headers=new Headers(response.headers);headers.delete('content-length');return new Response(html,{status:response.status,statusText:response.statusText,headers});
 }
