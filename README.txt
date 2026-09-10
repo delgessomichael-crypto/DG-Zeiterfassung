@@ -1,26 +1,27 @@
-DG ZEITERFASSUNG v59
+DG ZEITERFASSUNG v60
 
-Aktueller Stand GitHub-PWA / Google-Apps-Script-Backend: Version 59.
+Aktueller Stand GitHub-PWA / Google-Apps-Script-Backend: Version 60.
 
-Stabiler Basisstand aus v58:
+Stabiler Basisstand aus v59:
 - Automatische feste Pausenregel, Tages-/Wochen-/Monatsauswertung.
 - Nachtraege nach Tagesabschluss mit Aktualisierung des bestehenden Tagesabschlusses.
-- Regieberichte, Objektstatus, Fotoauswahl/ZIP und gemeinsame Abrechnung.
-- Uebertragungsdatum fuer Mitarbeiter bzw. Datum/Uhrzeit im Buero.
-- Stabilitaets- und Integritaetspruefungen aus v58.
+- Regieberichte, Objektstatus und gemeinsame Abrechnung.
+- Mitarbeiter-Eintraege vor Tagesabschluss sachlich bearbeitbar; Datum/Von/Bis/Stunden fuer Mitarbeiter dauerhaft gesperrt.
+- Kalender Mitarbeiter: Heute offen, Morgen/Uebermorgen separat minimierbar.
 
-Aenderungen in v59:
-- Mitarbeiter: eigener Tageseintrag kann vor Tagesabschluss ueber den gruenen Button „Eintrag bearbeiten“ sachlich korrigiert werden.
-- Zeitmanipulationsschutz: Datum, Von, Bis und Stunden sind beim Mitarbeiter immer gesperrt. Das Backend veraendert diese Werte auch bei manipulierten Requests nicht.
-- Bearbeitbar sind Kunde/Baustelle, Taetigkeit, Material und Auftragsstatus. Eine vorhandene Kundenunterschrift bleibt unveraendert.
-- Bereits abgerechnete Regieberichte koennen vom Mitarbeiter nicht mehr bearbeitet werden.
-- „Eintrag loeschen“ ist durch eine eindeutige Ja/Nein-Sicherheitsabfrage abgesichert.
-- Kalender Mitarbeiter: Heute ist standardmaessig offen; Morgen und Uebermorgen sind standardmaessig minimiert.
-- Jeder Kalendertag ist separat auf-/zuklappbar und zeigt Datum sowie Anzahl der Termine.
+Aenderungen in v60:
+- Chefbereich Regieberichte: bisheriger Bilder-ZIP-Download wird zum vollstaendigen Berichtsexport.
+- Button heisst jetzt „Bericht herunterladen“.
+- ZIP enthaelt automatisch eine Regiebericht-PDF, vorhandene Kundenunterschrift(en) und die ausgewaehlten Baustellenbilder.
+- Bilder bleiben einzeln abwaehlbar; PDF und Kundenunterschrift werden automatisch beigefuegt.
+- Die PDF enthaelt Kunde/Baustelle, Datum, Mitarbeiter, Von/Bis, Stunden, Taetigkeit, Material und Auftragsstatus.
+- Der Uebertragungszeitpunkt wird bewusst nicht in die Kunden-PDF aufgenommen.
+- Auch Regieberichte ohne Baustellenbilder koennen als Bericht mit PDF und ggf. Kundenunterschrift heruntergeladen werden.
+- Backend prueft, dass angeforderte Bilder zum ausgewaehlten Objekt/Regiebericht gehoeren.
 
 Aktive Patch-Kette:
-v45-patch.js, v48-patch.js, v49-patch.js, v50-patch.js, v51-patch.js, v53-finish.js, v54-patch.js, v55-patch.js, v56-patch.js, v57-patch.js, v58-patch.js, v59-patch.js
+v45-patch.js, v48-patch.js, v49-patch.js, v50-patch.js, v51-patch.js, v53-finish.js, v54-patch.js, v55-patch.js, v56-patch.js, v57-patch.js, v58-patch.js, v59-patch.js, v60-patch.js
 
-Service-Worker Cache: dg-zeiterfassung-v59-1
+Service-Worker Cache: dg-zeiterfassung-v60-1
 
-Wichtig: v59 benoetigt das zugehoerige Apps-Script-Backend v59. Nach dessen Bereitstellung die PWA vollstaendig neu laden bzw. mit ?v=59 oeffnen und auf „Version 59“ achten.
+Wichtig: v60 benoetigt das zugehoerige Apps-Script-Backend v60. Nach dessen Bereitstellung die PWA vollstaendig neu laden bzw. mit ?v=60 oeffnen und auf „Version 60“ achten.
