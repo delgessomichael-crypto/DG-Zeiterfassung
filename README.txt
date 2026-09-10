@@ -1,26 +1,26 @@
-DG ZEITERFASSUNG v56
+DG ZEITERFASSUNG v59
 
-Aktueller Stand GitHub-PWA / Google-Apps-Script-Backend: Version 56.
+Aktueller Stand GitHub-PWA / Google-Apps-Script-Backend: Version 59.
 
-Basis aus v55:
-- Automatische Pausenregel und Tages-/Wochen-/Monatsauswertung.
-- Nachträge nach bereits erfolgtem Tagesabschluss mit dauerhafter Kennzeichnung.
-- Regieberichte, Objektstatus und gemeinsame Abrechnung zusammengefasster Objekt-IDs.
+Stabiler Basisstand aus v58:
+- Automatische feste Pausenregel, Tages-/Wochen-/Monatsauswertung.
+- Nachtraege nach Tagesabschluss mit Aktualisierung des bestehenden Tagesabschlusses.
+- Regieberichte, Objektstatus, Fotoauswahl/ZIP und gemeinsame Abrechnung.
+- Uebertragungsdatum fuer Mitarbeiter bzw. Datum/Uhrzeit im Buero.
+- Stabilitaets- und Integritaetspruefungen aus v58.
 
-Änderungen und Korrekturen in v56:
-- Nachtrag-Workflow nach Tagesabschluss vollständig getrennt: Nachtrag erfassen -> Nachtrag speichern -> Tagesabschluss aktualisieren.
-- Nach erfolgreichem Speichern erscheint eine eindeutige Erfolgsmeldung mit Hinweis, den Tagesabschluss anschließend über „Tag aktualisieren“ neu zu berechnen.
-- „Nachtrag zu abgeschlossenem Tag erfassen“ ist rot hervorgehoben.
-- „Tag aktualisieren“ ist grün hervorgehoben.
-- Neue Nachträge werden zunächst als noch nicht erneut tagesabgeschlossen gespeichert; erst „Tag aktualisieren“ bestätigt sie im Tagesabschluss.
-- Backend liefert closureNeedsRefresh und erkennt automatisch, ob seit dem letzten Tagesabschluss/Aktualisieren ein Nachtrag hinzugekommen ist.
-- „Tag aktualisieren“ aktualisiert den bestehenden Tagesabschluss mit der aktuellen gesamten Tageszeit und der daraus neu berechneten automatischen Pause.
-- Nachtrag erzeugt unmittelbar einen neuen offenen Regiebericht im Chefbereich; Rückgabe bestätigt supplementSaved/regieCreated.
-- Doppelte lokale Verarbeitungshinweise im Nachtrag-Formular werden reduziert.
+Aenderungen in v59:
+- Mitarbeiter: eigener Tageseintrag kann vor Tagesabschluss ueber den gruenen Button „Eintrag bearbeiten“ sachlich korrigiert werden.
+- Zeitmanipulationsschutz: Datum, Von, Bis und Stunden sind beim Mitarbeiter immer gesperrt. Das Backend veraendert diese Werte auch bei manipulierten Requests nicht.
+- Bearbeitbar sind Kunde/Baustelle, Taetigkeit, Material und Auftragsstatus. Eine vorhandene Kundenunterschrift bleibt unveraendert.
+- Bereits abgerechnete Regieberichte koennen vom Mitarbeiter nicht mehr bearbeitet werden.
+- „Eintrag loeschen“ ist durch eine eindeutige Ja/Nein-Sicherheitsabfrage abgesichert.
+- Kalender Mitarbeiter: Heute ist standardmaessig offen; Morgen und Uebermorgen sind standardmaessig minimiert.
+- Jeder Kalendertag ist separat auf-/zuklappbar und zeigt Datum sowie Anzahl der Termine.
 
 Aktive Patch-Kette:
-v45-patch.js, v48-patch.js, v49-patch.js, v50-patch.js, v51-patch.js, v53-finish.js, v54-patch.js, v55-patch.js, v56-patch.js
+v45-patch.js, v48-patch.js, v49-patch.js, v50-patch.js, v51-patch.js, v53-finish.js, v54-patch.js, v55-patch.js, v56-patch.js, v57-patch.js, v58-patch.js, v59-patch.js
 
-Service-Worker Cache: dg-zeiterfassung-v56-1
+Service-Worker Cache: dg-zeiterfassung-v59-1
 
-Wichtig: v56 benötigt das zugehörige Apps-Script-Backend v56. Nach dessen Bereitstellung die PWA vollständig neu laden bzw. mit ?v=56 öffnen und auf „Version 56“ achten.
+Wichtig: v59 benoetigt das zugehoerige Apps-Script-Backend v59. Nach dessen Bereitstellung die PWA vollstaendig neu laden bzw. mit ?v=59 oeffnen und auf „Version 59“ achten.
