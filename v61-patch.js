@@ -8,7 +8,8 @@ let minWage61=null;
 
 function renameAdminHeading61(){
   document.querySelectorAll('.dg48-head h2,.card > h2').forEach(h=>{
-    if(String(h.textContent||'').trim().startsWith('Mitarbeiterverwaltung'))h.textContent='Mitarbeiterverwaltung';
+    const txt=String(h.textContent||'').trim();
+    if(txt.startsWith('Mitarbeiterverwaltung')&&txt!=='Mitarbeiterverwaltung')h.textContent='Mitarbeiterverwaltung';
   });
 }
 
@@ -78,7 +79,6 @@ if(typeof oldEditAdmin61==='function')window.editEmployeeAdmin=function(i){const
 const oldClearAdmin61=window.clearEmployeeAdminForm;
 if(typeof oldClearAdmin61==='function')window.clearEmployeeAdminForm=function(){const r=oldClearAdmin61.apply(this,arguments);ensureWageField61();if($('adminHourlyWage'))$('adminHourlyWage').value='';loadMinimumWage61();checkWage61(false);return r};
 
-// Stundenlohn in den bestehenden Speichervorgang einschleusen; das Backend prueft zusaetzlich selbst.
 const baseApi61=window.api;
 if(typeof baseApi61==='function')window.api=async function(payload){
   const p=payload&&typeof payload==='object'?Object.assign({},payload):payload;
