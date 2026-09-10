@@ -2,57 +2,8 @@
 'use strict';
 if(window.__DG_V60_PATCH__)return;window.__DG_V60_PATCH__=true;
 const $=id=>document.getElementById(id);
-
-function selectedGroups60(view){
-  let groups=Array.isArray(window.__dgRegieRaw)?window.__dgRegieRaw.slice():[];
-  if(typeof mergeRegieGroups==='function')groups=mergeRegieGroups(groups);
-  const isBilled=view==='Abgerechnet',isRunning=view==='Laufend';
-  if(!isBilled)groups=groups.filter(g=>isRunning?(g.jobStatus==='Laufend'):(g.jobStatus!=='Laufend'));
-  return groups;
-}
-function ensureExportTools60(view){
-  const groups=selectedGroups60(view),cards=[...document.querySelectorAll('#regieResult > .report-card')];
-  cards.forEach((card,i)=>{
-    const g=groups[i];if(!g)return;
-    card.dataset.dg60ObjectIds=(g.objectIds||[g.objectId]).filter(Boolean).join(',');
-    card.dataset.dg60Customer=g.customer||'';
-    let box=card.querySelector('.dg54-photo-tools');
-    if(box){
-      const old=box.querySelector('button[onclick*="dg54DownloadPhotos"]');
-      if(old){old.textContent='Bericht herunterladen';old.setAttribute('onclick','dg60DownloadReport(this)')}
-      const title=box.querySelector(':scope > strong');if(title)title.textContent='Baustellenbilder';
-      let hint=box.querySelector('.dg60-export-hint');
-      if(!hint){hint=document.createElement('div');hint.className='muted small dg60-export-hint';hint.style.marginTop='5px';hint.textContent='Regiebericht-PDF und Kundenunterschrift werden automatisch beigefügt. Bilder können unten abgewählt werden.';title?title.insertAdjacentElement('afterend',hint):box.prepend(hint)}
-      return;
-    }
-    box=document.createElement('div');box.className='dg54-photo-tools dg60-report-tools';
-    box.innerHTML='<strong>Bericht herunterladen</strong><div class="muted small" style="margin-top:5px">Regiebericht-PDF und vorhandene Kundenunterschrift werden gemeinsam als ZIP bereitgestellt.</div><div class="dg54-photo-actions" style="margin-top:10px"><button class="btn primary" type="button" onclick="dg60DownloadReport(this)">Bericht herunterladen</button></div><div class="dg54-photo-status"></div>';
-    const details=card.querySelector('details');details?details.insertAdjacentElement('afterend',box):card.appendChild(box);
-  });
-}
-window.dg60DownloadReport=async function(btn){
-  const card=btn.closest('.report-card'),box=btn.closest('.dg54-photo-tools');if(!card||!box)return;
-  const objectIds=String(card.dataset.dg60ObjectIds||'').split(',').map(x=>x.trim()).filter(Boolean);
-  const fileIds=[...box.querySelectorAll('.dg54-photo-check:checked')].map(x=>x.dataset.id).filter(Boolean);
-  const customer=card.dataset.dg60Customer||((card.querySelector('strong')||{}).textContent||'Objekt').replace(/^🏢\s*/, '').trim();
-  const st=box.querySelector('.dg54-photo-status')||document.createElement('div');if(!st.parentNode)box.appendChild(st);
-  if(!objectIds.length){st.className='status error dg54-photo-status';st.textContent='Objekt-ID fehlt. Bitte Regieberichte neu laden.';return}
-  try{
-    btn.disabled=true;st.className='status info dg54-photo-status';st.textContent='Bericht wird vorbereitet …';
-    const r=await api(chefPayload({action:'createRegieReportZip',objectIds,fileIds,customer}));
-    const bytes=Uint8Array.from(atob(r.base64),c=>c.charCodeAt(0)),blob=new Blob([bytes],{type:'application/zip'}),url=URL.createObjectURL(blob),a=document.createElement('a');
-    a.href=url;a.download=r.fileName||'Regiebericht.zip';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
-    st.className='status ok dg54-photo-status';st.textContent='✓ Bericht bereitgestellt: '+Number(r.reportCount||0)+' Regiebericht(e), '+Number(r.signatureCount||0)+' Kundenunterschrift(en), '+Number(r.photoCount||0)+' Bild(er).';
-  }catch(e){st.className='status error dg54-photo-status';st.textContent='Bericht konnte nicht erstellt werden: '+(e&&e.message?e.message:'Unbekannter Fehler.')}finally{btn.disabled=false}
-};
-
-const oldLoadRegie60=window.loadRegieReports;
-if(typeof oldLoadRegie60==='function')window.loadRegieReports=async function(view){const r=await oldLoadRegie60.apply(this,arguments);ensureExportTools60(view);return r};
-
-function removeOldVersionBanner60(){['dg58BackendStatus','dg59BackendStatus'].forEach(id=>{const x=$(id);if(x)x.remove()})}
-const obs60=new MutationObserver(removeOldVersionBanner60);obs60.observe(document.documentElement,{subtree:true,childList:true,characterData:true});
-async function checkBackend60(){if(!navigator.onLine)return;try{const r=await window.api({action:'ping'}),v=Number(r&&r.version||0);removeOldVersionBanner60();let x=$('dg60BackendStatus');if(v===60){if(x)x.remove();return}if(!x){x=document.createElement('div');x.id='dg60BackendStatus';x.className='status error';x.style.position='sticky';x.style.top='0';x.style.zIndex='20002';x.style.margin='0';x.style.borderRadius='0';document.body.prepend(x)}x.textContent='Frontend Version 60 ist aktiv, aber das Google-Backend ist nicht Version 60. Bitte GS v60 bereitstellen.'}catch(_e){}}
-window.addEventListener('online',()=>setTimeout(checkBackend60,150));setTimeout(checkBackend60,900);
-
-document.title='DG Zeiterfassung v60';const lv=document.querySelector('.login-card .center.muted.small');if(lv)lv.textContent='Version 60';const hv=document.querySelector('.hero .head-row strong');if(hv)hv.textContent='Zeiterfassung · v60';
+function selectedGroups60(view){let groups=Array.isArray(window.__dgRegieRaw)?window.__dgRegieRaw.slice():[];if(typeof mergeRegieGroups==='function')groups=mergeRegieGroups(groups);const isBilled=view==='Abgerechnet',isRunning=view==='Laufend';if(!isBilled)groups=groups.filter(g=>isRunning?(g.jobStatus==='Laufend'):(g.jobStatus!=='Laufend'));return groups}
+function ensureExportTools60(view){const groups=selectedGroups60(view),cards=[...document.querySelectorAll('#regieResult > .report-card')];cards.forEach((card,i)=>{const g=groups[i];if(!g)return;card.dataset.dg60ObjectIds=(g.objectIds||[g.objectId]).filter(Boolean).join(',');card.dataset.dg60Customer=g.customer||'';let box=card.querySelector('.dg54-photo-tools');if(box){const old=box.querySelector('button[onclick*="dg54DownloadPhotos"]');if(old){old.textContent='Bericht herunterladen';old.setAttribute('onclick','dg60DownloadReport(this)')}const title=box.querySelector(':scope > strong');if(title)title.textContent='Baustellenbilder';let hint=box.querySelector('.dg60-export-hint');if(!hint){hint=document.createElement('div');hint.className='muted small dg60-export-hint';hint.style.marginTop='5px';hint.textContent='Regiebericht-PDF und Kundenunterschrift werden automatisch beigefügt. Bilder können unten abgewählt werden.';title?title.insertAdjacentElement('afterend',hint):box.prepend(hint)}return}box=document.createElement('div');box.className='dg54-photo-tools dg60-report-tools';box.innerHTML='<strong>Bericht herunterladen</strong><div class="muted small" style="margin-top:5px">Regiebericht-PDF und vorhandene Kundenunterschrift werden gemeinsam als ZIP bereitgestellt.</div><div class="dg54-photo-actions" style="margin-top:10px"><button class="btn primary" type="button" onclick="dg60DownloadReport(this)">Bericht herunterladen</button></div><div class="dg54-photo-status"></div>';const details=card.querySelector('details');details?details.insertAdjacentElement('afterend',box):card.appendChild(box)})}
+window.dg60DownloadReport=async function(btn){const card=btn.closest('.report-card'),box=btn.closest('.dg54-photo-tools');if(!card||!box)return;const objectIds=String(card.dataset.dg60ObjectIds||'').split(',').map(x=>x.trim()).filter(Boolean);const fileIds=[...box.querySelectorAll('.dg54-photo-check:checked')].map(x=>x.dataset.id).filter(Boolean);const customer=card.dataset.dg60Customer||((card.querySelector('strong')||{}).textContent||'Objekt').replace(/^🏢\s*/, '').trim();const st=box.querySelector('.dg54-photo-status')||document.createElement('div');if(!st.parentNode)box.appendChild(st);if(!objectIds.length){st.className='status error dg54-photo-status';st.textContent='Objekt-ID fehlt. Bitte Regieberichte neu laden.';return}try{btn.disabled=true;st.className='status info dg54-photo-status';st.textContent='Bericht wird vorbereitet …';const r=await api(chefPayload({action:'createRegieReportZip',objectIds,fileIds,customer}));const bytes=Uint8Array.from(atob(r.base64),c=>c.charCodeAt(0)),blob=new Blob([bytes],{type:'application/zip'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=r.fileName||'Regiebericht.zip';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);st.className='status ok dg54-photo-status';st.textContent='✓ Bericht bereitgestellt: '+Number(r.reportCount||0)+' Regiebericht(e), '+Number(r.signatureCount||0)+' Kundenunterschrift(en), '+Number(r.photoCount||0)+' Bild(er).'}catch(e){st.className='status error dg54-photo-status';st.textContent='Bericht konnte nicht erstellt werden: '+(e&&e.message?e.message:'Unbekannter Fehler.')}finally{btn.disabled=false}};
+const oldLoadRegie60=window.loadRegieReports;if(typeof oldLoadRegie60==='function')window.loadRegieReports=async function(view){const r=await oldLoadRegie60.apply(this,arguments);ensureExportTools60(view);return r};
 })();
