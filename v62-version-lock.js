@@ -10,8 +10,6 @@ function apply(){
   if(hv&&hv.textContent!=='Zeiterfassung · v'+VERSION)hv.textContent='Zeiterfassung · v'+VERSION;
 }
 apply();
-const obs=new MutationObserver(()=>apply());
-obs.observe(document.documentElement,{subtree:true,childList:true,characterData:true});
-[0,50,100,200,350,500,700,900,1200,1500,2000,3000].forEach(ms=>setTimeout(apply,ms));
+[0,50,100,200,350,500,700,900,1200,1500,2000,3000,5000].forEach(ms=>setTimeout(apply,ms));
 window.addEventListener('load',apply);
 })();
