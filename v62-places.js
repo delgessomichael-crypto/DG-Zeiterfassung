@@ -3,7 +3,7 @@
 if(window.__DG_V62_PLACES__)return;window.__DG_V62_PLACES__=true;
 const $=id=>document.getElementById(id);
 // WICHTIG: API-Key aus Sicherheitsgruenden selbst eintragen.
-const DG_MAPS_KEY = 'HIER_DEINEN_API_KEY_EINTRAGEN';
+const DG_MAPS_KEY = 'AIzaSyC4Pn8tyyrdKK7389MtqYynrtDqyOBsTVo';
 let loadPromise=null;
 function addCss(){if($('dg62PlacesCss'))return;const s=document.createElement('style');s.id='dg62PlacesCss';s.textContent=`.pac-container{z-index:20000!important}.dg62-place-note{font-size:12px;color:#64748b;margin-top:5px}.dg62-place-ok{color:#166534!important}`;document.head.appendChild(s)}
 function loadGoogle(){if(window.google&&google.maps&&google.maps.places)return Promise.resolve();if(loadPromise)return loadPromise;loadPromise=new Promise((resolve,reject)=>{if(!DG_MAPS_KEY||DG_MAPS_KEY.includes('HIER_DEINEN'))return reject(new Error('Google Maps API-Key fehlt.'));const cb='dgPlacesReady_'+Date.now();window[cb]=()=>{delete window[cb];resolve()};const sc=document.createElement('script');sc.async=true;sc.defer=true;sc.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(DG_MAPS_KEY)+'&libraries=places&language=de&region=DE&callback='+cb;sc.onerror=()=>reject(new Error('Google Places konnte nicht geladen werden.'));document.head.appendChild(sc)});return loadPromise}
