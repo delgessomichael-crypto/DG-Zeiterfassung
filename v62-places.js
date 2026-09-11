@@ -3,7 +3,7 @@
 if(window.__DG_V62_PLACES__)return;window.__DG_V62_PLACES__=true;
 const $=id=>document.getElementById(id);
 // Google Maps Browser-Key wird lokal im Browser hinterlegt, nicht im Repository.
-const STORAGE_KEY='dg_maps_browser_key';
+localStorage.setItem(STORAGE_KEY,'AIzaSyA33roKN2sY3IjYh_TnRE8Q5MTlhqUvezc');
 function getMapsKey(){return String(localStorage.getItem(STORAGE_KEY)||'').trim()}
 window.dg62SetMapsKey=function(key){key=String(key||'').trim();if(!key){localStorage.removeItem(STORAGE_KEY);alert('Google Maps API-Key wurde entfernt.');return}localStorage.setItem(STORAGE_KEY,key);alert('Google Maps API-Key wurde auf diesem Gerät gespeichert. Bitte App neu laden.')};
 let loadPromise=null;
