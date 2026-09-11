@@ -1,7 +1,7 @@
 (function(){
 'use strict';
 if(window.__DG_V62_VERSION_LOCK__)return;window.__DG_V62_VERSION_LOCK__=true;
-const VERSION='62.18';
+const VERSION='62.19';
 function apply(){
   try{document.title='DG Zeiterfassung v'+VERSION;}catch(_e){}
   const lv=document.querySelector('.login-card .center.muted.small');
