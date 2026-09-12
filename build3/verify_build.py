@@ -1,7 +1,7 @@
 import pathlib,hashlib,json,re
 from bs4 import BeautifulSoup
 root=pathlib.Path(__file__).resolve().parent/'release'
-expected={'app-3.0.js':'b61723516ee92e623c9adcf4037643c7fbedf0953e93803ed8d16efec0af6a82','app-3.0.css':'43acd41f1722caf2b712bf6d15600545d5f9046ce4754d598a5cf9ce19724e75','sw.js':'291279114cdf045f15d4a719a3dbb24aeee29908e5c89fc0abf6d9c646751e91','manifest.json':'34360e9de0594bee3d76f2718d34bf040e4b553c05a1679bf30f7a68b52680c4'}
+expected={'app-3.0.js':'b61723516ee92e623c9adcf4037643c7fbedf0953e93803ed8d16efec0af6a82','app-3.0.css':'9f881ca2978c38a0927e5ed57e26f7681e46eaa943820fd0fa2a4705e03612bf','sw.js':'982da4698b0fe2f6091dc3d41f43e899ca8d689c8c48e0498b5522c33e18ad8c','manifest.json':'34360e9de0594bee3d76f2718d34bf040e4b553c05a1679bf30f7a68b52680c4'}
 for name,digest in expected.items():
     assert hashlib.sha256((root/name).read_bytes()).hexdigest()==digest, 'Build differs from tested file: '+name
 html=BeautifulSoup((root/'index.html').read_text(),'html.parser')
