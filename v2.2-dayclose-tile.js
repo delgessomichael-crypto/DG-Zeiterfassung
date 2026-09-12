@@ -1,6 +1,0 @@
-(function(){
-'use strict';
-if(window.__DG_V22_DAYCLOSE_TILE__)return;window.__DG_V22_DAYCLOSE_TILE__=true;
-function apply(){const grid=document.querySelector('.dg62-top-grid');if(!grid)return;const tile=[...grid.children].find(c=>String(c.textContent||'').toLowerCase().includes('tagesabschl'));if(!tile)return;tile.querySelectorAll('*').forEach(el=>{const txt=String(el.textContent||'').trim().toLowerCase();if(txt==='offene tagesabschlüsse'||txt==='offene tagesabschluesse'){el.style.setProperty('font-size','15px','important');el.style.setProperty('line-height','1.15','important');el.style.setProperty('white-space','normal','important');el.style.setProperty('overflow-wrap','normal','important');el.style.setProperty('word-break','normal','important')}})}
-apply();window.addEventListener('DOMContentLoaded',apply);window.addEventListener('load',apply);[100,300,700,1200,2200].forEach(ms=>setTimeout(apply,ms));const mo=new MutationObserver(()=>{clearTimeout(window.__dgV22DayClose);window.__dgV22DayClose=setTimeout(apply,50)});mo.observe(document.documentElement,{childList:true,subtree:true});
-})();
