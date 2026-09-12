@@ -1,8 +1,8 @@
 (function(){
 'use strict';
-if(window.__DG_VERSION_LOCK_1_0__)return;window.__DG_VERSION_LOCK_1_0__=true;
-const VERSION='1.0';
-const LABEL='1.0 Testphase';
+if(window.__DG_VERSION_LOCK_1_1__)return;window.__DG_VERSION_LOCK_1_1__=true;
+const VERSION='1.1';
+const LABEL='1.1 Testphase';
 window.DG_APP_VERSION=VERSION;
 function installCss(){
   if(document.getElementById('dgVersionLockCss'))return;
@@ -16,13 +16,8 @@ function installCss(){
 `;
   document.head.appendChild(s);
 }
-function apply(){
-  installCss();
-  try{document.title='DG Zeiterfassung '+LABEL;}catch(_e){}
-}
-apply();
-window.addEventListener('DOMContentLoaded',apply);
-window.addEventListener('load',apply);
+function apply(){installCss();try{document.title='DG Zeiterfassung '+LABEL;}catch(_e){}}
+apply();window.addEventListener('DOMContentLoaded',apply);window.addEventListener('load',apply);
 [0,25,50,100,200,350,500,700,900,1200,1500,2000,3000,5000].forEach(ms=>setTimeout(apply,ms));
 setInterval(()=>{try{if(document.title!=='DG Zeiterfassung '+LABEL)document.title='DG Zeiterfassung '+LABEL;}catch(_e){}},1000);
 })();
