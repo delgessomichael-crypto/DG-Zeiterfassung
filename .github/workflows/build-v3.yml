@@ -1,0 +1,44 @@
+name: Build DG 3.0
+on:
+  push:
+    branches: ['release/v3.0-bereinigung']
+    paths: ['build3/READY', '.github/workflows/build-v3.yml']
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check build readiness
+        id: ready
+        run: |
+          if test -f build3/READY; then echo 'yes=true' >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/setup-node@v4
+        if: steps.ready.outputs.yes == 'true'
+        with:
+          node-version: '22'
+      - name: Compile application
+        if: steps.ready.outputs.yes == 'true'
+        run: |
+          npm install --prefix build3 acorn@8
+          python -m pip install beautifulsoup4
+          mkdir -p build3/original/frontend build3/release
+          git archive 6c985a2e09b1f857756102ce0d74acebc004f2cd | tar -x -C build3/original/frontend
+          DG_BUILD_ROOT="$PWD/build3" python build3/build_frontend.py
+          node --check build3/release/app-3.0.js
+          node --check build3/release/sw.js
+          python build3/verify_build.py
+      - name: Save compiled frontend on release branch
+        if: steps.ready.outputs.yes == 'true'
+        run: |
+          git config user.name 'DG Build'
+          git config user.email 'build@users.noreply.github.com'
+          git rm -f --ignore-unmatch 'v*-*.js'
+          cp build3/release/index.html build3/release/app-3.0.js build3/release/app-3.0.css build3/release/sw.js build3/release/manifest.json .
+          touch .nojekyll
+          git add index.html app-3.0.js app-3.0.css sw.js manifest.json .nojekyll
+          git commit -m 'v3.0: geprueften Frontend-Build bereitstellen' || true
+          git push origin HEAD:release/v3.0-bereinigung
