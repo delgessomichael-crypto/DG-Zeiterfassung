@@ -1,0 +1,4 @@
+DG Zeiterfassung 3.0
+Frontend test build: b61723516ee92e623c9adcf4037643c7fbedf0953e93803ed8d16efec0af6a82
+Local tests: Chromium with mocked API/storage; backend with mocked Google services. No real customer writes.
+Google Code.gs 3.0 must be deployed separately in the existing Apps Script project.
