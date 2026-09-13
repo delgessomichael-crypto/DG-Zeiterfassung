@@ -1,0 +1,23 @@
+/* DG 3.2 */
+.d3-tile.traffic-green{background:#e3fae9!important;color:#356239!important}
+.d3-tile.traffic-orange{background:#fff0d8!important;color:#9a4b00!important}
+.d3-tile.traffic-red{background:#fde2e2!important;color:#9f1d1d!important}
+.d3-tile.traffic-error{background:#e5e7eb!important;color:#475569!important}
+.d3-tile.traffic-green>strong,.d3-tile.traffic-orange>strong,.d3-tile.traffic-red>strong{color:inherit!important}
+.d32-photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:12px;margin:12px 0 16px}
+.d32-photo-item{border:1px solid #d4dae4;border-radius:12px;background:#fff;padding:8px;min-width:0}
+.d32-thumb{display:block;width:100%;aspect-ratio:4/3;border:0;border-radius:9px;overflow:hidden;background:#eef3f8;padding:0;cursor:zoom-in}
+.d32-thumb img{display:block;width:100%;height:100%;object-fit:cover}
+.d32-photo-check{display:flex;align-items:center;gap:7px;margin:8px 0 0;font-weight:700}
+.d32-photo-check input{width:auto}
+.d32-gallery{position:fixed;inset:0;z-index:40000;background:rgba(5,10,20,.88);display:flex;align-items:center;justify-content:center;padding:18px}
+.d32-gallery.hidden{display:none!important}
+.d32-gallery-box{position:relative;width:min(1100px,96vw);height:min(820px,92vh);display:grid;grid-template-columns:64px 1fr 64px;grid-template-rows:1fr auto;align-items:center;gap:8px}
+.d32-gallery-image{grid-column:2;grid-row:1;max-width:100%;max-height:calc(92vh - 70px);width:100%;height:100%;object-fit:contain;background:#111827;border-radius:12px}
+.d32-gallery-arrow,.d32-gallery-close{border:0;background:rgba(255,255,255,.94);color:#111827;font-weight:900;cursor:pointer}
+.d32-gallery-arrow{width:54px;height:72px;border-radius:14px;font-size:42px}
+.d32-prev{grid-column:1;grid-row:1}.d32-next{grid-column:3;grid-row:1}
+.d32-gallery-close{position:absolute;right:0;top:0;z-index:2;width:46px;height:46px;border-radius:50%;font-size:30px;line-height:1}
+.d32-gallery-foot{grid-column:1/4;grid-row:2;display:flex;justify-content:center;align-items:center;gap:18px;color:#fff;padding:8px}
+.d32-gallery-original{color:#fff;text-decoration:underline}
+@media(max-width:560px){.d32-photo-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.d32-gallery{padding:8px}.d32-gallery-box{grid-template-columns:44px 1fr 44px}.d32-gallery-arrow{width:40px;height:58px;font-size:34px}}
