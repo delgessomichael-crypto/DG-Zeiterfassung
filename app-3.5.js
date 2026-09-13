@@ -340,31 +340,37 @@ function togglePhotos(){const yes=document.querySelector('input[name="photosUsed
 
 function renderPhotoPreview(){const box=$('photoPreview');if(!box)return;box.innerHTML=preparedPhotos.map((p,i)=>'<div class="photo-preview-item"><img src="'+p.dataUrl+'" alt="Foto '+(i+1)+'"><button type="button" class="photo-preview-remove" onclick="return removePreparedPhoto('+i+')">×</button></div>').join('')}
 
-function updatePhotoStatus(){$('photoStatus').textContent=preparedPhotos.length?preparedPhotos.length+' von 6 Bild(ern) bereit. Bitte Vorschau kontrollieren.':'Noch keine Bilder hinzugefügt.';$('clearPhotosBtn').classList.toggle('hidden',preparedPhotos.length===0);renderPhotoPreview()}
+function updatePhotoStatus(){
+  if(!$('photoStatus'))return;
+  $('photoStatus').textContent=preparedPhotos.length?preparedPhotos.length+' Bild(er) bereit. Bitte Vorschau kontrollieren.':'Noch keine Bilder hinzugefügt.';
+  $('clearPhotosBtn')?.classList.toggle('hidden',preparedPhotos.length===0);
+  renderPhotoPreview();
+}
 
 function removePreparedPhoto(i){preparedPhotos.splice(i,1);updatePhotoStatus()}
 
 function clearPhotos(){preparedPhotos=[];$('cameraPhoto').value='';$('galleryPhotos').value='';updatePhotoStatus()}
 
 async function startCamera(){
-  if(preparedPhotos.length>=6){setMessage('entryStatus','Maximal 6 Bilder möglich.','warn');return}
-  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){$('cameraPhoto').click();return}
-  try{
-    stopCamera();
-    cameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
-    $('cameraVideo').srcObject=cameraStream;$('cameraLive').classList.remove('hidden');
-  }catch(e){$('cameraLive').classList.add('hidden');$('cameraPhoto').click()}
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){$('cameraPhoto')?.click();return;}
+  try{stopCamera();cameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});$('cameraVideo').srcObject=cameraStream;$('cameraLive').classList.remove('hidden');}
+  catch(_e){$('cameraPhoto')?.click();}
 }
 
 function stopCamera(){if(cameraStream){cameraStream.getTracks().forEach(t=>t.stop());cameraStream=null}if($('cameraVideo'))$('cameraVideo').srcObject=null;if($('cameraLive'))$('cameraLive').classList.add('hidden')}
 
 function captureCameraPhoto(){
-  if(!cameraStream||preparedPhotos.length>=6){if(preparedPhotos.length>=6)stopCamera();return}
+  if(!cameraStream)return;
   const v=$('cameraVideo');if(!v.videoWidth||!v.videoHeight)return;
-  const max=1200,f=Math.min(1,max/v.videoWidth,max/v.videoHeight),c=document.createElement('canvas');c.width=Math.round(v.videoWidth*f);c.height=Math.round(v.videoHeight*f);c.getContext('2d').drawImage(v,0,0,c.width,c.height);preparedPhotos.push({dataUrl:c.toDataURL('image/jpeg',0.68)});updatePhotoStatus();if(preparedPhotos.length>=6)stopCamera();
+  const max=1200,f=Math.min(1,max/v.videoWidth,max/v.videoHeight),c=document.createElement('canvas');c.width=Math.round(v.videoWidth*f);c.height=Math.round(v.videoHeight*f);c.getContext('2d').drawImage(v,0,0,c.width,c.height);preparedPhotos.push({dataUrl:c.toDataURL('image/jpeg',0.68)});updatePhotoStatus();
 }
 
-async function addPhotos(files,inputId){const remaining=6-preparedPhotos.length;if(remaining<=0)return;const list=Array.from(files||[]).slice(0,remaining);$('photoStatus').textContent='Bilder werden vorbereitet ...';try{for(const f of list)preparedPhotos.push({dataUrl:await resizeImage(f)});updatePhotoStatus()}catch(e){$('photoStatus').textContent='Bild konnte nicht vorbereitet werden.'}$(inputId).value=''}
+async function addPhotos(files,inputId){
+  const list=Array.from(files||[]);if(!list.length)return;$('photoStatus').textContent='Bilder werden vorbereitet ...';
+  try{for(const f of list)preparedPhotos.push({dataUrl:await resizeImage(f)});updatePhotoStatus();}
+  catch(_e){$('photoStatus').textContent='Mindestens ein Bild konnte nicht vorbereitet werden.';}
+  if($(inputId))$(inputId).value='';
+}
 
 function resizeImage(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onerror=reject;r.onload=()=>{const img=new Image();img.onerror=reject;img.onload=()=>{const max=1200;let w=img.width,h=img.height;if(w>max||h>max){const f=Math.min(max/w,max/h);w=Math.round(w*f);h=Math.round(h*f)}const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);resolve(c.toDataURL('image/jpeg',0.68))};img.src=r.result};r.readAsDataURL(file)})}
 
@@ -642,12 +648,12 @@ function fillMonths(id){const n=['Januar','Februar','März','April','Mai','Juni'
 function init(){initEnterSupport();fillMonths('empMonth');fillMonths('bossMonth');fillMonths('regieMonth');$('regieMonth').insertAdjacentHTML('afterbegin','<option value="0">Alle Monate</option>');const d=new Date();loadEmployeeDirectory();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('regieYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);$('regieMonth').value=String(d.getMonth()+1);$('holidayYear').value=d.getFullYear();if($('vacationYear'))$('vacationYear').value=d.getFullYear();$('absenceStart').value=localDate();$('absenceEnd').value=localDate();clearEmployeeAdminForm();customerPad=initPad('customerSignature');employeePad=null;toggleMaterial();togglePhotos();updateConnection();const a=auth();if(a.employee&&a.pin)openMain();else $('loginScreen').classList.remove('hidden');if(navigator.onLine)syncQueue()}
 
 /* DG 3.0: one request coordinator and one synchronization clock. */
-window.DG3={version:'3.4',backend:'',pending:0,reads:new Map(),reports:{},active:'Abgeschlossen',loaders:{},ready:false};window.DG_APP_VERSION='3.4';
+window.DG3={version:'3.5.1',backend:'',pending:0,reads:new Map(),reports:{},active:'Abgeschlossen',loaders:{},ready:false};window.DG_APP_VERSION='3.5.1';
 function d3Visible(e){return !!(e&&e.getClientRects().length);}
 function d3Notice(msg,type='info'){let e=$('d3Notice');if(!e){e=document.createElement('div');e.id='d3Notice';document.querySelector('#mainScreen .tabs').after(e);}e.className='status '+type;e.textContent=msg;}
 function d3Button(text,fn,args=[],kind='primary'){return '<button type="button" class="btn '+kind+'" data-d3-fn="'+esc(fn)+'" data-d3-args="'+esc(JSON.stringify(args))+'">'+esc(text)+'</button>';}
-async function d3CheckBackend(){try{const r=await api({action:'ping'});DG3.backend=String(r.version||'');if(!/^3\./.test(DG3.backend))d3Notice('App 3.4: Bitte zuerst Google-GS 3.0 bereitstellen. Backend: '+DG3.backend+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return /^3\./.test(DG3.backend);}catch(e){d3Notice('Verbindungspruefung fehlgeschlagen: '+e.message,'warn');return false;}}
-async function d3Api(payload){const action=String(payload.action||''),read=/^(get|check)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload);if(action!=='ping'&&!/^3\./.test(DG3.backend)){await d3CheckBackend();if(!/^3\./.test(DG3.backend))throw dgError('Google-Backend 3.0 noch nicht bereitgestellt.','version');}if(read&&DG3.reads.has(key))return DG3.reads.get(key);const promise=(async()=>{if(!read)DG3.pending++;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);try{let response;try{response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...payload,clientVersion:'3.4'}),signal:controller.signal});}catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Anlegen zuerst Daten neu laden.':'Keine Serververbindung.','network');}if(!response.ok)throw dgError('HTTP '+response.status,'network');let data;try{data=JSON.parse(await response.text());}catch(e){throw dgError('Ungueltige Serverantwort.','server');}if(!data.ok)throw dgError(data.error||'Serverfehler.','server');return data.data!==undefined?data.data:data;}finally{clearTimeout(timer);if(!read)DG3.pending--;}})();if(read)DG3.reads.set(key,promise);try{return await promise;}finally{if(read&&DG3.reads.get(key)===promise)DG3.reads.delete(key);}}
+async function d3CheckBackend(){try{const r=await api({action:'ping'});DG3.backend=String(r.version||'');if(!/^3\./.test(DG3.backend))d3Notice('App 3.5.1: Bitte zuerst Google-GS 3.0 bereitstellen. Backend: '+DG3.backend+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return /^3\./.test(DG3.backend);}catch(e){d3Notice('Verbindungspruefung fehlgeschlagen: '+e.message,'warn');return false;}}
+async function d3Api(payload){const action=String(payload.action||''),read=/^(get|check)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload);if(action!=='ping'&&!/^3\./.test(DG3.backend)){await d3CheckBackend();if(!/^3\./.test(DG3.backend))throw dgError('Google-Backend 3.0 noch nicht bereitgestellt.','version');}if(read&&DG3.reads.has(key))return DG3.reads.get(key);const promise=(async()=>{if(!read)DG3.pending++;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);try{let response;try{response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...payload,clientVersion:'3.5.1'}),signal:controller.signal});}catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Anlegen zuerst Daten neu laden.':'Keine Serververbindung.','network');}if(!response.ok)throw dgError('HTTP '+response.status,'network');let data;try{data=JSON.parse(await response.text());}catch(e){throw dgError('Ungueltige Serverantwort.','server');}if(!data.ok)throw dgError(data.error||'Serverfehler.','server');return data.data!==undefined?data.data:data;}finally{clearTimeout(timer);if(!read)DG3.pending--;}})();if(read)DG3.reads.set(key,promise);try{return await promise;}finally{if(read&&DG3.reads.get(key)===promise)DG3.reads.delete(key);}}
 document.addEventListener('click',e=>{const b=e.target.closest?.('button');if(!b)return;const fn=b.dataset.d3Fn,handler=fn?window[fn]:b.getAttribute('onclick')?b.onclick:null;if(typeof handler!=='function')return;e.preventDefault();e.stopImmediatePropagation();if(b.dataset.d3Busy)return;try{const r=handler.apply(b,fn?JSON.parse(b.dataset.d3Args||'[]'):[e]);if(r&&typeof r.then==='function'){b.dataset.d3Busy='1';b.disabled=true;b.setAttribute('aria-busy','true');Promise.resolve(r).catch(err=>d3Notice(err.message,'error')).finally(()=>{delete b.dataset.d3Busy;b.disabled=false;b.removeAttribute('aria-busy');});}}catch(err){d3Notice(err.message,'error');}},true);
 function d3Dirty(){return !!(document.activeElement?.matches('input,textarea,select')||document.querySelector('[data-d3-busy]')||[...document.querySelectorAll('[id$="Modal"],.regie-merge-select:checked')].some(d3Visible)||(($('customer')?.value||'').trim())||(($('activity')?.value||'').trim())||(typeof preparedPhotos!=='undefined'&&preparedPhotos.length));}
 async function d3Sync(){if(DG3.syncing||DG3.pending||document.hidden||!navigator.onLine||!DG3.ready||!auth().employee||d3Dirty())return;DG3.syncing=true;try{await syncQueue(false);if(d3Visible($('employeeView'))){await loadDay();await loadCalendarEvents();}else{if(DG3.loaders[DG3.open])await DG3.loaders[DG3.open]();await d3Dashboard();}if($('d3Sync'))$('d3Sync').textContent='Aktualisierung angefordert: '+new Date().toLocaleTimeString('de-DE')+' - Ergebnis im jeweiligen Bereich.';}catch(e){if($('d3Sync'))$('d3Sync').textContent='Aktualisierung fehlgeschlagen: '+e.message;}finally{DG3.syncing=false;}}
@@ -897,7 +903,17 @@ function removeManualPause(){const sel=$('pauseHours');if(sel){const label=docum
 function isoToday(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 function deDate(v){return typeof formatDateDE==='function'?formatDateDE(v):v}
 function fmt(v){return typeof formatHours==='function'?formatHours(v):Number(v||0).toFixed(2).replace('.',',')}
-async function refreshWeek(){let box=$('dg54WeekHours');const monthBox=$('employeeTimeBank');if(!monthBox)return;if(!box){box=document.createElement('div');box.id='dg54WeekHours';box.className='dg54-week';monthBox.insertAdjacentElement('beforebegin',box)}if(!navigator.onLine){box.innerHTML='Geleistete Wochenstunden: offline nicht verfügbar';return}const a=typeof auth==='function'?auth():{};if(!a.employee||!a.pin)return;try{box.innerHTML='Geleistete Wochenstunden: werden geladen …';const d=await api({action:'getWeekData',employee:a.employee,pin:a.pin,referenceDate:isoToday()});box.innerHTML='Geleistete Wochenstunden: '+fmt(d.total||0)+' Std.<small>Woche '+deDate(d.start)+' bis '+deDate(d.end)+' · Montag bis Samstag</small>'}catch(e){box.innerHTML='Geleistete Wochenstunden: nicht verfügbar'}}
+async function refreshWeek(){
+  let box=$('dg54WeekHours');const monthBox=$('employeeTimeBank');if(!monthBox)return;
+  if(!box){box=document.createElement('div');box.id='dg54WeekHours';box.className='dg54-week';monthBox.insertAdjacentElement('beforebegin',box);}
+  if(!navigator.onLine){box.innerHTML='Geleistete Wochenstunden: offline nicht verfügbar';return;}
+  const a=auth();if(!a.employee||!a.pin)return;
+  try{
+    box.innerHTML='Geleistete Wochenstunden: werden geladen …';
+    const d=await api({action:'getWeekData',employee:a.employee,pin:a.pin,referenceDate:isoToday()});
+    box.innerHTML='Geleistete Wochenstunden: '+fmt(d.total||0)+' Std.<small>Woche '+deDate(d.start)+' bis '+deDate(d.end)+' · Montag bis Sonntag · tatsächliche Einsätze an Sonn- und Feiertagen werden mitgerechnet</small>';
+  }catch(_e){box.innerHTML='Geleistete Wochenstunden: nicht verfügbar';}
+}
 function finishDayUi(){removeManualPause();const day=$('dayTotal');if(day&&window.lastDayData){day.className='day-balance good';day.textContent='Heute: '+fmt(lastDayData.total||0)+' Std.';if(Number(lastDayData.automaticPauseHours||0)>0){day.title='Automatische Pause: '+fmt(lastDayData.automaticPauseHours)+' Std.'}}refreshWeek()}
 const oldRenderDay=window.renderDay;
 if(typeof oldRenderDay==='function')window.renderDay=function(){const r=oldRenderDay.apply(this,arguments);finishDayUi();return r};
@@ -1390,7 +1406,19 @@ function d3InstallOffice(){const root=$('bossView'),cards=[...root.children],fin
  const tiles=[['completed','Abgeschlossene Auftr\u00e4ge','d3Completed',''],['running','Laufende Auftr\u00e4ge','d3Running',''],['offers','Offene Angebote','d3Offers','d3OfferOpen'],['days','Offene Tagesabschl\u00fcsse','d3Admin','dg48EmployeeClosures'],['reminders','Reminder','d3Reminder',''],['inquiries','Offene Anfragen','d3Inquiries','']];root.prepend(d3Element('div','d3-dashboard',tiles.map(([key,label,id,sub])=>'<button type="button" class="d3-tile '+key+'" data-d3-fn="d3Open" data-d3-args="'+esc(JSON.stringify([id,sub]))+'"><span>'+esc(label)+'</span><strong id="d3Count-'+key+'">\u2026</strong></button>').join('')));root.prepend(d3Element('div','muted small','<div id="d3Sync">Automatische Aktualisierung bereit</div>'));
 }
 function d3Count(k,v){const e=$('d3Count-'+k);if(e&&e.textContent!==String(v))e.textContent=String(v);}
-async function d3Dashboard(){if(!canAccessBoss()||!navigator.onLine)return;const d=new Date(),jobs=[['reports',{action:'getRegieReports',status:'Offen',year:0,month:0}],['offers',{action:'getOfferReports',stage:'Offen'}],['days',{action:'getBossDayClosures',year:d.getFullYear(),month:d.getMonth()+1}],['reminders',{action:'getOfferReminders',includeDone:false}],['inquiries',{action:'getCustomerInquiries',status:'Offen'}]];await Promise.all(jobs.map(async([k,p])=>{try{const a=await api(chefPayload(p));if(k==='reports'){d3Count('running',a.filter(g=>g.jobStatus==='Laufend').length);d3Count('completed',a.filter(g=>g.jobStatus!=='Laufend').length);}else d3Count(k,k==='days'?a.reduce((n,x)=>n+(x.days||[]).filter(d=>!d.closed).length,0):k==='reminders'?a.filter(x=>x.isDue).length:a.length);}catch(e){if(k==='reports'){d3Count('running','!');d3Count('completed','!');}else d3Count(k,'!');}}));}
+async function d3Dashboard(){
+  if(!canAccessBoss()||!navigator.onLine)return;
+  const d=new Date(),jobs=[['reports',{action:'getRegieReports',status:'Offen',year:0,month:0}],['offers',{action:'getOfferReports',stage:'Offen'}],['days',{action:'getBossDayClosures',year:d.getFullYear(),month:d.getMonth()+1}],['reminders',{action:'getOfferReminders',includeDone:false}],['inquiries',{action:'getCustomerInquiries',status:'Offen'}]];
+  await Promise.all(jobs.map(async([k,p])=>{try{
+    const a=await api(chefPayload(p));
+    if(k==='reports'){
+      d3Count('running',a.filter(g=>g.jobStatus==='Laufend').length);
+      d3Count('completed',a.filter(g=>g.jobStatus!=='Laufend').length);
+    }else if(k==='days'){
+      d3Count('days',a.reduce((n,x)=>n+(x.days||[]).filter(d35MandatoryDayClosure).length,0));
+    }else d3Count(k,k==='reminders'?a.filter(x=>x.isDue).length:a.length);
+  }catch(_e){if(k==='reports'){d3Count('running','!');d3Count('completed','!');}else d3Count(k,'!');}}));
+}
 function d3ReportRoot(view){return $(view==='Laufend'?'d3RunningList':'regieResult');}
 async function d3Reports(view='Abgeschlossen'){DG3.active=view;window.__regieStatus=view;if(view!=='Laufend')DG3.completedView=view;const root=d3ReportRoot(view),st=view==='Laufend'?'d3RunningStatus':'regieStatus',billed=view==='Abgerechnet';DG3.tokens=DG3.tokens||{};const token=DG3.tokens[root.id]=(DG3.tokens[root.id]||0)+1;if(view!=='Laufend')$('regieDateFilter')?.classList.toggle('hidden',!billed);if(!navigator.onLine){setMessage(st,'Offline. Angezeigte Daten sind moeglicherweise veraltet.','warn');return;}setMessage(st,'Auftr\u00e4ge werden geladen ...','info');try{const data=await api(chefPayload({action:'getRegieReports',status:billed?'Abgerechnet':'Offen',year:billed?(+$('regieYear').value||0):0,month:billed?(+$('regieMonth').value||0):0}));if(DG3.tokens[root.id]!==token)return;const groups=data.filter(g=>billed||(view==='Laufend'?g.jobStatus==='Laufend':g.jobStatus!=='Laufend'));DG3.reports[view]=groups;root.replaceChildren();if(!billed&&groups.length)root.append(d3Element('div','d3-merge-top',d3Button('Ausgew\u00e4hlte zusammenf\u00fchren','requestMergeSelectedRegieReports',[view],'success')+'<div class="muted small d3-hint">Mindestens zwei Kundenkarten markieren.</div>'));groups.forEach((g,i)=>root.append(d3ReportCard(g,view,i)));if(!groups.length)root.innerHTML='<div class="status ok">Keine Eintr\u00e4ge.</div>';setMessage(st,groups.length+' Kundenkarte(n) geladen - '+new Date().toLocaleTimeString('de-DE'),'ok');if(view==='Laufend')await d3Orders();}catch(e){setMessage(st,'Laden fehlgeschlagen: '+e.message,'error');}}
 function d3Single(r){return '<div class="entry"><strong>'+esc(formatDateDE(r.date))+' - '+esc(r.employee)+' - '+formatHours(r.hours)+' Std.</strong><div>'+esc(r.start)+' - '+esc(r.end)+'</div><div>'+esc(r.activity||'')+'</div>'+(r.materialUsed?'<div>Material: '+esc(r.material)+'</div>':'')+(r.isSupplement?'<div class="status info">Nachtrag '+esc(r.supplementCreatedAt||'')+'</div>':'')+'</div>';}
@@ -1404,7 +1432,7 @@ async function d3JobStatus(ids,status){if(!confirm('Auftrag auf '+status+' setze
 async function d3Bill(ids){const objectIds=ids.split(',').filter(Boolean),risk=await api(chefPayload({action:'checkRegieBillingRisk',objectIds})),matches=risk.matches||[];if(!confirm((matches.length?'Weitere offene Vorgaenge gefunden:\n'+matches.map(x=>x.customer).join('\n')+'\n\n':'')+'Diesen Auftrag als abgerechnet markieren?'))return;await api(chefPayload({action:'markRegieObjectsBilled',objectIds,force:!!matches.length}));await d3Reports(DG3.active);}
 async function d3MoveOffer(entryIds){if(!confirm('Nach Angebote zu erstellen verschieben?'))return;await api(chefPayload({action:'setRegieReportsOfferStatus',entryIds,offerStatus:'Angebot zu erstellen'}));await d3Reports(DG3.active);}
 async function d3Note(objectId,customer){const r=await api(chefPayload({action:'getObjectInternalNote',objectId})),note=prompt('Interner Vermerk zu '+customer,r.note||'');if(note===null)return;await api(chefPayload({action:'saveObjectInternalNote',objectId,note}));}
-async function d3Health(){const out=$('d3HealthList');out.textContent='System wird geprueft ...';try{const r=await api(chefPayload({action:'systemHealthCheck'}));out.innerHTML='<div class="status '+(r.ok?'ok':'warn')+'">App 3.4 - Backend '+esc(r.version)+' - '+esc(r.checkedAt)+'</div>'+(r.checks||[]).map(x=>'<div class="status '+(x.level==='error'?'error':x.level==='warn'?'warn':'ok')+'"><strong>'+esc(x.name)+'</strong><br>'+esc(x.detail)+'</div>').join('');}catch(e){out.textContent='Systemcheck fehlgeschlagen: '+e.message;}}
+async function d3Health(){const out=$('d3HealthList');out.textContent='System wird geprueft ...';try{const r=await api(chefPayload({action:'systemHealthCheck'}));out.innerHTML='<div class="status '+(r.ok?'ok':'warn')+'">App 3.5.1 - Backend '+esc(r.version)+' - '+esc(r.checkedAt)+'</div>'+(r.checks||[]).map(x=>'<div class="status '+(x.level==='error'?'error':x.level==='warn'?'warn':'ok')+'"><strong>'+esc(x.name)+'</strong><br>'+esc(x.detail)+'</div>').join('');}catch(e){out.textContent='Systemcheck fehlgeschlagen: '+e.message;}}
 
 
 DG3.offers={};DG3.inquiries=[];DG3.orders=[];DG3.reminders=[];
@@ -1442,7 +1470,7 @@ function d3TransferInstall(){const b=d3Element('button','btn primary','An andere
 async function d3Transfer(){const record=DG3.calendar.event(DG3.calendar.edit().id);if(!record)throw new Error('Zuerst einen vorhandenen Termin oeffnen.');const options=DG3.calendar.workers().filter(w=>w.active&&!(record.employeeIds||[]).includes(w.id)).map(w=>({value:w.id,label:w.displayName||w.employeeName}));if(!options.length)return alert('Kein anderer aktiver Mitarbeiter vorhanden.');d3Form('Termin uebertragen',[{name:'targetWorkerId',label:'Zielmitarbeiter',type:'select',options}],{targetWorkerId:options[0].value},async v=>{if(!confirm('Beim bisherigen Mitarbeiter entfernen und zum Zielmitarbeiter verschieben?'))return;await api(chefPayload({action:'transferPlannerEvent',item:{sourceId:record.id,targetWorkerId:v.targetWorkerId,date:record.date}}));dg62Close();await dg62Load();});}
 
 
-async function d3CheckBackend(){try{const r=await api({action:'ping'}),found=String(r.version||''),parts=found.split('.').map(Number),ok=parts[0]===3&&parts[1]>=3;DG3.backend=ok?found:'';if(!ok)d3Notice('App 3.4 benötigt Google-GS Backend 3.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return ok;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}}
+async function d3CheckBackend(){try{const r=await api({action:'ping'}),found=String(r.version||''),parts=found.split('.').map(Number),ok=parts[0]===3&&parts[1]>=4;DG3.backend=ok?found:'';if(!ok)d3Notice('App 3.5.1 benötigt Google-GS Backend 3.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return ok;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}}
 /* DG 3.2: dashboard traffic lights, inquiry workflow/archive/reminders, report gallery, AQON visibility cleanup. */
 const d32BaseInstallOffice=d3InstallOffice;
 const d32BaseReportCard=d3ReportCard;
@@ -1489,22 +1517,16 @@ function d3Count(k,v){
 }
 async function d3Dashboard(){
   if(!canAccessBoss()||!navigator.onLine)return;
-  const d=new Date();
-  const reportsP=api(chefPayload({action:'getRegieReports',status:'Offen',year:0,month:0}));
-  const offerOpenP=api(chefPayload({action:'getOfferReports',stage:'Offen'}));
-  const offerCreateP=api(chefPayload({action:'getOfferReports',stage:'Zu erstellen'}));
-  const daysP=api(chefPayload({action:'getBossDayClosures',year:d.getFullYear(),month:d.getMonth()+1}));
-  const offerRemP=api(chefPayload({action:'getOfferReminders',includeDone:false}));
-  const inquiryRemP=api(chefPayload({action:'getInquiryReminders',includeDone:false}));
-  const inquiriesP=api(chefPayload({action:'getCustomerInquiries',status:'Offen'}));
-  const safe=async(p,fn,keys)=>{try{fn(await p);}catch(_e){keys.forEach(k=>d3Count(k,'!'));}};
-  await Promise.all([
-    safe(reportsP,a=>{d3Count('running',a.filter(g=>g.jobStatus==='Laufend').length);d3Count('completed',a.filter(g=>g.jobStatus!=='Laufend').length);},['running','completed']),
-    safe(Promise.all([offerOpenP,offerCreateP]),([o,c])=>{DG3.offerCounts={open:o.length,create:c.length};d3Count('offers',o.length+c.length);},['offers']),
-    safe(daysP,a=>d3Count('days',a.reduce((n,x)=>n+(x.days||[]).filter(q=>!q.closed).length,0)),['days']),
-    safe(Promise.all([offerRemP,inquiryRemP]),([o,i])=>d3Count('reminders',o.filter(x=>x.isDue).length+i.filter(x=>x.isDue).length),['reminders']),
-    safe(inquiriesP,a=>d3Count('inquiries',a.length),['inquiries'])
-  ]);
+  const d=new Date(),jobs=[['reports',{action:'getRegieReports',status:'Offen',year:0,month:0}],['offers',{action:'getOfferReports',stage:'Offen'}],['days',{action:'getBossDayClosures',year:d.getFullYear(),month:d.getMonth()+1}],['reminders',{action:'getOfferReminders',includeDone:false}],['inquiries',{action:'getCustomerInquiries',status:'Offen'}]];
+  await Promise.all(jobs.map(async([k,p])=>{try{
+    const a=await api(chefPayload(p));
+    if(k==='reports'){
+      d3Count('running',a.filter(g=>g.jobStatus==='Laufend').length);
+      d3Count('completed',a.filter(g=>g.jobStatus!=='Laufend').length);
+    }else if(k==='days'){
+      d3Count('days',a.reduce((n,x)=>n+(x.days||[]).filter(d35MandatoryDayClosure).length,0));
+    }else d3Count(k,k==='reminders'?a.filter(x=>x.isDue).length:a.length);
+  }catch(_e){if(k==='reports'){d3Count('running','!');d3Count('completed','!');}else d3Count(k,'!');}}));
 }
 
 function d32InquiryCard(r,i,archive=false){
@@ -1714,6 +1736,42 @@ d3Import=async function(){
 };
 
 
-function d3Startup(){try{const pin=localStorage.getItem('dg_employee_pin');if(pin&&!sessionStorage.getItem('dg_employee_pin'))sessionStorage.setItem('dg_employee_pin',pin);localStorage.removeItem('dg_employee_pin');d3InstallOffice();d3TransferInstall();document.querySelectorAll('[onclick]').forEach(e=>{const s=e.getAttribute('onclick');if(s&&!s.startsWith('return ')&&/^[\w.$]+\([\s\S]*\)$/.test(s.trim()))e.setAttribute('onclick','return '+s);});init();DG3.ready=true;setInterval(d3Sync,60000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)d3Sync();});if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(e=>d3Notice('Offline-Funktion noch nicht bereit: '+e.message,'warn'));}catch(e){console.error(e);const msg=d3Element('div','status error');msg.textContent='App 3.4 konnte nicht starten: '+e.message;document.body.prepend(msg);}}
+function d35MandatoryDayClosure(day){
+  if(!day||day.closed)return false;
+  const raw=String(day.date||'').trim();
+  if(raw){
+    const dt=new Date(raw+'T12:00:00');
+    if(!Number.isNaN(dt.getTime())){const w=dt.getDay();if(w===0||w===6)return false;}
+  }
+  const status=[day.status,day.dayStatus,day.absenceStatus,day.type,day.reason,day.note].filter(Boolean).join(' ').toLowerCase();
+  if(status.includes('feiertag')||status.includes('holiday'))return false;
+  return true;
+}
+function d35InstallInspectionButton(){
+  const save=[...document.querySelectorAll('#employeeView button')].find(b=>b.textContent.trim()==='Eintrag speichern');
+  if(!save)return;
+  let b=$('d35InspectionBtn');
+  if(!canAccessBoss()){b?.remove();return;}
+  if(!b){
+    b=document.createElement('button');b.type='button';b.id='d35InspectionBtn';b.className='btn success d35-inspection';b.textContent='Besichtigungstermin';
+    b.addEventListener('click',d35InspectionVisit);
+  }
+  if(b.previousElementSibling!==save)save.insertAdjacentElement('afterend',b);
+}
+function d35SelectedCalendarEvent(){
+  const rows=window.__dgCalendarEvents||[];return rows.find(e=>String(e.id||'')===String(selectedCalendarEventId||''))||null;
+}
+function d35InspectionVisit(){
+  if(!canAccessBoss()){setMessage('entryStatus','Besichtigungstermine können nur mit Chefzugang übertragen werden.','error');return;}
+  const customer=String($('customer')?.value||'').trim();if(!customer){setMessage('entryStatus','Bitte mindestens Kunde / Baustelle auswählen oder eintragen.','error');return;}
+  const options=[0.5,1,1.5,2,2.5,3].map(v=>({value:String(v),label:String(v).replace('.',',')+' Std.'}));
+  d3Form('Besichtigungstermin',[{name:'hours',label:'Zeitaufwand',type:'select',options}],{hours:'1'},async v=>{
+    const event=d35SelectedCalendarEvent();
+    const payload={action:'createInspectionOffer',employee:auth().employee,employeePin:auth().pin,item:{customer,date:$('date')?.value||localDate(),hours:Number(v.hours),vehicleUsed:true,sourceCalendarEventId:selectedCalendarEventId||'',event:event?{title:event.title||'',location:event.location||'',description:event.description||'',startDate:event.startDate||'',startTime:event.startTime||'',endDate:event.endDate||'',endTime:event.endTime||'',phone:event.phone||'',email:event.email||''}:null}};
+    const r=await api(payload);resetEntry();await loadCalendarEvents();setMessage('entryStatus','✓ Besichtigung als offenes Angebot übertragen. Zeitaufwand '+formatHours(v.hours)+' Std. · Fahrzeugeinsatz Ja.','ok');return r;
+  });
+}
+
+function d3Startup(){try{const pin=localStorage.getItem('dg_employee_pin');if(pin&&!sessionStorage.getItem('dg_employee_pin'))sessionStorage.setItem('dg_employee_pin',pin);localStorage.removeItem('dg_employee_pin');d3InstallOffice();d3TransferInstall();document.querySelectorAll('[onclick]').forEach(e=>{const s=e.getAttribute('onclick');if(s&&!s.startsWith('return ')&&/^[\w.$]+\([\s\S]*\)$/.test(s.trim()))e.setAttribute('onclick','return '+s);});init();DG3.ready=true;setInterval(d3Sync,60000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)d3Sync();});if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(e=>d3Notice('Offline-Funktion noch nicht bereit: '+e.message,'warn'));}catch(e){console.error(e);const msg=d3Element('div','status error');msg.textContent='App 3.5.1 konnte nicht starten: '+e.message;document.body.prepend(msg);}}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',d3Startup,{once:true});else d3Startup();
 
