@@ -1,5 +1,8 @@
-DG Zeiterfassung 3.0
-Frontend test build: b61723516ee92e623c9adcf4037643c7fbedf0953e93803ed8d16efec0af6a82
-CSS verified: 9f881ca2978c38a0927e5ed57e26f7681e46eaa943820fd0fa2a4705e03612bf
-Local tests: Chromium with mocked API/storage; backend with mocked Google services. No real customer writes.
-Google Code.gs 3.0 must be deployed separately in the existing Apps Script project.
+DG Zeiterfassung 3.1 - Mitarbeiterkalender heute/morgen/uebermorgen
+Base commit: 55fdd3a6a55783e8791358c3b0ba8c745845f346
+Tested app SHA256: 7012ab2a1826b06f0a9b13cfe89ca9e628e72ffe94a331a54731252f113deb11
+Local Chromium tests: 25 calendar scenarios and 35 existing UI/flow regression tests passed, simulated API only.
+Cases include Sunday 2026-09-13, next-week events, Saturday/Monday, date picker, reopening, midnight refresh, month/year/leap-day/DST boundaries and out-of-order responses.
+Exactly one calendar event request on open, one app script and one synchronization timer.
+Google GS 3.0 unchanged and compatible. No production calendar/customer writes.
+Backup: backup/v3.0-vor-kalender-3tage-2026-09-13
