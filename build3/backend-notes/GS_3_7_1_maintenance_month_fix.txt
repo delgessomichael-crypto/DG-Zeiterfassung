@@ -1,0 +1,1 @@
+Backend-Datei absichtlich nicht im öffentlichen Repository abgelegt. Der produktive Google Apps Script Stand 3.7.1 korrigiert die Speicherung von Wartungsmonaten: YYYY-MM wird als Text gespeichert, bestehende als Datum interpretierte Werte werden auf YYYY-MM normalisiert. Lokales Übergabeartefakt: DG_Zeiterfassung_Google_GS_3.7.1.txt
