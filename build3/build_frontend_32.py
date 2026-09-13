@@ -6,6 +6,8 @@ O=R/'release'
 subprocess.check_call(['python',str(R/'build_frontend.py')],env={**__import__('os').environ,'DG_BUILD_ROOT':str(R)})
 js=(O/'app-3.1.js').read_text()
 features=(R/'src/features_3_2.js').read_text()
+backend_guard="""async function d3CheckBackend(){try{const r=await api({action:'ping'}),found=String(r.version||''),parts=found.split('.').map(Number),ok=parts[0]===3&&parts[1]>=1;DG3.backend=ok?found:'';if(!ok)d3Notice('App 3.2 benötigt Google-GS Backend 3.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return ok;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}}\n"""
+features=backend_guard+features
 js=js.replace("version:'3.1'","version:'3.2'",1).replace("DG_APP_VERSION='3.1'","DG_APP_VERSION='3.2'",1).replace("clientVersion:'3.1'","clientVersion:'3.2'",1).replace('App 3.1','App 3.2')
 marker='function d3Startup()'
 if marker not in js: raise RuntimeError('Startup marker missing')
