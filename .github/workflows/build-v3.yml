@@ -1,8 +1,8 @@
-name: Build DG 3.1
+name: Build DG 3.2
 on:
   push:
-    branches: ['fix/v3.1-calendar-3days']
-    paths: ['build3/READY', '.github/workflows/build-v3.yml']
+    branches: ['release/v3.2-dashboard-inquiries-gallery']
+    paths: ['build3/**', '.github/workflows/build-v3.yml']
 permissions:
   contents: write
 jobs:
@@ -15,22 +15,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Compile and verify tested application
+      - name: Compile and verify DG 3.2
         run: |
           npm install --prefix build3 acorn@8
           python -m pip install beautifulsoup4
+          rm -rf build3/original/frontend build3/release
           mkdir -p build3/original/frontend build3/release
           git archive 6c985a2e09b1f857756102ce0d74acebc004f2cd | tar -x -C build3/original/frontend
-          DG_BUILD_ROOT="$PWD/build3" python build3/build_frontend.py
-          node --check build3/release/app-3.1.js
+          DG_BUILD_ROOT="$PWD/build3" python build3/build_frontend_32.py
+          node --check build3/release/app-3.2.js
           node --check build3/release/sw.js
-          python build3/verify_build.py
-      - name: Commit verified 3.1 frontend on fix branch
+          python build3/verify_build_32.py
+      - name: Commit verified 3.2 frontend on release branch
         run: |
           git config user.name 'DG Build'
           git config user.email 'build@users.noreply.github.com'
-          git rm -f --ignore-unmatch app-3.0.js app-3.0.css
-          cp build3/release/index.html build3/release/app-3.1.js build3/release/app-3.1.css build3/release/sw.js build3/release/manifest.json .
-          git add index.html app-3.1.js app-3.1.css sw.js manifest.json
-          git commit -m 'v3.1: getestete Drei-Tage-Kalenderansicht bereitstellen'
-          git push origin HEAD:fix/v3.1-calendar-3days
+          git rm -f --ignore-unmatch app-3.0.js app-3.0.css app-3.1.js app-3.1.css
+          cp build3/release/index.html build3/release/app-3.2.js build3/release/app-3.2.css build3/release/sw.js build3/release/manifest.json .
+          git add index.html app-3.2.js app-3.2.css sw.js manifest.json
+          git commit -m 'v3.2: geprüften Frontend-Build bereitstellen' || true
+          git push origin HEAD:release/v3.2-dashboard-inquiries-gallery
