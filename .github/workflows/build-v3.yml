@@ -1,7 +1,7 @@
-name: Build DG 3.5.2
+name: Build DG 3.5.3
 on:
   push:
-    branches: ['release/v3.5.2-fixes']
+    branches: ['release/v3.5.3-aqon-check24']
     paths: ['build3/**', '.github/workflows/build-v3.yml']
 permissions:
   contents: write
@@ -15,7 +15,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Compile and verify DG 3.5.2
+      - name: Compile and verify DG 3.5.3
         run: |
           npm install --prefix build3 acorn@8
           python -m pip install beautifulsoup4
@@ -25,11 +25,11 @@ jobs:
           node --check build3/release/app-3.5.js
           node --check build3/release/sw.js
           python build3/verify_build_35.py
-      - name: Commit verified 3.5.2 frontend on release branch
+      - name: Commit verified 3.5.3 frontend on release branch
         run: |
           git config user.name 'DG Build'
           git config user.email 'build@users.noreply.github.com'
           cp build3/release/index.html build3/release/app-3.5.js build3/release/app-3.5.css build3/release/sw.js build3/release/manifest.json .
           git add index.html app-3.5.js app-3.5.css sw.js manifest.json
-          git commit -m 'v3.5.2: geprüften Frontend-Build bereitstellen' || true
-          git push origin HEAD:release/v3.5.2-fixes
+          git commit -m 'v3.5.3: geprüften Frontend-Build bereitstellen' || true
+          git push origin HEAD:release/v3.5.3-aqon-check24
