@@ -1,0 +1,1 @@
+Backend-Datei absichtlich nicht im öffentlichen Repository abgelegt. Produktiver Zielstand: Google Apps Script 5.0.0. Enthalten sind u. a. bereinigte Kalenderbeschreibung, Wartungs-Regiebericht mit Geräte-ID/Rechnungsempfänger/Ausführungsort, Geräte-ID-Neustart bei leerem Wartungsstamm und SystemHealth-Version 5.0.0. Übergabedatei: DG_Zeiterfassung_Google_GS_5.0.0.txt
