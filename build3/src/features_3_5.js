@@ -1,4 +1,4 @@
-/* DG 3.5.1: unlimited employee photos, Sunday/holiday work hours, chef-only inspection workflow, mandatory day closures only Mon-Fri/non-holiday. */
+/* DG 3.5.2: unlimited employee photos, Sunday/holiday work hours, chef-only inspection workflow, mandatory day closures only Mon-Fri/non-holiday, offer count and AQON sync fixes. */
 
 function updatePhotoStatus(){
   if(!$('photoStatus'))return;
@@ -49,16 +49,21 @@ function d35MandatoryDayClosure(day){
 
 async function d3Dashboard(){
   if(!canAccessBoss()||!navigator.onLine)return;
-  const d=new Date(),jobs=[['reports',{action:'getRegieReports',status:'Offen',year:0,month:0}],['offers',{action:'getOfferReports',stage:'Offen'}],['days',{action:'getBossDayClosures',year:d.getFullYear(),month:d.getMonth()+1}],['reminders',{action:'getOfferReminders',includeDone:false}],['inquiries',{action:'getCustomerInquiries',status:'Offen'}]];
-  await Promise.all(jobs.map(async([k,p])=>{try{
-    const a=await api(chefPayload(p));
-    if(k==='reports'){
-      d3Count('running',a.filter(g=>g.jobStatus==='Laufend').length);
-      d3Count('completed',a.filter(g=>g.jobStatus!=='Laufend').length);
-    }else if(k==='days'){
-      d3Count('days',a.reduce((n,x)=>n+(x.days||[]).filter(d35MandatoryDayClosure).length,0));
-    }else d3Count(k,k==='reminders'?a.filter(x=>x.isDue).length:a.length);
-  }catch(_e){if(k==='reports'){d3Count('running','!');d3Count('completed','!');}else d3Count(k,'!');}}));
+  const d=new Date();
+  const reportsP=api(chefPayload({action:'getRegieReports',status:'Offen',year:0,month:0}));
+  const offerOpenP=api(chefPayload({action:'getOfferReports',stage:'Offen'}));
+  const offerCreateP=api(chefPayload({action:'getOfferReports',stage:'Zu erstellen'}));
+  const daysP=api(chefPayload({action:'getBossDayClosures',year:d.getFullYear(),month:d.getMonth()+1}));
+  const remindersP=api(chefPayload({action:'getOfferReminders',includeDone:false}));
+  const inquiriesP=api(chefPayload({action:'getCustomerInquiries',status:'Offen'}));
+  const safe=async(p,fn,keys)=>{try{fn(await p);}catch(_e){keys.forEach(k=>d3Count(k,'!'));}};
+  await Promise.all([
+    safe(reportsP,a=>{d3Count('running',a.filter(g=>g.jobStatus==='Laufend').length);d3Count('completed',a.filter(g=>g.jobStatus!=='Laufend').length);},['running','completed']),
+    safe(Promise.all([offerOpenP,offerCreateP]),([o,c])=>{DG3.offerCounts={open:o.length,create:c.length};d3Count('offers',o.length+c.length);},['offers']),
+    safe(daysP,a=>d3Count('days',a.reduce((n,x)=>n+(x.days||[]).filter(d35MandatoryDayClosure).length,0)),['days']),
+    safe(remindersP,a=>d3Count('reminders',a.filter(x=>x.isDue).length),['reminders']),
+    safe(inquiriesP,a=>d3Count('inquiries',a.length),['inquiries'])
+  ]);
 }
 
 const d35BaseRenderBossDayClosures=window.renderBossDayClosuresV48;
@@ -92,8 +97,32 @@ function d35InspectionVisit(){
   });
 }
 
-const d35BaseOpenMain=openMain;
-openMain=function(){const r=d35BaseOpenMain.apply(this,arguments);setTimeout(d35InstallInspectionButton,0);return r;};
-const d35BaseShowEmployee=showEmployee;
-showEmployee=function(){const r=d35BaseShowEmployee.apply(this,arguments);setTimeout(d35InstallInspectionButton,0);return r;};
-window.addEventListener('load',()=>setTimeout(d35InstallInspectionButton,250));
+function openMain(){
+  const a=auth();
+  $('loginScreen').classList.add('hidden');
+  $('mainScreen').classList.remove('hidden');
+  $('employeeLabel').textContent='Angemeldet: '+a.employee;
+  $('date').value=localDate();
+  const bossAllowed=canAccessBoss();
+  $('bossTab').classList.toggle('hidden',!bossAllowed);
+  showEmployee();DG3.reports={};DG3.inquiries=[];DG3.orders=[];$('regieResult').replaceChildren();$('d3RunningList').replaceChildren();d3CheckBackend();loadEmployeeDirectory();
+  requestAnimationFrame(()=>{if(customerPad)customerPad.resize();if(employeePad)employeePad.resize()});
+  updateConnection();loadDay();loadCalendarEvents();setTimeout(d35InstallInspectionButton,0);
+}
+function showEmployee(){
+  $('employeeView').classList.remove('hidden');$('bossView').classList.add('hidden');$('employeeTab').classList.add('active');$('bossTab').classList.remove('active');setTimeout(d35InstallInspectionButton,0);
+}
+
+async function d34AqonInquiries(){
+  setMessage('d34AqonStatus','AQON PURE Posteingang wird abgeglichen ...','info');
+  try{
+    const now=Date.now();
+    if(!DG3.aqonSyncAt||now-DG3.aqonSyncAt>30000){
+      const sync=await api(chefPayload({action:'syncCustomerInquiries'}));DG3.aqonSyncAt=now;
+      if(sync.aqonReplyErrors||sync.gmailFileErrors)setMessage('d34AqonStatus','AQON-Abgleich abgeschlossen, aber mit '+Number(sync.aqonReplyErrors||0)+' Antwort- und '+Number(sync.gmailFileErrors||0)+' Gmail-Ablagefehler(n).','warn');
+    }
+    const all=await api(chefPayload({action:'getCustomerInquiries',status:'Offen'}));DG3.inquiries=all;const rows=all.filter(r=>r.source==='AQON PURE');
+    $('d34AqonList').innerHTML=rows.map((r,i)=>d32InquiryCard(r,i,false)).join('')||'Keine offenen AQON PURE Anfragen.';
+    setMessage('d34AqonStatus',rows.length+' offene AQON PURE Anfrage(n).','ok');d34SetAqonCount(rows.length);d3Count('inquiries',all.length);
+  }catch(e){setMessage('d34AqonStatus','AQON-Abgleich fehlgeschlagen: '+e.message,'error');}
+}
