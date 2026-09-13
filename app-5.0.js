@@ -2391,6 +2391,21 @@ window.d3Sync=d3Sync=async function(){
   finally{DG3.syncing=false;}
 };
 
+/* Finaler 5.0-Backendcheck: überschreibt die alte 3.x-Kompatibilitätsprüfung aus dem Altbestand. */
+window.d3CheckBackend=d3CheckBackend=async function(){
+  try{
+    const r=await api({action:'ping'}),found=String(r&&r.version||''),ok=/^5(?:\.|$)/.test(found);
+    DG3.backend=ok?found:'';
+    if(!ok)d3Notice('App 5.0 benötigt Google-GS 5.0. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');
+    else $('d3Notice')?.remove();
+    return ok;
+  }catch(e){
+    DG3.backend='';
+    d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');
+    return false;
+  }
+};
+
 try{DG3.version=V;window.DG_APP_VERSION=V;}catch(_e){}
 const oldOpenMain50=window.openMain;
 if(typeof oldOpenMain50==='function')window.openMain=function(){const r=oldOpenMain50.apply(this,arguments);setTimeout(ensureAllCustomers50,200);return r;};
