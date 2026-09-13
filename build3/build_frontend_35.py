@@ -6,7 +6,7 @@ base=ROOT/'app-3.5.js';base_css=ROOT/'app-3.5.css';base_html=ROOT/'index.html';b
 for p in [base,base_css,base_html,base_manifest]:
     if not p.exists(): raise SystemExit('stable 3.5.1 base missing: '+str(p))
 feat_path=R/'src/features_3_5.js';js=base.read_text();css=base_css.read_text();feat_nodes=nodes(feat_path)
-replace_names={'updatePhotoStatus','startCamera','captureCameraPhoto','addPhotos','refreshWeek','d3Dashboard','d35MandatoryDayClosure','d35InstallInspectionButton','d35SelectedCalendarEvent','d35InspectionVisit','openMain','showEmployee','d34AqonInquiries'}
+replace_names={'updatePhotoStatus','startCamera','captureCameraPhoto','addPhotos','refreshWeek','d3Dashboard','loadOffers','d35MandatoryDayClosure','d35InstallInspectionButton','d35SelectedCalendarEvent','d35InspectionVisit','openMain','showEmployee','d34AqonInquiries'}
 replacement={n['name']:n['source'] for n in feat_nodes if n.get('name') in replace_names}
 for n in nodes(base):
     name=n.get('name')
