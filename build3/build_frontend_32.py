@@ -7,7 +7,9 @@ subprocess.check_call(['python',str(R/'build_frontend.py')],env={**__import__('o
 js=(O/'app-3.1.js').read_text()
 features=(R/'src/features_3_2.js').read_text()
 js=js.replace("version:'3.1'","version:'3.2'",1).replace("DG_APP_VERSION='3.1'","DG_APP_VERSION='3.2'",1).replace("clientVersion:'3.1'","clientVersion:'3.2'",1).replace('App 3.1','App 3.2')
-js+='\n\n'+features+'\n'
+marker='function d3Startup()'
+if marker not in js: raise RuntimeError('Startup marker missing')
+js=js.replace(marker,features+'\n\n'+marker,1)
 css=(O/'app-3.1.css').read_text()+'\n'+(R/'src/features_3_2.css').read_text()
 (O/'app-3.2.js').write_text(js)
 (O/'app-3.2.css').write_text(css)
