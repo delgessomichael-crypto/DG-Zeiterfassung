@@ -1,4 +1,4 @@
-/* DG 3.5: unlimited employee photos, Sunday/holiday weekly hours, chef-only inspection workflow. */
+/* DG 3.5.1: unlimited employee photos, Sunday/holiday work hours, chef-only inspection workflow, mandatory day closures only Mon-Fri/non-holiday. */
 
 function updatePhotoStatus(){
   if(!$('photoStatus'))return;
@@ -35,14 +35,48 @@ async function refreshWeek(){
   }catch(_e){box.innerHTML='Geleistete Wochenstunden: nicht verfügbar';}
 }
 
+function d35MandatoryDayClosure(day){
+  if(!day||day.closed)return false;
+  const raw=String(day.date||'').trim();
+  if(raw){
+    const dt=new Date(raw+'T12:00:00');
+    if(!Number.isNaN(dt.getTime())){const w=dt.getDay();if(w===0||w===6)return false;}
+  }
+  const status=[day.status,day.dayStatus,day.absenceStatus,day.type,day.reason,day.note].filter(Boolean).join(' ').toLowerCase();
+  if(status.includes('feiertag')||status.includes('holiday'))return false;
+  return true;
+}
+
+async function d3Dashboard(){
+  if(!canAccessBoss()||!navigator.onLine)return;
+  const d=new Date(),jobs=[['reports',{action:'getRegieReports',status:'Offen',year:0,month:0}],['offers',{action:'getOfferReports',stage:'Offen'}],['days',{action:'getBossDayClosures',year:d.getFullYear(),month:d.getMonth()+1}],['reminders',{action:'getOfferReminders',includeDone:false}],['inquiries',{action:'getCustomerInquiries',status:'Offen'}]];
+  await Promise.all(jobs.map(async([k,p])=>{try{
+    const a=await api(chefPayload(p));
+    if(k==='reports'){
+      d3Count('running',a.filter(g=>g.jobStatus==='Laufend').length);
+      d3Count('completed',a.filter(g=>g.jobStatus!=='Laufend').length);
+    }else if(k==='days'){
+      d3Count('days',a.reduce((n,x)=>n+(x.days||[]).filter(d35MandatoryDayClosure).length,0));
+    }else d3Count(k,k==='reminders'?a.filter(x=>x.isDue).length:a.length);
+  }catch(_e){if(k==='reports'){d3Count('running','!');d3Count('completed','!');}else d3Count(k,'!');}}));
+}
+
+const d35BaseRenderBossDayClosures=window.renderBossDayClosuresV48;
+window.renderBossDayClosuresV48=function(rows){
+  const filtered=(rows||[]).map(emp=>({...emp,days:(emp.days||[]).filter(d=>d.closed||d35MandatoryDayClosure(d))})).filter(emp=>(emp.days||[]).length);
+  return d35BaseRenderBossDayClosures?d35BaseRenderBossDayClosures(filtered):undefined;
+};
+
 function d35InstallInspectionButton(){
   const save=[...document.querySelectorAll('#employeeView button')].find(b=>b.textContent.trim()==='Eintrag speichern');
   if(!save)return;
   let b=$('d35InspectionBtn');
   if(!canAccessBoss()){b?.remove();return;}
-  if(b)return;
-  b=document.createElement('button');b.type='button';b.id='d35InspectionBtn';b.className='btn success d35-inspection';b.textContent='Besichtigungstermin';
-  b.addEventListener('click',d35InspectionVisit);save.insertAdjacentElement('afterend',b);
+  if(!b){
+    b=document.createElement('button');b.type='button';b.id='d35InspectionBtn';b.className='btn success d35-inspection';b.textContent='Besichtigungstermin';
+    b.addEventListener('click',d35InspectionVisit);
+  }
+  if(b.previousElementSibling!==save)save.insertAdjacentElement('afterend',b);
 }
 function d35SelectedCalendarEvent(){
   const rows=window.__dgCalendarEvents||[];return rows.find(e=>String(e.id||'')===String(selectedCalendarEventId||''))||null;
@@ -60,4 +94,6 @@ function d35InspectionVisit(){
 
 const d35BaseOpenMain=openMain;
 openMain=function(){const r=d35BaseOpenMain.apply(this,arguments);setTimeout(d35InstallInspectionButton,0);return r;};
+const d35BaseShowEmployee=showEmployee;
+showEmployee=function(){const r=d35BaseShowEmployee.apply(this,arguments);setTimeout(d35InstallInspectionButton,0);return r;};
 window.addEventListener('load',()=>setTimeout(d35InstallInspectionButton,250));
