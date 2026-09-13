@@ -1,8 +1,6 @@
-DG Zeiterfassung 3.1 - Mitarbeiterkalender heute/morgen/uebermorgen
-Base commit: 55fdd3a6a55783e8791358c3b0ba8c745845f346
-Tested app SHA256: 7012ab2a1826b06f0a9b13cfe89ca9e628e72ffe94a331a54731252f113deb11
-Local Chromium tests: 25 calendar scenarios and 35 existing UI/flow regression tests passed, simulated API only.
-Cases include Sunday 2026-09-13, next-week events, Saturday/Monday, date picker, reopening, midnight refresh, month/year/leap-day/DST boundaries and out-of-order responses.
-Exactly one calendar event request on open, one app script and one synchronization timer.
-Google GS 3.0 unchanged and compatible. No production calendar/customer writes.
-Backup: backup/v3.0-vor-kalender-3tage-2026-09-13
+DG Zeiterfassung 3.2 - Dashboard, Anfrageworkflow, Galerie, AQON-Ausblendung
+Base: Version 3.1
+Frontend: Ampelsystem 0 gruen, 1-5 orange, ab 6 rot; Kachel-Sprungnavigation; Offene Angebote zaehlen Offen + Zu erstellen; Offene Anfragen mit Archiv; Anfrage-Reminder; Regiebericht-Miniaturen mit Galerie; alte AQON-Gmail-Auftraege in der Auftragsplanung ausgeblendet.
+Backend requirement: Google GS 3.1 or newer.
+Architecture: weiterhin genau ein geladenes App-Skript; keine neue Patch-Kette.
+Safety: Backup branch backup/v3.1-vor-3.2-2026-09-13.

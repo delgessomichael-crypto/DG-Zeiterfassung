@@ -1,0 +1,4 @@
+/* DG 3.5 */
+.d35-inspection{display:block;width:100%;margin-top:10px;background:#31589e}
+.d35-inspection:hover{filter:brightness(.96)}
+@media(max-width:560px){.d35-inspection{width:100%}}
