@@ -21,14 +21,14 @@ jobs:
           rm -rf build3/release
           mkdir -p build3/release
           python build3/build_frontend_50.py
-          node --check build3/release/app-3.5.js
+          node --check build3/release/app-5.0.js
           node --check build3/release/sw.js
           python build3/verify_build_50.py
       - name: Commit verified 5.0 frontend on release branch
         run: |
           git config user.name 'DG Build'
           git config user.email 'build@users.noreply.github.com'
-          cp build3/release/index.html build3/release/app-3.5.js build3/release/app-3.5.css build3/release/sw.js build3/release/manifest.json .
-          git add index.html app-3.5.js app-3.5.css sw.js manifest.json
+          cp build3/release/index.html build3/release/app-5.0.js build3/release/app-5.0.css build3/release/sw.js build3/release/manifest.json .
+          git add index.html app-5.0.js app-5.0.css sw.js manifest.json
           git commit -m 'v5.0: geprüften finalen Stand bereitstellen' || true
           git push origin HEAD:release/v5.0-final
