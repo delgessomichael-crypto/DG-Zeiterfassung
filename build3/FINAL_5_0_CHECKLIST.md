@@ -1,7 +1,7 @@
 # DG Zeiterfassung 5.0 – Finalcheck
 
 - Frontend-Version: 5.0
-- Backend-Zielstand: Google GS 5.0.0
+- Backend-Zielstand: Google GS 5.0
 - Ausgelieferte Bundles: app-5.0.js / app-5.0.css
 - Service-Worker-Cache: dg-zeiterfassung-5-0
 - Mitarbeiterkalender: Wartungs-Metadaten werden aus der sichtbaren Beschreibung entfernt; Geräte-ID bleibt separat sichtbar.
