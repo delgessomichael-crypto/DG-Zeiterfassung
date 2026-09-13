@@ -614,12 +614,12 @@ function fillMonths(id){const n=['Januar','Februar','März','April','Mai','Juni'
 function init(){initEnterSupport();fillMonths('empMonth');fillMonths('bossMonth');fillMonths('regieMonth');$('regieMonth').insertAdjacentHTML('afterbegin','<option value="0">Alle Monate</option>');const d=new Date();loadEmployeeDirectory();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('regieYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);$('regieMonth').value=String(d.getMonth()+1);$('holidayYear').value=d.getFullYear();if($('vacationYear'))$('vacationYear').value=d.getFullYear();$('absenceStart').value=localDate();$('absenceEnd').value=localDate();clearEmployeeAdminForm();customerPad=initPad('customerSignature');employeePad=null;toggleMaterial();togglePhotos();updateConnection();const a=auth();if(a.employee&&a.pin)openMain();else $('loginScreen').classList.remove('hidden');if(navigator.onLine)syncQueue()}
 
 /* DG 3.0: one request coordinator and one synchronization clock. */
-window.DG3={version:'3.7',backend:'',pending:0,reads:new Map(),reports:{},active:'Abgeschlossen',loaders:{},ready:false};window.DG_APP_VERSION='3.7';
+window.DG3={version:'3.7.1',backend:'',pending:0,reads:new Map(),reports:{},active:'Abgeschlossen',loaders:{},ready:false};window.DG_APP_VERSION='3.7.1';
 function d3Visible(e){return !!(e&&e.getClientRects().length);}
 function d3Notice(msg,type='info'){let e=$('d3Notice');if(!e){e=document.createElement('div');e.id='d3Notice';document.querySelector('#mainScreen .tabs').after(e);}e.className='status '+type;e.textContent=msg;}
 function d3Button(text,fn,args=[],kind='primary'){return '<button type="button" class="btn '+kind+'" data-d3-fn="'+esc(fn)+'" data-d3-args="'+esc(JSON.stringify(args))+'">'+esc(text)+'</button>';}
-async function d3CheckBackend(){try{const r=await api({action:'ping'});DG3.backend=String(r.version||'');if(!/^3\./.test(DG3.backend))d3Notice('App 3.7: Bitte zuerst Google-GS 3.0 bereitstellen. Backend: '+DG3.backend+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return /^3\./.test(DG3.backend);}catch(e){d3Notice('Verbindungspruefung fehlgeschlagen: '+e.message,'warn');return false;}}
-async function d3Api(payload){const action=String(payload.action||''),read=/^(get|check)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload);if(action!=='ping'&&!/^3\./.test(DG3.backend)){await d3CheckBackend();if(!/^3\./.test(DG3.backend))throw dgError('Google-Backend 3.0 noch nicht bereitgestellt.','version');}if(read&&DG3.reads.has(key))return DG3.reads.get(key);const promise=(async()=>{if(!read)DG3.pending++;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);try{let response;try{response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...payload,clientVersion:'3.7'}),signal:controller.signal});}catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Anlegen zuerst Daten neu laden.':'Keine Serververbindung.','network');}if(!response.ok)throw dgError('HTTP '+response.status,'network');let data;try{data=JSON.parse(await response.text());}catch(e){throw dgError('Ungueltige Serverantwort.','server');}if(!data.ok)throw dgError(data.error||'Serverfehler.','server');return data.data!==undefined?data.data:data;}finally{clearTimeout(timer);if(!read)DG3.pending--;}})();if(read)DG3.reads.set(key,promise);try{return await promise;}finally{if(read&&DG3.reads.get(key)===promise)DG3.reads.delete(key);}}
+async function d3CheckBackend(){try{const r=await api({action:'ping'});DG3.backend=String(r.version||'');if(!/^3\./.test(DG3.backend))d3Notice('App 3.7.1: Bitte zuerst Google-GS 3.0 bereitstellen. Backend: '+DG3.backend+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return /^3\./.test(DG3.backend);}catch(e){d3Notice('Verbindungspruefung fehlgeschlagen: '+e.message,'warn');return false;}}
+async function d3Api(payload){const action=String(payload.action||''),read=/^(get|check)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload);if(action!=='ping'&&!/^3\./.test(DG3.backend)){await d3CheckBackend();if(!/^3\./.test(DG3.backend))throw dgError('Google-Backend 3.0 noch nicht bereitgestellt.','version');}if(read&&DG3.reads.has(key))return DG3.reads.get(key);const promise=(async()=>{if(!read)DG3.pending++;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);try{let response;try{response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...payload,clientVersion:'3.7.1'}),signal:controller.signal});}catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Anlegen zuerst Daten neu laden.':'Keine Serververbindung.','network');}if(!response.ok)throw dgError('HTTP '+response.status,'network');let data;try{data=JSON.parse(await response.text());}catch(e){throw dgError('Ungueltige Serverantwort.','server');}if(!data.ok)throw dgError(data.error||'Serverfehler.','server');return data.data!==undefined?data.data:data;}finally{clearTimeout(timer);if(!read)DG3.pending--;}})();if(read)DG3.reads.set(key,promise);try{return await promise;}finally{if(read&&DG3.reads.get(key)===promise)DG3.reads.delete(key);}}
 document.addEventListener('click',e=>{const b=e.target.closest?.('button');if(!b)return;const fn=b.dataset.d3Fn,handler=fn?window[fn]:b.getAttribute('onclick')?b.onclick:null;if(typeof handler!=='function')return;e.preventDefault();e.stopImmediatePropagation();if(b.dataset.d3Busy)return;try{const r=handler.apply(b,fn?JSON.parse(b.dataset.d3Args||'[]'):[e]);if(r&&typeof r.then==='function'){b.dataset.d3Busy='1';b.disabled=true;b.setAttribute('aria-busy','true');Promise.resolve(r).catch(err=>d3Notice(err.message,'error')).finally(()=>{delete b.dataset.d3Busy;b.disabled=false;b.removeAttribute('aria-busy');});}}catch(err){d3Notice(err.message,'error');}},true);
 function d3Dirty(){return !!(document.activeElement?.matches('input,textarea,select')||document.querySelector('[data-d3-busy]')||[...document.querySelectorAll('[id$="Modal"],.regie-merge-select:checked')].some(d3Visible)||(($('customer')?.value||'').trim())||(($('activity')?.value||'').trim())||(typeof preparedPhotos!=='undefined'&&preparedPhotos.length));}
 async function d3Sync(){if(DG3.syncing||DG3.pending||document.hidden||!navigator.onLine||!DG3.ready||!auth().employee||d3Dirty())return;DG3.syncing=true;try{await syncQueue(false);if(d3Visible($('employeeView'))){await loadDay();await loadCalendarEvents();}else{if(DG3.loaders[DG3.open])await DG3.loaders[DG3.open]();await d3Dashboard();}if($('d3Sync'))$('d3Sync').textContent='Aktualisierung angefordert: '+new Date().toLocaleTimeString('de-DE')+' - Ergebnis im jeweiligen Bereich.';}catch(e){if($('d3Sync'))$('d3Sync').textContent='Aktualisierung fehlgeschlagen: '+e.message;}finally{DG3.syncing=false;}}
@@ -1376,7 +1376,7 @@ async function d3JobStatus(ids,status){if(!confirm('Auftrag auf '+status+' setze
 async function d3Bill(ids){const objectIds=ids.split(',').filter(Boolean),risk=await api(chefPayload({action:'checkRegieBillingRisk',objectIds})),matches=risk.matches||[];if(!confirm((matches.length?'Weitere offene Vorgaenge gefunden:\n'+matches.map(x=>x.customer).join('\n')+'\n\n':'')+'Diesen Auftrag als abgerechnet markieren?'))return;await api(chefPayload({action:'markRegieObjectsBilled',objectIds,force:!!matches.length}));await d3Reports(DG3.active);}
 async function d3MoveOffer(entryIds){if(!confirm('Nach Angebote zu erstellen verschieben?'))return;await api(chefPayload({action:'setRegieReportsOfferStatus',entryIds,offerStatus:'Angebot zu erstellen'}));await d3Reports(DG3.active);}
 async function d3Note(objectId,customer){const r=await api(chefPayload({action:'getObjectInternalNote',objectId})),note=prompt('Interner Vermerk zu '+customer,r.note||'');if(note===null)return;await api(chefPayload({action:'saveObjectInternalNote',objectId,note}));}
-async function d3Health(){const out=$('d3HealthList');out.textContent='System wird geprueft ...';try{const r=await api(chefPayload({action:'systemHealthCheck'}));out.innerHTML='<div class="status '+(r.ok?'ok':'warn')+'">App 3.7 - Backend '+esc(r.version)+' - '+esc(r.checkedAt)+'</div>'+(r.checks||[]).map(x=>'<div class="status '+(x.level==='error'?'error':x.level==='warn'?'warn':'ok')+'"><strong>'+esc(x.name)+'</strong><br>'+esc(x.detail)+'</div>').join('');}catch(e){out.textContent='Systemcheck fehlgeschlagen: '+e.message;}}
+async function d3Health(){const out=$('d3HealthList');out.textContent='System wird geprueft ...';try{const r=await api(chefPayload({action:'systemHealthCheck'}));out.innerHTML='<div class="status '+(r.ok?'ok':'warn')+'">App 3.7.1 - Backend '+esc(r.version)+' - '+esc(r.checkedAt)+'</div>'+(r.checks||[]).map(x=>'<div class="status '+(x.level==='error'?'error':x.level==='warn'?'warn':'ok')+'"><strong>'+esc(x.name)+'</strong><br>'+esc(x.detail)+'</div>').join('');}catch(e){out.textContent='Systemcheck fehlgeschlagen: '+e.message;}}
 
 
 DG3.offers={};DG3.inquiries=[];DG3.orders=[];DG3.reminders=[];
@@ -1414,7 +1414,7 @@ function d3TransferInstall(){const b=d3Element('button','btn primary','An andere
 async function d3Transfer(){const record=DG3.calendar.event(DG3.calendar.edit().id);if(!record)throw new Error('Zuerst einen vorhandenen Termin oeffnen.');const options=DG3.calendar.workers().filter(w=>w.active&&!(record.employeeIds||[]).includes(w.id)).map(w=>({value:w.id,label:w.displayName||w.employeeName}));if(!options.length)return alert('Kein anderer aktiver Mitarbeiter vorhanden.');d3Form('Termin uebertragen',[{name:'targetWorkerId',label:'Zielmitarbeiter',type:'select',options}],{targetWorkerId:options[0].value},async v=>{if(!confirm('Beim bisherigen Mitarbeiter entfernen und zum Zielmitarbeiter verschieben?'))return;await api(chefPayload({action:'transferPlannerEvent',item:{sourceId:record.id,targetWorkerId:v.targetWorkerId,date:record.date}}));dg62Close();await dg62Load();});}
 
 
-async function d3CheckBackend(){try{const r=await api({action:'ping'}),found=String(r.version||''),parts=found.split('.').map(Number),ok=parts[0]===3&&parts[1]>=4;DG3.backend=ok?found:'';if(!ok)d3Notice('App 3.7 benötigt Google-GS Backend 3.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return ok;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}}
+async function d3CheckBackend(){try{const r=await api({action:'ping'}),found=String(r.version||''),parts=found.split('.').map(Number),ok=parts[0]===3&&parts[1]>=4;DG3.backend=ok?found:'';if(!ok)d3Notice('App 3.7.1 benötigt Google-GS Backend 3.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return ok;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}}
 /* DG 3.2: dashboard traffic lights, inquiry workflow/archive/reminders, report gallery, AQON visibility cleanup. */
 const d32BaseInstallOffice=d3InstallOffice;
 const d32BaseReportCard=d3ReportCard;
@@ -1666,7 +1666,7 @@ function d35InstallInspectionButton(){const save=[...document.querySelectorAll('
 function d35SelectedCalendarEvent(){const rows=window.__dgCalendarEvents||[];return rows.find(e=>String(e.id||'')===String(selectedCalendarEventId||''))||null;}
 function d35InspectionVisit(){if(!canAccessBoss()){setMessage('entryStatus','Besichtigungstermine können nur mit Chefzugang übertragen werden.','error');return;}const customer=String($('customer')?.value||'').trim();if(!customer){setMessage('entryStatus','Bitte mindestens Kunde / Baustelle auswählen oder eintragen.','error');return;}const options=[0.5,1,1.5,2,2.5,3].map(v=>({value:String(v),label:String(v).replace('.',',')+' Std.'}));d3Form('Besichtigungstermin',[{name:'hours',label:'Zeitaufwand',type:'select',options}],{hours:'1'},async v=>{const event=d35SelectedCalendarEvent(),payload={action:'createInspectionOffer',employee:auth().employee,employeePin:auth().pin,item:{customer,date:$('date')?.value||localDate(),hours:Number(v.hours),vehicleUsed:true,sourceCalendarEventId:selectedCalendarEventId||'',event:event?{title:event.title||'',location:event.location||'',description:event.description||'',startDate:event.startDate||'',startTime:event.startTime||'',endDate:event.endDate||'',endTime:event.endTime||'',phone:event.phone||'',email:event.email||''}:null}};const r=await api(payload);resetEntry();await loadCalendarEvents();setMessage('entryStatus','✓ Besichtigung als offenes Angebot übertragen. Zeitaufwand '+formatHours(v.hours)+' Std. · Fahrzeugeinsatz Ja.','ok');return r;});}
 
-function d3Startup(){try{const pin=localStorage.getItem('dg_employee_pin');if(pin&&!sessionStorage.getItem('dg_employee_pin'))sessionStorage.setItem('dg_employee_pin',pin);localStorage.removeItem('dg_employee_pin');d3InstallOffice();d3TransferInstall();document.querySelectorAll('[onclick]').forEach(e=>{const s=e.getAttribute('onclick');if(s&&!s.startsWith('return ')&&/^[\w.$]+\([\s\S]*\)$/.test(s.trim()))e.setAttribute('onclick','return '+s);});init();DG3.ready=true;setInterval(d3Sync,60000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)d3Sync();});if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(e=>d3Notice('Offline-Funktion noch nicht bereit: '+e.message,'warn'));}catch(e){console.error(e);const msg=d3Element('div','status error');msg.textContent='App 3.7 konnte nicht starten: '+e.message;document.body.prepend(msg);}}
+function d3Startup(){try{const pin=localStorage.getItem('dg_employee_pin');if(pin&&!sessionStorage.getItem('dg_employee_pin'))sessionStorage.setItem('dg_employee_pin',pin);localStorage.removeItem('dg_employee_pin');d3InstallOffice();d3TransferInstall();document.querySelectorAll('[onclick]').forEach(e=>{const s=e.getAttribute('onclick');if(s&&!s.startsWith('return ')&&/^[\w.$]+\([\s\S]*\)$/.test(s.trim()))e.setAttribute('onclick','return '+s);});init();DG3.ready=true;setInterval(d3Sync,60000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)d3Sync();});if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(e=>d3Notice('Offline-Funktion noch nicht bereit: '+e.message,'warn'));}catch(e){console.error(e);const msg=d3Element('div','status error');msg.textContent='App 3.7.1 konnte nicht starten: '+e.message;document.body.prepend(msg);}}
 /* DG 3.6: Wartungsvertraege, Wartungskalender und Pflichtfeld naechste Wartung. */
 (function(){
 'use strict';
@@ -1890,6 +1890,179 @@ const baseOpen37=window.d3Open;
 if(typeof baseOpen37==='function')window.d3Open=d3Open=function(id,child){const r=baseOpen37.apply(this,arguments);if(id==='d36Maintenance')setTimeout(()=>{d37MaintenanceShell();d37LoadMaintenanceOverview();$('d36Maintenance')?.scrollIntoView({behavior:'instant',block:'start'});},0);return r;};
 const baseStartup37=window.d3Startup;
 if(typeof baseStartup37==='function')window.d3Startup=d3Startup=function(){const r=baseStartup37.apply(this,arguments);setTimeout(()=>{d37MaintenanceShell();d37RepairPlannerAssignment();},0);return r;};
+})();
+
+/* DG 3.7: Wartungskunden, Objekte, Geräte, Wartungsarchiv und Kalender-Verfügbarkeitsprüfung. */
+(function(){
+'use strict';
+const S=window.DG37=window.DG37||{workers:[],previewEvents:[],previewDate:'',customer:null,overview:null,plannerLink:null,plannerEditId:''};
+const esc37=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const val=id=>String($(id)?.value||'').trim();
+const monthLabel=k=>{if(!/^\d{4}-\d{2}$/.test(k||''))return k||'';const [y,m]=k.split('-').map(Number);return new Intl.DateTimeFormat('de-DE',{month:'long',year:'numeric'}).format(new Date(y,m-1,1));};
+const fmtDevice=d=>[d.deviceType,d.otherDescription,d.manufacturer,d.model].filter(Boolean).join(' · ');
+function d37Notice(msg,type='info'){if(typeof d3Notice==='function')d3Notice(msg,type);else alert(msg);}
+
+/* ---------- Kalender: Mitarbeiterwahl + Tagesvorschau ---------- */
+async function d37Workers(){
+  if(S.workers.length)return S.workers;
+  S.workers=(await api(chefPayload({action:'getPlannerWorkers'}))||[]).filter(x=>x.active);
+  return S.workers;
+}
+function d37SelectedWorkerIds(){return [...document.querySelectorAll('#dg62Share .dg62cb:checked')].map(x=>x.value);}
+function d37EnsurePlannerPreview(){
+  const share=$('dg62Share');if(!share)return null;
+  let p=$('d37PlannerPreview');if(!p){p=document.createElement('div');p.id='d37PlannerPreview';p.className='d37-planner-preview';share.insertAdjacentElement('afterend',p);}return p;
+}
+async function d37RepairPlannerAssignment(){
+  const share=$('dg62Share');if(!share)return;
+  let workers=[];try{workers=await d37Workers();}catch(e){workers=[];}
+  if(!share.querySelector('.dg62cb')&&workers.length){
+    const selected=new Set((S.pendingWorkerIds||[]).map(String));
+    share.innerHTML=workers.map(w=>'<label><input type="checkbox" class="dg62cb" value="'+esc37(w.id)+'" '+(selected.has(String(w.id))?'checked':'')+'>'+esc37(w.displayName||w.employeeName)+'</label>').join('');
+    const hint=$('dg62ShareHint');if(hint)hint.textContent='Mitarbeiter auswählen. Darunter wird der Kalender des gewählten Tages eingeblendet.';
+  }
+  [...share.querySelectorAll('.dg62cb')].forEach(cb=>{if(cb.dataset.d37)return;cb.dataset.d37='1';cb.addEventListener('change',d37PreviewPlannerDay);});
+  ['dg62ED','dg62Start','dg62End'].forEach(id=>{const e=$(id);if(e&&!e.dataset.d37){e.dataset.d37='1';e.addEventListener('change',d37PreviewPlannerDay);}});
+  d37EnsurePlannerPreview();await d37PreviewPlannerDay();
+}
+function d37Overlap(e,start,end){if(!start||!end)return false;return String(e.start||'')<end&&String(e.end||'')>start;}
+async function d37PreviewPlannerDay(){
+  const host=d37EnsurePlannerPreview();if(!host)return;
+  const date=val('dg62ED'),ids=d37SelectedWorkerIds(),start=val('dg62Start'),end=val('dg62End');
+  if(!date){host.innerHTML='<div class="muted small">Bitte zuerst einen Tag auswählen.</div>';return;}
+  if(!ids.length){host.innerHTML='<div class="d37-preview-empty">Noch kein Mitarbeiter ausgewählt. Nach Auswahl erscheint hier dessen Kalender für '+esc37(formatDateDE(date))+'.</div>';return;}
+  host.innerHTML='<div class="status info">Kalender '+esc37(formatDateDE(date))+' wird geladen …</div>';
+  try{
+    const [workers,events]=await Promise.all([d37Workers(),api(chefPayload({action:'getPlannerEvents',startDate:date,endDate:date}))]);
+    S.previewEvents=(events||[]);S.previewDate=date;
+    host.innerHTML='<div class="d37-preview-title">Kalender am '+esc37(formatDateDE(date))+'</div><div class="d37-preview-grid">'+ids.map(id=>{
+      const w=workers.find(x=>String(x.id)===String(id))||{displayName:id};
+      const ev=(events||[]).filter(x=>(x.employeeIds||[]).map(String).includes(String(id))&&String(x.id)!==String(S.plannerEditId||''));
+      const conflicts=ev.filter(x=>d37Overlap(x,start,end));
+      return '<div class="d37-preview-worker '+(conflicts.length?'conflict':'')+'"><strong>'+esc37(w.displayName||w.employeeName)+'</strong>'+(ev.length?ev.map(x=>'<div class="d37-preview-event '+(d37Overlap(x,start,end)?'conflict':'')+'"><b>'+esc37(x.start)+'–'+esc37(x.end)+'</b> '+esc37(x.customer||'Termin')+(x.type==='Wartung'?' <span>🔧</span>':'')+'<div class="small muted">'+esc37(x.task||'')+'</div></div>').join(''):'<div class="d37-free">Keine Termine – Zeitraum frei.</div>')+(conflicts.length?'<div class="d37-conflict-note">⚠ Überschneidung mit der gewählten Uhrzeit.</div>':'')+'</div>';
+    }).join('')+'</div>';
+  }catch(e){host.innerHTML='<div class="status error">Kalender konnte nicht geladen werden: '+esc37(e.message)+'</div>';}
+}
+function d37PlannerConflicts(){const ids=d37SelectedWorkerIds(),date=val('dg62ED'),start=val('dg62Start'),end=val('dg62End');if(date!==S.previewDate)return [];return (S.previewEvents||[]).filter(e=>String(e.id)!==String(S.plannerEditId||'')&&(e.employeeIds||[]).some(id=>ids.includes(String(id)))&&d37Overlap(e,start,end));}
+const baseNew37=window.dg62New;
+if(typeof baseNew37==='function')window.dg62New=function(){S.plannerEditId='';S.pendingWorkerIds=[];S.plannerLink=null;const r=baseNew37.apply(this,arguments);setTimeout(d37RepairPlannerAssignment,0);return r;};
+const baseEdit37=window.dg62Edit;
+if(typeof baseEdit37==='function')window.dg62Edit=function(id){S.plannerEditId=String(id||'');const r=baseEdit37.apply(this,arguments);setTimeout(d37RepairPlannerAssignment,0);return r;};
+const baseSave37=window.dg62Save;
+if(typeof baseSave37==='function')window.dg62Save=async function(){const conflicts=d37PlannerConflicts();if(conflicts.length&&!confirm('Achtung: Der gewählte Zeitraum überschneidet sich mit '+conflicts.length+' vorhandenem Termin(en) des ausgewählten Mitarbeiters. Trotzdem speichern?'))return;return baseSave37.apply(this,arguments);};
+const baseApi37=window.api;
+if(typeof baseApi37==='function')window.api=api=async function(payload){
+  if(payload&&payload.action==='savePlannerEvent'&&payload.item&&payload.item.type==='Wartung'&&S.plannerLink){Object.assign(payload.item,{maintenanceCustomerId:S.plannerLink.customerId||'',maintenanceObjectId:S.plannerLink.objectId||'',maintenanceDeviceId:S.plannerLink.deviceId||''});}
+  const r=await baseApi37.apply(this,arguments);
+  if(payload&&payload.action==='savePlannerEvent')S.plannerLink=null;
+  return r;
+};
+
+/* ---------- Wartungskunden: Formular ---------- */
+function d37BlankCustomer(){return{id:'',name:'',billingStreet:'',billingZip:'',billingCity:'',email:'',phone:'',objects:[d37BlankObject()]};}
+function d37BlankObject(){return{id:'',name:'',street:'',zip:'',city:'',notes:'',devices:[d37BlankDevice()]};}
+function d37BlankDevice(){return{id:'',deviceType:'Gas Brennwert',otherDescription:'',manufacturer:'',model:'',serialNumber:'',year:'',tenantName:'',tenantPhone:'',tenantEmail:'',sparePartManufacturer:'',sparePartSerialNumber:'',internalNotes:'',nextMaintenanceDue:'',repairs:[]};}
+function d37Field(label,key,value='',type='text',extra=''){return '<label>'+label+'</label><input data-d37="'+key+'" type="'+type+'" value="'+esc37(value)+'" '+extra+'>';}
+function d37DeviceHtml(d,oi,di){
+  const repairs=(d.repairs||[]).map(r=>'<div class="d37-repair"><b>'+esc37(formatDateDE(r.date||''))+'</b> · '+esc37(r.description||'')+(r.createdBy?'<div class="small muted">Erfasst von '+esc37(r.createdBy)+'</div>':'')+'</div>').join('');
+  const history=(d.history||[]).map(r=>'<div class="d37-repair"><b>'+esc37(formatDateDE(r.date||''))+'</b> · '+esc37(r.description||'')+'<div class="small muted">'+esc37(r.employee||'')+' · '+Number(r.hours||0).toFixed(2).replace('.',',')+' Std.'+(r.nextMaintenanceDue?' · nächste Wartung '+esc37(monthLabel(r.nextMaintenanceDue)):'')+'</div></div>').join('');
+  return '<div class="d37-device" data-device-index="'+di+'" data-device-id="'+esc37(d.id||'')+'"><div class="d37-subhead"><strong>Gerät '+(di+1)+'</strong><button type="button" class="btn danger d37-mini" onclick="return d37RemoveDevice('+oi+','+di+')">Gerät entfernen</button></div><div class="d37-grid3">'
+    +'<div><label>Geräteart</label><select data-d37="deviceType" onchange="d37ToggleOther(this)">'+['Gas Atmosphärisch','Gas Brennwert','Öl Atmosphärisch','Öl Brennwert','Hebeanlage','Sonstiges'].map(x=>'<option '+(d.deviceType===x?'selected':'')+'>'+x+'</option>').join('')+'</select></div>'
+    +'<div class="d37-other '+(d.deviceType==='Sonstiges'?'':'hidden')+'">'+d37Field('Beschreibung bei Sonstiges','otherDescription',d.otherDescription)+'</div>'
+    +'<div>'+d37Field('Hersteller','manufacturer',d.manufacturer)+'</div><div>'+d37Field('Typ / Modell','model',d.model)+'</div><div>'+d37Field('Seriennummer','serialNumber',d.serialNumber)+'</div><div>'+d37Field('Baujahr','year',d.year,'number','min="1900" max="2200"')+'</div>'
+    +'<div>'+d37Field('Ersatzteil-Hersteller','sparePartManufacturer',d.sparePartManufacturer)+'</div><div>'+d37Field('Ersatzteil-Seriennummer','sparePartSerialNumber',d.sparePartSerialNumber)+'</div><div>'+d37Field('Nächste Wartung fällig','nextMaintenanceDue',d.nextMaintenanceDue,'month')+'</div></div>'
+    +'<div class="d37-section-label">Mieter / Ansprechpartner am Gerät <span class="muted small">(optional)</span></div><div class="d37-grid3"><div>'+d37Field('Name','tenantName',d.tenantName)+'</div><div>'+d37Field('Telefon','tenantPhone',d.tenantPhone,'tel')+'</div><div>'+d37Field('E-Mail','tenantEmail',d.tenantEmail,'email')+'</div></div>'
+    +'<label>Interne Vermerke</label><textarea data-d37="internalNotes">'+esc37(d.internalNotes||'')+'</textarea>'
+    +(d.id?'<div class="d37-repair-box"><div class="d37-subhead"><strong>Wartungsberichte</strong></div>'+(history||'<div class="muted small">Noch keine abgeschlossenen Wartungen hinterlegt.</div>')+'<div class="d37-subhead" style="margin-top:12px"><strong>Reparaturen außerhalb des Wartungsvertrags</strong><button type="button" class="btn secondary d37-mini" onclick="return d37AddRepair(\''+esc37(d.id)+'\')">+ Reparatur eintragen</button></div>'+(repairs||'<div class="muted small">Noch keine Reparaturen hinterlegt.</div>')+'</div>':'')
+    +'</div>';
+}
+function d37ObjectHtml(o,oi){return '<div class="d37-object" data-object-index="'+oi+'" data-object-id="'+esc37(o.id||'')+'"><div class="d37-subhead"><h3>Objekt '+(oi+1)+'</h3><button type="button" class="btn danger d37-mini" onclick="return d37RemoveObject('+oi+')">Objekt entfernen</button></div><div class="d37-grid2"><div>'+d37Field('Objektbezeichnung','objectName',o.name)+'</div><div>'+d37Field('Straße / Hausnummer','street',o.street)+'</div><div>'+d37Field('PLZ','zip',o.zip)+'</div><div>'+d37Field('Ort','city',o.city)+'</div></div><label>Objekt-Vermerk</label><textarea data-d37="objectNotes">'+esc37(o.notes||'')+'</textarea><div class="d37-devices">'+(o.devices||[]).map((d,di)=>d37DeviceHtml(d,oi,di)).join('')+'</div><button type="button" class="btn secondary" onclick="return d37AddDevice('+oi+')">+ Weiteres Gerät an diesem Objekt</button></div>';}
+function d37RenderCustomerForm(hostId,model,mode){
+  const host=$(hostId);if(!host)return;S.customer=JSON.parse(JSON.stringify(model||d37BlankCustomer()));
+  host.innerHTML='<div class="d37-customer-form" data-host="'+esc37(hostId)+'" data-mode="'+esc37(mode)+'"><input type="hidden" class="d37CustomerId" value="'+esc37(S.customer.id||'')+'"><div class="d37-section-label">1. Kundendaten / Rechnungsempfänger</div><div class="d37-grid2"><div>'+d37Field('Name / Firma','customerName',S.customer.name)+'</div><div>'+d37Field('E-Mail','customerEmail',S.customer.email,'email')+'</div><div>'+d37Field('Telefon','customerPhone',S.customer.phone,'tel')+'</div><div>'+d37Field('Rechnungsadresse – Straße / Hausnummer','billingStreet',S.customer.billingStreet)+'</div><div>'+d37Field('Rechnungsadresse – PLZ','billingZip',S.customer.billingZip)+'</div><div>'+d37Field('Rechnungsadresse – Ort','billingCity',S.customer.billingCity)+'</div></div><div class="d37-section-label">2. Ausführungsorte / Objekte</div><div id="d37Objects">'+(S.customer.objects||[]).map(d37ObjectHtml).join('')+'</div><button type="button" class="btn secondary" onclick="return d37AddObject()">+ Weiteres Objekt hinzufügen</button><div class="d37CustomerStatus"></div><button type="button" class="btn success d37-save-customer" onclick="return d37SaveCustomer(\''+mode+'\')">'+(mode==='edit'?'Kundendaten speichern':'Kunde und Wartungsgeräte anlegen')+'</button></div>';
+}
+function d37ReadField(root,key){const e=root.querySelector('[data-d37="'+key+'"]');return e?String(e.value||'').trim():'';}
+function d37ActiveCustomerForm(){return document.querySelector('#d37MaintenanceManage:not(.hidden) .d37-customer-form')||document.querySelector('#d37MaintenanceCreate:not(.hidden) .d37-customer-form')||document.querySelector('.d37-customer-form');}
+function d37CollectCustomer(validate=true,root){
+  root=root||d37ActiveCustomerForm();if(!root)return null;
+  const c={id:String(root.querySelector('.d37CustomerId')?.value||'').trim(),name:d37ReadField(root,'customerName'),email:d37ReadField(root,'customerEmail'),phone:d37ReadField(root,'customerPhone'),billingStreet:d37ReadField(root,'billingStreet'),billingZip:d37ReadField(root,'billingZip'),billingCity:d37ReadField(root,'billingCity'),objects:[]};
+  [...root.querySelectorAll('.d37-object')].forEach(or=>{const o={id:or.dataset.objectId||'',name:d37ReadField(or,'objectName'),street:d37ReadField(or,'street'),zip:d37ReadField(or,'zip'),city:d37ReadField(or,'city'),notes:d37ReadField(or,'objectNotes'),devices:[]};[...or.querySelectorAll(':scope > .d37-devices > .d37-device')].forEach(dr=>{const d={id:dr.dataset.deviceId||'',deviceType:d37ReadField(dr,'deviceType'),otherDescription:d37ReadField(dr,'otherDescription'),manufacturer:d37ReadField(dr,'manufacturer'),model:d37ReadField(dr,'model'),serialNumber:d37ReadField(dr,'serialNumber'),year:d37ReadField(dr,'year'),tenantName:d37ReadField(dr,'tenantName'),tenantPhone:d37ReadField(dr,'tenantPhone'),tenantEmail:d37ReadField(dr,'tenantEmail'),sparePartManufacturer:d37ReadField(dr,'sparePartManufacturer'),sparePartSerialNumber:d37ReadField(dr,'sparePartSerialNumber'),internalNotes:d37ReadField(dr,'internalNotes'),nextMaintenanceDue:d37ReadField(dr,'nextMaintenanceDue')};o.devices.push(d);});c.objects.push(o);});
+  if(validate){
+    if(!c.name||!c.billingStreet||!c.billingZip||!c.billingCity)throw new Error('Bitte Name und vollständige Rechnungsadresse eintragen.');
+    if(!c.objects.length)throw new Error('Mindestens ein Ausführungsobjekt ist erforderlich.');
+    c.objects.forEach((o,oi)=>{if(!o.name||!o.street||!o.zip||!o.city)throw new Error('Objekt '+(oi+1)+': Bezeichnung und vollständige Adresse fehlen.');if(!o.devices.length)throw new Error('Objekt '+(oi+1)+': Mindestens ein Wartungsgerät anlegen.');o.devices.forEach((d,di)=>{if(!d.deviceType)throw new Error('Objekt '+(oi+1)+', Gerät '+(di+1)+': Geräteart fehlt.');if(d.deviceType==='Sonstiges'&&!d.otherDescription)throw new Error('Objekt '+(oi+1)+', Gerät '+(di+1)+': Bei „Sonstiges“ ist die Beschreibung Pflicht.');if(!/^\d{4}-\d{2}$/.test(d.nextMaintenanceDue||''))throw new Error('Objekt '+(oi+1)+', Gerät '+(di+1)+': Nächste Wartung mit Monat und Jahr eintragen.');});});
+  }
+  return c;
+}
+function d37SyncModel(){try{S.customer=d37CollectCustomer(false)||S.customer;}catch(_e){}return S.customer;}
+window.d37ToggleOther=function(sel){const dev=sel.closest('.d37-device'),other=dev?.querySelector('.d37-other');if(other)other.classList.toggle('hidden',sel.value!=='Sonstiges');};
+window.d37AddObject=function(){const form=d37ActiveCustomerForm(),c=d37SyncModel();c.objects=c.objects||[];c.objects.push(d37BlankObject());d37RenderCustomerForm(form?.dataset.host||'d37CustomerCreateHost',c,form?.dataset.mode||'create');return false;};
+window.d37RemoveObject=function(i){const form=d37ActiveCustomerForm(),c=d37SyncModel();if(c.objects.length<=1)return alert('Mindestens ein Objekt muss vorhanden bleiben.');c.objects.splice(i,1);d37RenderCustomerForm(form?.dataset.host||'d37CustomerCreateHost',c,form?.dataset.mode||'create');return false;};
+window.d37AddDevice=function(i){const form=d37ActiveCustomerForm(),c=d37SyncModel();c.objects[i].devices.push(d37BlankDevice());d37RenderCustomerForm(form?.dataset.host||'d37CustomerCreateHost',c,form?.dataset.mode||'create');return false;};
+window.d37RemoveDevice=function(oi,di){const form=d37ActiveCustomerForm(),c=d37SyncModel();if(c.objects[oi].devices.length<=1)return alert('Mindestens ein Gerät muss an diesem Objekt vorhanden bleiben.');c.objects[oi].devices.splice(di,1);d37RenderCustomerForm(form?.dataset.host||'d37CustomerCreateHost',c,form?.dataset.mode||'create');return false;};
+window.d37SaveCustomer=async function(mode){const form=d37ActiveCustomerForm(),st=form?.querySelector('.d37CustomerStatus');try{const item=d37CollectCustomer(true,form);if(st){st.className='d37CustomerStatus status info';st.textContent='Kundendaten werden gespeichert …';}const saved=await api(chefPayload({action:'saveMaintenanceCustomer',item}));S.customer=saved;d37RenderCustomerForm(mode==='edit'?'d37CustomerEditHost':'d37CustomerCreateHost',saved,'edit');const fresh=d37ActiveCustomerForm()?.querySelector('.d37CustomerStatus');if(fresh){fresh.className='d37CustomerStatus status ok';fresh.textContent='✓ Kunde, Objekte und Geräte gespeichert.';}await d37LoadMaintenanceOverview();}catch(e){if(st){st.className='d37CustomerStatus status error';st.textContent=e.message;}else d37Notice(e.message,'error');}return false;};
+window.d37AddRepair=function(deviceId){if(typeof d3Form!=='function')return;d3Form('Reparatur außerhalb Wartungsvertrag',[{name:'date',label:'Datum',type:'date'},{name:'description',label:'Ausgeführte Reparatur',type:'textarea'}],{date:localDate(),description:''},async v=>{if(!v.description.trim())throw new Error('Bitte Reparatur beschreiben.');await api(chefPayload({action:'addMaintenanceRepair',deviceId,date:v.date,description:v.description}));if(S.customer?.id){const fresh=await api(chefPayload({action:'getMaintenanceCustomer',id:S.customer.id}));d37RenderCustomerForm('d37CustomerEditHost',fresh,'edit');}});};
+
+/* ---------- Wartungsbereich ---------- */
+function d37MaintenanceShell(){
+  const card=$('d36Maintenance');if(!card)return;
+  const body=card.querySelector(':scope > .dg48-body');if(!body||$('d37MaintenanceNav'))return;
+  body.innerHTML='<div id="d37MaintenanceNav" class="d37-maint-nav"><button type="button" data-tab="overview" onclick="return d37MaintenanceTab(\'overview\')">Wartungsübersicht</button><button type="button" data-tab="create" onclick="return d37MaintenanceTab(\'create\')">Kunde anlegen</button><button type="button" data-tab="manage" onclick="return d37MaintenanceTab(\'manage\')">Kunde verwalten</button><button type="button" data-tab="archive" onclick="return d37MaintenanceTab(\'archive\')">Wartungsarchiv</button></div><div id="d37MaintenanceOverview" class="d37-maint-panel"></div><div id="d37MaintenanceCreate" class="d37-maint-panel hidden"><div id="d37CustomerCreateHost"></div></div><div id="d37MaintenanceManage" class="d37-maint-panel hidden"><div class="d37-search"><input id="d37CustomerSearch" placeholder="Kunde, Objekt, Adresse, Gerät oder Seriennummer suchen"><button type="button" class="btn primary" onclick="return d37SearchCustomers()">Suchen</button></div><div id="d37CustomerSearchResults"></div><div id="d37CustomerEditHost" class="hidden"></div></div><div id="d37MaintenanceArchive" class="d37-maint-panel hidden"><div class="d37-search"><input id="d37ArchiveSearch" placeholder="Archiv durchsuchen"><button type="button" class="btn primary" onclick="return d37LoadArchive()">Suchen</button></div><div id="d37ArchiveList"></div></div>';
+  d37RenderCustomerForm('d37CustomerCreateHost',d37BlankCustomer(),'create');
+  DG3.loaders.d36Maintenance=window.d37LoadMaintenanceOverview;
+}
+window.d37MaintenanceTab=function(tab){
+  document.querySelectorAll('#d37MaintenanceNav [data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+  const map={overview:'d37MaintenanceOverview',create:'d37MaintenanceCreate',manage:'d37MaintenanceManage',archive:'d37MaintenanceArchive'};Object.entries(map).forEach(([k,id])=>$(id)?.classList.toggle('hidden',k!==tab));
+  if(tab==='overview')d37LoadMaintenanceOverview();if(tab==='manage')d37SearchCustomers();if(tab==='archive')d37LoadArchive();return false;
+};
+window.d37LoadMaintenanceOverview=async function(){
+  d37MaintenanceShell();const host=$('d37MaintenanceOverview');if(!host)return;
+  host.innerHTML='<div class="status info">Wartungen werden geladen …</div>';
+  try{const data=await api(chefPayload({action:'getMaintenanceOverview'}));S.overview=data||{};d3Count('maintenance',Number(data.currentMonthOpen||0));
+    const months=(data.months||[]);host.innerHTML='<div class="d37-overview-head"><div><h3>Wartungen '+esc37(data.windowLabel||'')+'</h3><div class="muted small">Die Kachel zählt nur im aktuellen Monat noch offene, nicht terminierte Wartungen.</div></div><div class="d37-open-count"><span>Aktueller Monat offen</span><strong>'+Number(data.currentMonthOpen||0)+'</strong></div></div><div class="d37-months">'+months.map(m=>'<button type="button" class="d37-month '+(m.current?'current':'')+'" onclick="return d37ShowMonth(\''+esc37(m.key)+'\')"><span>'+esc37(m.label||monthLabel(m.key))+'</span><strong>'+Number(m.openCount||0)+'</strong><small>'+Number(m.scheduledCount||0)+' terminiert</small></button>').join('')+'</div><div id="d37MonthDetail"></div>';const cur=months.find(x=>x.current)||months[Math.min(3,Math.max(0,months.length-1))];if(cur)d37ShowMonth(cur.key);
+  }catch(e){host.innerHTML='<div class="status error">'+esc37(e.message)+'</div>';d3Count('maintenance','!');}
+};
+window.d37ShowMonth=function(key){const m=(S.overview?.months||[]).find(x=>x.key===key),host=$('d37MonthDetail');if(!m||!host)return false;document.querySelectorAll('.d37-month').forEach(b=>b.classList.toggle('selected',(b.textContent||'').includes(m.label||monthLabel(key))));host.innerHTML='<h3>'+esc37(m.label||monthLabel(key))+'</h3>'+((m.items||[]).map(x=>'<div class="report-card d37-maint-item"><div class="d3-head"><strong>🔧 '+esc37(x.customerName)+'</strong><span class="badge">'+(x.scheduled?'Terminiert':'Offen')+'</span></div><div><b>'+esc37(x.objectName)+'</b> · '+esc37(x.address||'')+'</div><div class="report-meta">'+esc37(fmtDevice(x))+(x.serialNumber?' · Seriennr. '+esc37(x.serialNumber):'')+'</div><div class="report-meta">Fällig: '+esc37(monthLabel(x.nextMaintenanceDue))+'</div>'+(x.scheduled?'<div class="status ok">Termin '+esc37(formatDateDE(x.plannedDate))+' · '+esc37((x.employeeNames||[]).join(', '))+'</div>':'<button type="button" class="btn success" onclick="return d37PlanMaintenance(\''+esc37(x.customerId)+'\',\''+esc37(x.objectId)+'\',\''+esc37(x.deviceId)+'\')">Wartung terminieren</button>')+'</div>').join('')||'<div class="status ok">In diesem Monat sind keine Wartungen fällig.</div>');return false;};
+window.d37PlanMaintenance=function(customerId,objectId,deviceId){const all=(S.overview?.months||[]).flatMap(m=>m.items||[]),x=all.find(r=>r.deviceId===deviceId);if(!x)return alert('Wartungsgerät bitte neu laden.');S.plannerLink={customerId,objectId,deviceId};window.dg62New();setTimeout(async()=>{S.plannerLink={customerId,objectId,deviceId};$('d36PlannerType').value='Wartung';$('dg62Customer').value=x.customerName||'';$('dg62Address').value=x.address||'';$('dg62Task').value='Wartung '+fmtDevice(x)+(x.serialNumber?' · Seriennummer '+x.serialNumber:'');if(x.nextMaintenanceDue&&/^\d{4}-\d{2}$/.test(x.nextMaintenanceDue)){$('dg62ED').value=x.nextMaintenanceDue+'-01';}await d37RepairPlannerAssignment();$('dg62MT').textContent='Wartung terminieren';},0);return false;};
+window.d37SearchCustomers=async function(){const host=$('d37CustomerSearchResults');if(!host)return false;try{const rows=await api(chefPayload({action:'searchMaintenanceCustomers',query:val('d37CustomerSearch')}));host.innerHTML=(rows||[]).map(x=>'<button type="button" class="d37-search-result" onclick="return d37OpenCustomer(\''+esc37(x.id)+'\')"><strong>'+esc37(x.name)+'</strong><span>'+Number(x.objectCount||0)+' Objekt(e) · '+Number(x.deviceCount||0)+' Gerät(e)</span><small>'+esc37(x.billingCity||'')+'</small></button>').join('')||'<div class="muted">Keine Kunden gefunden.</div>';}catch(e){host.innerHTML='<div class="status error">'+esc37(e.message)+'</div>';}return false;};
+window.d37OpenCustomer=async function(id){try{const c=await api(chefPayload({action:'getMaintenanceCustomer',id}));S.customer=c;$('d37CustomerEditHost').classList.remove('hidden');d37RenderCustomerForm('d37CustomerEditHost',c,'edit');$('d37CustomerEditHost').scrollIntoView({behavior:'instant',block:'start'});}catch(e){d37Notice(e.message,'error');}return false;};
+window.d37LoadArchive=async function(){const host=$('d37ArchiveList');if(!host)return false;host.innerHTML='<div class="status info">Archiv wird geladen …</div>';try{const rows=await api(chefPayload({action:'getMaintenanceArchive',query:val('d37ArchiveSearch')}));host.innerHTML=(rows||[]).map((x,i)=>'<div class="report-card '+(i%2?'d3-alt':'')+'"><div class="d3-head"><strong>'+esc37(x.kind==='Repair'?'🔧 Reparatur':'🧾 Wartungsbericht')+' · '+esc37(x.customerName)+'</strong><span class="badge">'+esc37(formatDateDE(x.date))+'</span></div><div>'+esc37(x.objectName||'')+' · '+esc37(x.deviceLabel||'')+'</div><div class="report-meta">'+esc37(x.description||'')+'</div>'+(x.employee?'<div class="small muted">Mitarbeiter: '+esc37(x.employee)+'</div>':'')+'</div>').join('')||'<div class="status ok">Noch keine Archiv-Einträge.</div>';}catch(e){host.innerHTML='<div class="status error">'+esc37(e.message)+'</div>';}return false;};
+
+/* ---------- Installation / Kachelzählung ---------- */
+const baseInstall37=window.d3InstallOffice;
+if(typeof baseInstall37==='function')window.d3InstallOffice=d3InstallOffice=function(){const r=baseInstall37.apply(this,arguments);d37MaintenanceShell();return r;};
+const baseDashboard37=window.d3Dashboard;
+if(typeof baseDashboard37==='function')window.d3Dashboard=d3Dashboard=async function(){const r=await baseDashboard37.apply(this,arguments);if(canAccessBoss()&&navigator.onLine){try{const o=await api(chefPayload({action:'getMaintenanceOverview'}));d3Count('maintenance',Number(o.currentMonthOpen||0));S.overview=o;}catch(_e){d3Count('maintenance','!');}}return r;};
+const baseOpen37=window.d3Open;
+if(typeof baseOpen37==='function')window.d3Open=d3Open=function(id,child){const r=baseOpen37.apply(this,arguments);if(id==='d36Maintenance')setTimeout(()=>{d37MaintenanceShell();d37LoadMaintenanceOverview();$('d36Maintenance')?.scrollIntoView({behavior:'instant',block:'start'});},0);return r;};
+const baseStartup37=window.d3Startup;
+if(typeof baseStartup37==='function')window.d3Startup=d3Startup=function(){const r=baseStartup37.apply(this,arguments);setTimeout(()=>{d37MaintenanceShell();d37RepairPlannerAssignment();},0);return r;};
+})();
+/* DG 3.7.1: Wartungskachel = Monatsreminder; nach Terminierung/Löschung sofort neu zählen. */
+(function(){
+'use strict';
+async function d371RefreshMaintenanceReminder(){
+  if(!canAccessBoss()||!navigator.onLine)return;
+  try{
+    const o=await api(chefPayload({action:'getMaintenanceOverview'}));
+    if(window.DG37)DG37.overview=o||{};
+    d3Count('maintenance',Number(o&&o.currentMonthOpen||0));
+    const panel=$('d37MaintenanceOverview');
+    const card=$('d36Maintenance');
+    if(panel&&card&&!panel.classList.contains('hidden')&&!card.classList.contains('hidden')&&typeof window.d37LoadMaintenanceOverview==='function'){
+      await window.d37LoadMaintenanceOverview();
+    }
+  }catch(_e){d3Count('maintenance','!');}
+}
+window.d371RefreshMaintenanceReminder=d371RefreshMaintenanceReminder;
+const baseApi371=window.api;
+if(typeof baseApi371==='function')window.api=api=async function(payload){
+  const action=payload&&payload.action;
+  const result=await baseApi371.apply(this,arguments);
+  if(action==='savePlannerEvent'||action==='deletePlannerEvent')setTimeout(d371RefreshMaintenanceReminder,0);
+  return result;
+};
 })();
 
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',d3Startup,{once:true});else d3Startup();
