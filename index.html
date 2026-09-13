@@ -11,15 +11,14 @@
 <link href="manifest.json" rel="manifest"/>
 <link href="dg_icon_192.png" rel="icon"/>
 <link href="dg_icon_192.png" rel="apple-touch-icon"/>
-<title>DG Zeiterfassung 3.1</title>
-
-<link href="./app-3.1.css?v=9f881ca2978c" rel="stylesheet"/></head>
+<title>DG Zeiterfassung 3.2</title>
+<link href="./app-3.2.css?v=cb887c73219a" rel="stylesheet"/></head>
 <body>
 <div class="screen" id="loginScreen">
 <div class="login-wrap">
 <div class="login-card">
 <img alt="Del Gesso Gebäudetechnik" class="logo" src="dg_icon_512.png"/>
-<h2 class="center">Mitarbeiter-Anmeldung</h2><div class="center muted small" style="margin-top:-8px;margin-bottom:10px">Version 3.1</div>
+<h2 class="center">Mitarbeiter-Anmeldung</h2><div class="center muted small" style="margin-top:-8px;margin-bottom:10px">Version 3.2</div>
 <div class="status" id="loginNet"></div>
 <label for="loginEmployee">Mitarbeiter</label>
 <select id="loginEmployee" onkeydown="loginEnter(event)"><option value="">Mitarbeiter werden geladen ...</option></select>
@@ -45,11 +44,10 @@
 </div>
 <div class="hero">
 <img alt="Del Gesso Gebäudetechnik" class="logo" src="dg_icon_512.png"/>
-<div class="head-row"><div><strong>Zeiterfassung - 3.1</strong><br/><span id="employeeLabel"></span></div><button class="btn danger" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
+<div class="head-row"><div><strong>Zeiterfassung - 3.2</strong><br/><span id="employeeLabel"></span></div><button class="btn danger" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
 </div>
 <div class="tabs"><button class="tab active" id="employeeTab" onclick="showEmployee()">Mitarbeiter</button><button class="tab boss-tab" id="bossTab" onclick="showBoss()">Büro</button></div>
 <section id="employeeView">
-
 <div class="card">
 <div class="head-row">
 <div>
@@ -228,6 +226,5 @@
 </div>
 </div>
 </div>
-
-<script defer="" src="./app-3.1.js?v=7012ab2a1826"></script></body>
+<script defer="" src="./app-3.2.js?v=d4d69a7ea901"></script></body>
 </html>
