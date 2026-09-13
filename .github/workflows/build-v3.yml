@@ -1,7 +1,7 @@
-name: Build DG 3.8
+name: Build DG 3.9
 on:
   push:
-    branches: ['release/v3.8-maintenance-polish']
+    branches: ['release/v3.9-maintenance-device-id']
     paths: ['build3/**', '.github/workflows/build-v3.yml']
 permissions:
   contents: write
@@ -15,20 +15,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Compile and verify DG 3.8
+      - name: Compile and verify DG 3.9
         run: |
           python -m pip install beautifulsoup4
           rm -rf build3/release
           mkdir -p build3/release
-          python build3/build_frontend_38.py
+          python build3/build_frontend_39.py
           node --check build3/release/app-3.5.js
           node --check build3/release/sw.js
-          python build3/verify_build_38.py
-      - name: Commit verified 3.8 frontend on release branch
+          python build3/verify_build_39.py
+      - name: Commit verified 3.9 frontend on release branch
         run: |
           git config user.name 'DG Build'
           git config user.email 'build@users.noreply.github.com'
           cp build3/release/index.html build3/release/app-3.5.js build3/release/app-3.5.css build3/release/sw.js build3/release/manifest.json .
           git add index.html app-3.5.js app-3.5.css sw.js manifest.json
-          git commit -m 'v3.8: geprüften Wartungs-Feinschliff bereitstellen' || true
-          git push origin HEAD:release/v3.8-maintenance-polish
+          git commit -m 'v3.9: geprüfte Wartungsampeln und Geräte-ID bereitstellen' || true
+          git push origin HEAD:release/v3.9-maintenance-device-id
