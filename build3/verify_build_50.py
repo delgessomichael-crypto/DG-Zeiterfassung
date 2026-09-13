@@ -1,6 +1,6 @@
 import pathlib,re
 R=pathlib.Path(__file__).resolve().parent/'release'
-html=(R/'index.html').read_text();js=(R/'app-3.5.js').read_text();css=(R/'app-3.5.css').read_text();sw=(R/'sw.js').read_text();manifest=(R/'manifest.json').read_text()
+html=(R/'index.html').read_text();js=(R/'app-5.0.js').read_text();css=(R/'app-5.0.css').read_text();sw=(R/'sw.js').read_text();manifest=(R/'manifest.json').read_text()
 assert 'DG Zeiterfassung 5.0' in html
 assert 'Version 5.0' in html
 assert 'Zeiterfassung - 5.0' in html
@@ -15,8 +15,8 @@ assert 'Geräte-ID:' in js and 'd50-device-badge' in js
 assert 'cleanCalendarText50' in js and 'Wartung-Kunden-ID' in js
 assert 'offene Auswahlbereiche bleiben unverändert' in js
 assert 'dg-zeiterfassung-5-0-' in sw
-assert 'DG Zeiterfassung 5.0' in manifest
+assert 'DG Zeiterfassung 5.0' in manifest and 'DG 5.0' in manifest
 assert '.d50-customer-row' in css and '.d50-maint-report' in css
-# nur ein ausgeliefertes Hauptscript und eine CSS-Datei
-assert html.count('app-3.5.js')==1 and html.count('app-3.5.css')==1
+assert html.count('app-5.0.js')==1 and html.count('app-5.0.css')==1
+assert 'app-3.5.js' not in html and 'app-3.5.css' not in html
 print('DG 5.0 verification OK')
