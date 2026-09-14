@@ -1,13 +1,14 @@
 /* DG 5.1: Performance-Layer ohne Funktionsaenderung. */
 (function(){
 'use strict';
-const V51='5.1.0';
+const V51='5.1';
 const PERF=window.DG51=window.DG51||{
-  employeePromise:null,dayPromises:{},calendarPromise:null,dashboardPromise:null,
+  employeePromise:null,dayPromises:{},calendarPromise:null,dashboardPromise:null,readCache:new Map(),
   lastAutoSync:0,lastCalendarFetch:0,lastDayFetch:{},lastDashboardFetch:0,
   forceDay:false,forceCalendar:false,forceDashboard:false
 };
 const DAY_TTL=15000,CALENDAR_TTL=12000,DASHBOARD_TTL=90000,AUTO_SYNC_TTL=180000,EMPLOYEE_TTL=21600000,BACKEND_TTL=1800000;
+const READ_TTL51={getRegieReports:15000,getOfferReports:20000,getOfferReminders:20000,getCustomerInquiries:20000,getBossDayClosures:30000,getEmployeeAdminData:60000,getAbsences:60000,getPlannerWorkers:120000,getMaintenanceCustomer:30000,getMaintenanceArchive:30000};
 
 function jget51(key){try{return JSON.parse(localStorage.getItem(key)||'null');}catch(_e){return null;}}
 function jset51(key,value){try{localStorage.setItem(key,JSON.stringify(value));}catch(_e){}}
@@ -16,6 +17,8 @@ function sset51(key,value){try{sessionStorage.setItem(key,JSON.stringify(value))
 function now51(){return Date.now();}
 function valid51(x,ttl){return x&&Number(x.ts)>0&&(now51()-Number(x.ts)<ttl);}
 function safeText51(v){return String(v==null?'':v);}
+function readKey51(payload){const x=Object.assign({},payload||{});delete x.employeePin;delete x.pin;delete x.force;return JSON.stringify(x);}
+function clearReadCache51(){PERF.readCache.clear();}
 
 /* Schreibzugriffe markieren nur die betroffenen Caches als veraltet. */
 const apiBase51=window.api;
@@ -26,13 +29,17 @@ const DASH_WRITES51=new Set([
   'updateRegieReport','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','setRegieObjectJobStatus','markRegieObjectCompleted','mergeRegieObjects',
   'createInspectionOffer','setRegieReportsOfferStatus','discardOfferPermanently','acceptOfferAsRunning','saveOfferCreatedWithReminder','rescheduleOfferReminder','declineOfferFromReminder','acceptOfferFromReminder',
   'syncCustomerInquiries','updateCustomerInquiry','completeCustomerInquiry','deleteCustomerInquiry','archiveCustomerInquiry','rejectCustomerInquiry','inquiryToOffer',
-  'saveMaintenanceCustomer','deleteMaintenanceDevice','deleteMaintenanceCustomer','addMaintenanceRepair','addManualMaintenanceCount','savePlannerEvent','deletePlannerEvent'
+  'saveMaintenanceCustomer','deleteMaintenanceDevice','deleteMaintenanceCustomer','addMaintenanceRepair','addManualMaintenanceCount','savePlannerEvent','deletePlannerEvent',
+  'saveEmployeeAdmin','setEmployeeActive','deleteEmployeeAdmin','saveAbsence','deleteAbsence','saveVacationEntitlement'
 ]);
 if(typeof apiBase51==='function')window.api=api=async function(payload){
-  const r=await apiBase51.apply(this,arguments),a=payload&&payload.action;
+  const a=payload&&payload.action,ttl=READ_TTL51[a],key=ttl?readKey51(payload):'',cached=ttl?PERF.readCache.get(key):null;
+  if(ttl&&!payload.force&&cached&&now51()-cached.ts<ttl)return cached.value;
+  const r=await apiBase51.apply(this,arguments);
+  if(ttl)PERF.readCache.set(key,{ts:now51(),value:r});
   if(DAY_WRITES51.has(a))PERF.forceDay=true;
   if(CAL_WRITES51.has(a))PERF.forceCalendar=true;
-  if(DASH_WRITES51.has(a)){PERF.forceDashboard=true;try{localStorage.removeItem('dg51_dashboard');}catch(_e){}}
+  if(DASH_WRITES51.has(a)){PERF.forceDashboard=true;clearReadCache51();try{localStorage.removeItem('dg51_dashboard');}catch(_e){}}
   return r;
 };
 
@@ -81,8 +88,8 @@ window.loadCalendarEvents=loadCalendarEvents=async function(force){
   return PERF.calendarPromise;
 };
 
-/* Manuelles Aktualisieren des Terminkalenders umgeht bewusst den Kurzzeitcache. */
-document.addEventListener('click',function(ev){const b=ev.target&&ev.target.closest?ev.target.closest('button'):null;if(!b)return;const oc=safeText51(b.getAttribute('onclick'));if(oc.includes('loadCalendarEvents'))PERF.forceCalendar=true;if(oc.includes('d3Dashboard')||/Aktualisieren/i.test(b.textContent||'')&&b.closest('#bossView'))PERF.forceDashboard=true;},true);
+/* Manuelles Aktualisieren umgeht bewusst Kurzzeitcaches. */
+document.addEventListener('click',function(ev){const b=ev.target&&ev.target.closest?ev.target.closest('button'):null;if(!b)return;const oc=safeText51(b.getAttribute('onclick'));if(oc.includes('loadCalendarEvents'))PERF.forceCalendar=true;if(/Aktualisieren/i.test(b.textContent||'')){clearReadCache51();if(b.closest('#bossView'))PERF.forceDashboard=true;}},true);
 
 function renderDashboard51(d){
   if(!d)return;
@@ -151,7 +158,6 @@ window.d3Sync=d3Sync=async function(force){
   finally{DG3.syncing=false;}
 };
 
-/* Wartungsdaten nicht mehr beim Login vorladen. Erst beim Öffnen des Bereichs. */
 try{if(window.DG38){DG38.loaded=false;DG38.overview=null;}}catch(_e){}
 try{DG3.version=V51;window.DG_APP_VERSION=V51;}catch(_e){}
 })();
