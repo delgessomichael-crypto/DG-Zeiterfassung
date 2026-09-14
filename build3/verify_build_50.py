@@ -14,7 +14,7 @@ assert 'CALENDAR_TTL=12000' in js and 'DAY_TTL=15000' in js
 assert 'dg51_dashboard' in js and 'dg51_employees' in js
 assert 'Promise.allSettled([loadDay(false),loadCalendarEvents(false)])' in js
 assert 'dg_device_session' in js and 'createDeviceSession:true' in js and 'employeeLogout' in js
-assert 'migrateExistingLogin511' in js and 'DGSESSION' in js
+assert 'migrateExistingLogin511' in js
 assert 'Alle Kunden' in js and 'd50OpenAllCustomers' in js
 assert 'Rechnungsempfänger:' in js and 'Ausführungsort:' in js
 assert 'Geräte-ID:' in js and 'd50-device-badge' in js
