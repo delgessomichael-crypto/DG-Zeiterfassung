@@ -1,8 +1,8 @@
-name: Build DG 5.1.2
+name: Build DG 5.2.0
 on:
   push:
-    branches: ['release/v5.0-final','release/v5.0.1-maintenance-files','release/v5.0.2-signature-stability','release/v5.0.3-customer-correction','release/v5.0.4-object-address-toggle','release/v5.0.5-manual-maintenance-count','release/v5.1-performance','release/v5.1.2-day-entry-delete']
-    paths: ['build3/**', '.github/workflows/build-v3.yml']
+    branches: ['release/v5.0-final','release/v5.0.1-maintenance-files','release/v5.0.2-signature-stability','release/v5.0.3-customer-correction','release/v5.0.4-object-address-toggle','release/v5.0.5-manual-maintenance-count','release/v5.1-performance','release/v5.1.2-day-entry-delete','feature/monthly-payroll-5.2']
+    paths: ['build3/**', '.github/workflows/build-v3.yml', 'app-5.2.0-payroll.js']
 permissions:
   contents: write
 jobs:
@@ -15,7 +15,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Compile and verify DG 5.1.2
+      - name: Compile and verify DG 5.2.0
         run: |
           python -m pip install beautifulsoup4
           rm -rf build3/release
@@ -24,11 +24,11 @@ jobs:
           node --check build3/release/app-5.0.js
           node --check build3/release/sw.js
           python build3/verify_build_50.py
-      - name: Commit verified 5.1.2 frontend on current release branch
+      - name: Commit verified 5.2.0 frontend on current release branch
         run: |
           git config user.name 'DG Build'
           git config user.email 'build@users.noreply.github.com'
           cp build3/release/index.html build3/release/app-5.0.js build3/release/app-5.0.css build3/release/sw.js build3/release/manifest.json .
           git add index.html app-5.0.js app-5.0.css sw.js manifest.json
-          git commit -m 'v5.1.2: geprüfte Tagesabschluss-Korrektur bereitstellen' || true
+          git commit -m 'v5.2.0: Monatsabschluss und Lohnprüfung bereitstellen' || true
           git push origin HEAD:${GITHUB_REF_NAME}
