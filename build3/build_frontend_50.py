@@ -9,7 +9,12 @@ startup="if(document.readyState==='loading')document.addEventListener('DOMConten
 if startup not in js: raise SystemExit('startup marker missing')
 js=js.replace(startup,feat+'\n'+startup,1)
 # Einheitliche Versionsnummern und Backend-Kompatibilitaet 5.0.1.
-js=js.replace("version:'3.9'","version:'5.0.1'").replace("DG_APP_VERSION='3.9'","DG_APP_VERSION='5.0.1'").replace("clientVersion:'3.9'","clientVersion:'5.0.1'")
+for old in ("version:'3.9'","version:'5.0'"):
+    js=js.replace(old,"version:'5.0.1'")
+for old in ("DG_APP_VERSION='3.9'","DG_APP_VERSION='5.0'"):
+    js=js.replace(old,"DG_APP_VERSION='5.0.1'")
+for old in ("clientVersion:'3.9'","clientVersion:'5.0'"):
+    js=js.replace(old,"clientVersion:'5.0.1'")
 js=js.replace('App 3.9','App 5.0.1').replace('Google-GS 3.0','Google-GS 5.0.1').replace('Backend 3.0','Backend 5.0.1')
 js=js.replace('/^3\\./','/^(?:3\\.|5\\.)/')
 css=css+'\n'+feat_css+'\n'
