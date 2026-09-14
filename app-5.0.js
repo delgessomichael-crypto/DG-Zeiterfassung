@@ -614,12 +614,12 @@ function fillMonths(id){const n=['Januar','Februar','März','April','Mai','Juni'
 function init(){initEnterSupport();fillMonths('empMonth');fillMonths('bossMonth');fillMonths('regieMonth');$('regieMonth').insertAdjacentHTML('afterbegin','<option value="0">Alle Monate</option>');const d=new Date();loadEmployeeDirectory();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('regieYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);$('regieMonth').value=String(d.getMonth()+1);$('holidayYear').value=d.getFullYear();if($('vacationYear'))$('vacationYear').value=d.getFullYear();$('absenceStart').value=localDate();$('absenceEnd').value=localDate();clearEmployeeAdminForm();customerPad=initPad('customerSignature');employeePad=null;toggleMaterial();togglePhotos();updateConnection();const a=auth();if(a.employee&&a.pin)openMain();else $('loginScreen').classList.remove('hidden');if(navigator.onLine)syncQueue()}
 
 /* DG 3.0: one request coordinator and one synchronization clock. */
-window.DG3={version:'5.0.1',backend:'',pending:0,reads:new Map(),reports:{},active:'Abgeschlossen',loaders:{},ready:false};window.DG_APP_VERSION='5.0.1';
+window.DG3={version:'5.0.2',backend:'',pending:0,reads:new Map(),reports:{},active:'Abgeschlossen',loaders:{},ready:false};window.DG_APP_VERSION='5.0.2';
 function d3Visible(e){return !!(e&&e.getClientRects().length);}
 function d3Notice(msg,type='info'){let e=$('d3Notice');if(!e){e=document.createElement('div');e.id='d3Notice';document.querySelector('#mainScreen .tabs').after(e);}e.className='status '+type;e.textContent=msg;}
 function d3Button(text,fn,args=[],kind='primary'){return '<button type="button" class="btn '+kind+'" data-d3-fn="'+esc(fn)+'" data-d3-args="'+esc(JSON.stringify(args))+'">'+esc(text)+'</button>';}
 async function d3CheckBackend(){try{const r=await api({action:'ping'});DG3.backend=String(r.version||'');if(!/^(?:3\.|5\.)/.test(DG3.backend))d3Notice('App 5.0: Bitte zuerst Google-GS 5.0 bereitstellen. Backend: '+DG3.backend+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return /^(?:3\.|5\.)/.test(DG3.backend);}catch(e){d3Notice('Verbindungspruefung fehlgeschlagen: '+e.message,'warn');return false;}}
-async function d3Api(payload){const action=String(payload.action||''),read=/^(get|check)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload);if(action!=='ping'&&!/^(?:3\.|5\.)/.test(DG3.backend)){await d3CheckBackend();if(!/^(?:3\.|5\.)/.test(DG3.backend))throw dgError('Google-Backend 5.0 noch nicht bereitgestellt.','version');}if(read&&DG3.reads.has(key))return DG3.reads.get(key);const promise=(async()=>{if(!read)DG3.pending++;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);try{let response;try{response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...payload,clientVersion:'5.0.1'}),signal:controller.signal});}catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Anlegen zuerst Daten neu laden.':'Keine Serververbindung.','network');}if(!response.ok)throw dgError('HTTP '+response.status,'network');let data;try{data=JSON.parse(await response.text());}catch(e){throw dgError('Ungueltige Serverantwort.','server');}if(!data.ok)throw dgError(data.error||'Serverfehler.','server');return data.data!==undefined?data.data:data;}finally{clearTimeout(timer);if(!read)DG3.pending--;}})();if(read)DG3.reads.set(key,promise);try{return await promise;}finally{if(read&&DG3.reads.get(key)===promise)DG3.reads.delete(key);}}
+async function d3Api(payload){const action=String(payload.action||''),read=/^(get|check)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload);if(action!=='ping'&&!/^(?:3\.|5\.)/.test(DG3.backend)){await d3CheckBackend();if(!/^(?:3\.|5\.)/.test(DG3.backend))throw dgError('Google-Backend 5.0 noch nicht bereitgestellt.','version');}if(read&&DG3.reads.has(key))return DG3.reads.get(key);const promise=(async()=>{if(!read)DG3.pending++;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);try{let response;try{response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...payload,clientVersion:'5.0.2'}),signal:controller.signal});}catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Anlegen zuerst Daten neu laden.':'Keine Serververbindung.','network');}if(!response.ok)throw dgError('HTTP '+response.status,'network');let data;try{data=JSON.parse(await response.text());}catch(e){throw dgError('Ungueltige Serverantwort.','server');}if(!data.ok)throw dgError(data.error||'Serverfehler.','server');return data.data!==undefined?data.data:data;}finally{clearTimeout(timer);if(!read)DG3.pending--;}})();if(read)DG3.reads.set(key,promise);try{return await promise;}finally{if(read&&DG3.reads.get(key)===promise)DG3.reads.delete(key);}}
 document.addEventListener('click',e=>{const b=e.target.closest?.('button');if(!b)return;const fn=b.dataset.d3Fn,handler=fn?window[fn]:b.getAttribute('onclick')?b.onclick:null;if(typeof handler!=='function')return;e.preventDefault();e.stopImmediatePropagation();if(b.dataset.d3Busy)return;try{const r=handler.apply(b,fn?JSON.parse(b.dataset.d3Args||'[]'):[e]);if(r&&typeof r.then==='function'){b.dataset.d3Busy='1';b.disabled=true;b.setAttribute('aria-busy','true');Promise.resolve(r).catch(err=>d3Notice(err.message,'error')).finally(()=>{delete b.dataset.d3Busy;b.disabled=false;b.removeAttribute('aria-busy');});}}catch(err){d3Notice(err.message,'error');}},true);
 function d3Dirty(){return !!(document.activeElement?.matches('input,textarea,select')||document.querySelector('[data-d3-busy]')||[...document.querySelectorAll('[id$="Modal"],.regie-merge-select:checked')].some(d3Visible)||(($('customer')?.value||'').trim())||(($('activity')?.value||'').trim())||(typeof preparedPhotos!=='undefined'&&preparedPhotos.length));}
 async function d3Sync(){if(DG3.syncing||DG3.pending||document.hidden||!navigator.onLine||!DG3.ready||!auth().employee||d3Dirty())return;DG3.syncing=true;try{await syncQueue(false);if(d3Visible($('employeeView'))){await loadDay();await loadCalendarEvents();}else{if(DG3.loaders[DG3.open])await DG3.loaders[DG3.open]();await d3Dashboard();}if($('d3Sync'))$('d3Sync').textContent='Aktualisierung angefordert: '+new Date().toLocaleTimeString('de-DE')+' - Ergebnis im jeweiligen Bereich.';}catch(e){if($('d3Sync'))$('d3Sync').textContent='Aktualisierung fehlgeschlagen: '+e.message;}finally{DG3.syncing=false;}}
@@ -2497,9 +2497,83 @@ if(typeof api501==='function')window.api=api=async function(payload){const r=awa
 
 /* Patchstand eindeutig erkennen. */
 window.d3CheckBackend=d3CheckBackend=async function(){
-  try{const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]===5&&(p[1]>0||(p[1]===0&&p[2]>=1));DG3.backend=ok?found:'';if(!ok)d3Notice('App 5.0.1 benötigt Google-GS 5.0.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return ok;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
+  try{const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]===5&&(p[1]>0||(p[1]===0&&p[2]>=1));DG3.backend=ok?found:'';if(!ok)d3Notice('App 5.0.2 benötigt Google-GS 5.0.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return ok;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
 };
 try{DG3.version=V501;window.DG_APP_VERSION=V501;}catch(_e){}
+})();
+
+/* DG 5.0.2: stabiles Unterschriftenfeld ohne Scroll-/Sprung beim Loslassen. */
+(function(){
+'use strict';
+const V502='5.0.2';
+
+/*
+ * Das bisherige Pad mischte Touch- und Mausereignisse und beendete Touch nur
+ * direkt auf dem Canvas. Auf Mobilgeraeten kann touchend/cancel ausserhalb des
+ * Canvas landen bzw. ein synthetisches Click ausloesen. Die neue Variante
+ * benutzt Pointer Events mit Pointer Capture. Waehrend einer Unterschrift
+ * gehoert der aktive Pointer damit bis zum Ende dem Canvas. Kein Fokuswechsel,
+ * kein synthetischer Klick und kein Browser-Scroll innerhalb des Pads.
+ */
+window.initPad=initPad=function(id){
+  const canvas=$(id),ctx=canvas.getContext('2d'),wrap=$(id+'Wrap');
+  let drawing=false,signed=false,active=false,lastTap=0,activePointer=null;
+  function setActive(v){active=!!v;if(wrap)wrap.classList.toggle('active',active);canvas.style.touchAction=active?'none':'auto';}
+  function resize(){
+    const ratio=devicePixelRatio||1,rect=canvas.getBoundingClientRect(),old=signed?canvas.toDataURL('image/png'):'';
+    canvas.width=Math.max(1,Math.round(rect.width*ratio));canvas.height=Math.round(180*ratio);
+    ctx.setTransform(ratio,0,0,ratio,0,0);ctx.lineWidth=2;ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#111827';
+    if(old){const img=new Image();img.onload=()=>ctx.drawImage(img,0,0,rect.width,180);img.src=old;}
+  }
+  function point(ev){const r=canvas.getBoundingClientRect();return{x:ev.clientX-r.left,y:ev.clientY-r.top};}
+  function start(ev){
+    if(!active||drawing||ev.isPrimary===false)return;
+    ev.preventDefault();ev.stopPropagation();
+    drawing=true;signed=true;activePointer=ev.pointerId;
+    try{canvas.setPointerCapture(ev.pointerId);}catch(_e){}
+    const p=point(ev);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x+.01,p.y+.01);ctx.stroke();
+  }
+  function move(ev){
+    if(!drawing||!active||ev.pointerId!==activePointer)return;
+    ev.preventDefault();ev.stopPropagation();const p=point(ev);ctx.lineTo(p.x,p.y);ctx.stroke();
+  }
+  function finish(ev){
+    if(!drawing||ev.pointerId!==activePointer)return;
+    ev.preventDefault();ev.stopPropagation();drawing=false;
+    try{if(canvas.hasPointerCapture(ev.pointerId))canvas.releasePointerCapture(ev.pointerId);}catch(_e){}
+    activePointer=null;
+  }
+  canvas.addEventListener('pointerdown',start,{passive:false});
+  canvas.addEventListener('pointermove',move,{passive:false});
+  canvas.addEventListener('pointerup',finish,{passive:false});
+  canvas.addEventListener('pointercancel',finish,{passive:false});
+  canvas.addEventListener('lostpointercapture',ev=>{if(drawing&&ev.pointerId===activePointer){drawing=false;activePointer=null;}},{passive:true});
+  canvas.addEventListener('contextmenu',ev=>ev.preventDefault());
+  canvas.addEventListener('dragstart',ev=>ev.preventDefault());
+
+  if(wrap){
+    const lock=wrap.querySelector('.signature-lock');
+    const unlock=ev=>{ev.preventDefault();ev.stopPropagation();setActive(true);lastTap=0;};
+    const tap=ev=>{
+      ev.preventDefault();ev.stopPropagation();const now=Date.now();
+      if(ev.type==='dblclick'||now-lastTap<550)unlock(ev);else lastTap=now;
+    };
+    lock.addEventListener('dblclick',unlock,{passive:false});
+    lock.addEventListener('pointerup',tap,{passive:false});
+  }
+  resize();setActive(false);
+  return{
+    resize,
+    lock(){drawing=false;activePointer=null;setActive(false);},
+    clear(){drawing=false;activePointer=null;ctx.clearRect(0,0,canvas.getBoundingClientRect().width,180);signed=false;setActive(false);},
+    hasSignature(){return signed;},
+    dataUrl(){return signed?canvas.toDataURL('image/png'):'';}
+  };
+};
+
+/* Doppelte/synthetische Clicks im aktiven Unterschriftenbereich abfangen. */
+document.addEventListener('click',ev=>{const wrap=ev.target&&ev.target.closest?ev.target.closest('.signature-wrap.active'):null;if(wrap){ev.preventDefault();ev.stopPropagation();}},true);
+try{DG3.version=V502;window.DG_APP_VERSION=V502;}catch(_e){}
 })();
 
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',d3Startup,{once:true});else d3Startup();
