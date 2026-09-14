@@ -614,12 +614,12 @@ function fillMonths(id){const n=['Januar','Februar','März','April','Mai','Juni'
 function init(){initEnterSupport();fillMonths('empMonth');fillMonths('bossMonth');fillMonths('regieMonth');$('regieMonth').insertAdjacentHTML('afterbegin','<option value="0">Alle Monate</option>');const d=new Date();loadEmployeeDirectory();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('regieYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);$('regieMonth').value=String(d.getMonth()+1);$('holidayYear').value=d.getFullYear();if($('vacationYear'))$('vacationYear').value=d.getFullYear();$('absenceStart').value=localDate();$('absenceEnd').value=localDate();clearEmployeeAdminForm();customerPad=initPad('customerSignature');employeePad=null;toggleMaterial();togglePhotos();updateConnection();const a=auth();if(a.employee&&a.pin)openMain();else $('loginScreen').classList.remove('hidden');if(navigator.onLine)syncQueue()}
 
 /* DG 3.0: one request coordinator and one synchronization clock. */
-window.DG3={version:'5.0.3',backend:'',pending:0,reads:new Map(),reports:{},active:'Abgeschlossen',loaders:{},ready:false};window.DG_APP_VERSION='5.0.3';
+window.DG3={version:'5.0.4',backend:'',pending:0,reads:new Map(),reports:{},active:'Abgeschlossen',loaders:{},ready:false};window.DG_APP_VERSION='5.0.4';
 function d3Visible(e){return !!(e&&e.getClientRects().length);}
 function d3Notice(msg,type='info'){let e=$('d3Notice');if(!e){e=document.createElement('div');e.id='d3Notice';document.querySelector('#mainScreen .tabs').after(e);}e.className='status '+type;e.textContent=msg;}
 function d3Button(text,fn,args=[],kind='primary'){return '<button type="button" class="btn '+kind+'" data-d3-fn="'+esc(fn)+'" data-d3-args="'+esc(JSON.stringify(args))+'">'+esc(text)+'</button>';}
 async function d3CheckBackend(){try{const r=await api({action:'ping'});DG3.backend=String(r.version||'');if(!/^(?:3\.|5\.)/.test(DG3.backend))d3Notice('App 5.0: Bitte zuerst Google-GS 5.0 bereitstellen. Backend: '+DG3.backend+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return /^(?:3\.|5\.)/.test(DG3.backend);}catch(e){d3Notice('Verbindungspruefung fehlgeschlagen: '+e.message,'warn');return false;}}
-async function d3Api(payload){const action=String(payload.action||''),read=/^(get|check)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload);if(action!=='ping'&&!/^(?:3\.|5\.)/.test(DG3.backend)){await d3CheckBackend();if(!/^(?:3\.|5\.)/.test(DG3.backend))throw dgError('Google-Backend 5.0 noch nicht bereitgestellt.','version');}if(read&&DG3.reads.has(key))return DG3.reads.get(key);const promise=(async()=>{if(!read)DG3.pending++;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);try{let response;try{response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...payload,clientVersion:'5.0.3'}),signal:controller.signal});}catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Anlegen zuerst Daten neu laden.':'Keine Serververbindung.','network');}if(!response.ok)throw dgError('HTTP '+response.status,'network');let data;try{data=JSON.parse(await response.text());}catch(e){throw dgError('Ungueltige Serverantwort.','server');}if(!data.ok)throw dgError(data.error||'Serverfehler.','server');return data.data!==undefined?data.data:data;}finally{clearTimeout(timer);if(!read)DG3.pending--;}})();if(read)DG3.reads.set(key,promise);try{return await promise;}finally{if(read&&DG3.reads.get(key)===promise)DG3.reads.delete(key);}}
+async function d3Api(payload){const action=String(payload.action||''),read=/^(get|check)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload);if(action!=='ping'&&!/^(?:3\.|5\.)/.test(DG3.backend)){await d3CheckBackend();if(!/^(?:3\.|5\.)/.test(DG3.backend))throw dgError('Google-Backend 5.0 noch nicht bereitgestellt.','version');}if(read&&DG3.reads.has(key))return DG3.reads.get(key);const promise=(async()=>{if(!read)DG3.pending++;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);try{let response;try{response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...payload,clientVersion:'5.0.4'}),signal:controller.signal});}catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Anlegen zuerst Daten neu laden.':'Keine Serververbindung.','network');}if(!response.ok)throw dgError('HTTP '+response.status,'network');let data;try{data=JSON.parse(await response.text());}catch(e){throw dgError('Ungueltige Serverantwort.','server');}if(!data.ok)throw dgError(data.error||'Serverfehler.','server');return data.data!==undefined?data.data:data;}finally{clearTimeout(timer);if(!read)DG3.pending--;}})();if(read)DG3.reads.set(key,promise);try{return await promise;}finally{if(read&&DG3.reads.get(key)===promise)DG3.reads.delete(key);}}
 document.addEventListener('click',e=>{const b=e.target.closest?.('button');if(!b)return;const fn=b.dataset.d3Fn,handler=fn?window[fn]:b.getAttribute('onclick')?b.onclick:null;if(typeof handler!=='function')return;e.preventDefault();e.stopImmediatePropagation();if(b.dataset.d3Busy)return;try{const r=handler.apply(b,fn?JSON.parse(b.dataset.d3Args||'[]'):[e]);if(r&&typeof r.then==='function'){b.dataset.d3Busy='1';b.disabled=true;b.setAttribute('aria-busy','true');Promise.resolve(r).catch(err=>d3Notice(err.message,'error')).finally(()=>{delete b.dataset.d3Busy;b.disabled=false;b.removeAttribute('aria-busy');});}}catch(err){d3Notice(err.message,'error');}},true);
 function d3Dirty(){return !!(document.activeElement?.matches('input,textarea,select')||document.querySelector('[data-d3-busy]')||[...document.querySelectorAll('[id$="Modal"],.regie-merge-select:checked')].some(d3Visible)||(($('customer')?.value||'').trim())||(($('activity')?.value||'').trim())||(typeof preparedPhotos!=='undefined'&&preparedPhotos.length));}
 async function d3Sync(){if(DG3.syncing||DG3.pending||document.hidden||!navigator.onLine||!DG3.ready||!auth().employee||d3Dirty())return;DG3.syncing=true;try{await syncQueue(false);if(d3Visible($('employeeView'))){await loadDay();await loadCalendarEvents();}else{if(DG3.loaders[DG3.open])await DG3.loaders[DG3.open]();await d3Dashboard();}if($('d3Sync'))$('d3Sync').textContent='Aktualisierung angefordert: '+new Date().toLocaleTimeString('de-DE')+' - Ergebnis im jeweiligen Bereich.';}catch(e){if($('d3Sync'))$('d3Sync').textContent='Aktualisierung fehlgeschlagen: '+e.message;}finally{DG3.syncing=false;}}
@@ -2497,7 +2497,7 @@ if(typeof api501==='function')window.api=api=async function(payload){const r=awa
 
 /* Patchstand eindeutig erkennen. */
 window.d3CheckBackend=d3CheckBackend=async function(){
-  try{const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]===5&&(p[1]>0||(p[1]===0&&p[2]>=1));DG3.backend=ok?found:'';if(!ok)d3Notice('App 5.0.3 benötigt Google-GS 5.0.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return ok;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
+  try{const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]===5&&(p[1]>0||(p[1]===0&&p[2]>=1));DG3.backend=ok?found:'';if(!ok)d3Notice('App 5.0.4 benötigt Google-GS 5.0.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return ok;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
 };
 try{DG3.version=V501;window.DG_APP_VERSION=V501;}catch(_e){}
 })();
@@ -2656,6 +2656,93 @@ if(typeof baseReportCard503==='function'){
 }
 
 try{DG3.version=V503;window.DG_APP_VERSION=V503;}catch(_e){}
+})();
+
+/* DG 5.0.4: Wartungsvertrag - Ausführungsort aus Kundendaten übernehmen. */
+(function(){
+'use strict';
+const V504='5.0.4';
+
+function f504(root,key){return root?root.querySelector('[data-d37="'+key+'"]'):null;}
+function norm504(v){return String(v==null?'':v).trim().toLocaleLowerCase('de-DE');}
+function same504(a,b){return norm504(a)===norm504(b);}
+function summary504(form){
+  const name=f504(form,'customerName')?.value||'';
+  const street=f504(form,'billingStreet')?.value||'';
+  const zip=f504(form,'billingZip')?.value||'';
+  const city=f504(form,'billingCity')?.value||'';
+  return [name,street,[zip,city].filter(Boolean).join(' ')].filter(Boolean).join(' · ')||'Daten werden aus Punkt 1 übernommen.';
+}
+function copy504(form,obj){
+  if(!form||!obj)return;
+  [['customerName','objectName'],['billingStreet','street'],['billingZip','zip'],['billingCity','city']].forEach(([src,dst])=>{
+    const a=f504(form,src),b=f504(obj,dst);if(a&&b)b.value=a.value||'';
+  });
+  const s=obj.querySelector('.d504-address-summary');if(s)s.textContent=summary504(form);
+}
+function setMode504(form,obj,checked){
+  const cb=obj.querySelector('.d504-address-check');if(cb)cb.checked=!!checked;
+  ['objectName','street','zip','city'].forEach(key=>{
+    const input=f504(obj,key),box=input&&input.parentElement;if(box)box.classList.toggle('hidden',!!checked);
+  });
+  const s=obj.querySelector('.d504-address-summary');if(s)s.classList.toggle('hidden',!checked);
+  if(checked)copy504(form,obj);
+}
+function infer504(modelCustomer,o,index){
+  if(o&&typeof o._sameAsBilling==='boolean')return o._sameAsBilling;
+  const blank=!String(o?.name||'').trim()&&!String(o?.street||'').trim()&&!String(o?.zip||'').trim()&&!String(o?.city||'').trim();
+  if(blank)return index===0&&!String(modelCustomer?.id||'').trim();
+  return same504(o?.name,modelCustomer?.name)&&same504(o?.street,modelCustomer?.billingStreet)&&same504(o?.zip,modelCustomer?.billingZip)&&same504(o?.city,modelCustomer?.billingCity);
+}
+function relabel504(form,key,text){
+  const input=f504(form,key);if(!input)return;
+  const label=input.previousElementSibling;if(label&&label.tagName==='LABEL')label.textContent=text;
+}
+function enhance504(hostId,modelCustomer){
+  const host=$(hostId),form=host&&host.querySelector('.d37-customer-form');if(!form)return;
+
+  /* Punkt 1 bewusst kurz halten. */
+  relabel504(form,'billingStreet','Straße / Hausnummer');
+  relabel504(form,'billingZip','PLZ');
+  relabel504(form,'billingCity','Ort');
+
+  [...form.querySelectorAll('.d37-object')].forEach((obj,index)=>{
+    let row=obj.querySelector('.d504-address-toggle');
+    if(!row){
+      row=document.createElement('div');row.className='d504-address-toggle';
+      row.innerHTML='<label class="d504-address-label"><input type="checkbox" class="d504-address-check" style="width:auto"> <strong>Ausführungsort entspricht Kundendaten</strong></label><div class="d504-address-summary status ok hidden"></div>';
+      const head=obj.querySelector('.d37-subhead');if(head)head.insertAdjacentElement('afterend',row);else obj.prepend(row);
+      row.querySelector('.d504-address-check').addEventListener('change',ev=>setMode504(form,obj,ev.target.checked));
+    }
+    const om=(modelCustomer&&Array.isArray(modelCustomer.objects))?modelCustomer.objects[index]:null;
+    setMode504(form,obj,infer504(modelCustomer||{},om,index));
+  });
+
+  /* Ändert sich Punkt 1, werden angehakte Ausführungsorte live mitgeführt. */
+  ['customerName','billingStreet','billingZip','billingCity'].forEach(key=>{
+    const input=f504(form,key);if(!input||input.dataset.d504Bound==='1')return;
+    input.dataset.d504Bound='1';input.addEventListener('input',()=>{
+      form.querySelectorAll('.d37-object').forEach(obj=>{if(obj.querySelector('.d504-address-check')?.checked)copy504(form,obj);});
+    });
+  });
+}
+
+const render504=window.d37RenderCustomerForm;
+if(typeof render504==='function')window.d37RenderCustomerForm=d37RenderCustomerForm=function(hostId,model,mode){
+  const r=render504.apply(this,arguments);setTimeout(()=>enhance504(hostId,model),0);return r;
+};
+
+/* Vor dem Sammeln versteckte Felder mit Punkt 1 synchronisieren. */
+const collect504=window.d37CollectCustomer;
+if(typeof collect504==='function')window.d37CollectCustomer=d37CollectCustomer=function(validate,root){
+  root=root||document.querySelector('#d37MaintenanceManage:not(.hidden) .d37-customer-form')||document.querySelector('#d37MaintenanceCreate:not(.hidden) .d37-customer-form')||document.querySelector('.d37-customer-form');
+  if(root)root.querySelectorAll('.d37-object').forEach(obj=>{if(obj.querySelector('.d504-address-check')?.checked)copy504(root,obj);});
+  const c=collect504.call(this,validate,root);
+  if(c&&root){[...root.querySelectorAll('.d37-object')].forEach((obj,i)=>{if(c.objects&&c.objects[i])c.objects[i]._sameAsBilling=!!obj.querySelector('.d504-address-check')?.checked;});}
+  return c;
+};
+
+try{DG3.version=V504;window.DG_APP_VERSION=V504;}catch(_e){}
 })();
 
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',d3Startup,{once:true});else d3Startup();
