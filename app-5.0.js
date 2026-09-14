@@ -614,12 +614,12 @@ function fillMonths(id){const n=['Januar','Februar','März','April','Mai','Juni'
 function init(){initEnterSupport();fillMonths('empMonth');fillMonths('bossMonth');fillMonths('regieMonth');$('regieMonth').insertAdjacentHTML('afterbegin','<option value="0">Alle Monate</option>');const d=new Date();loadEmployeeDirectory();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('regieYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);$('regieMonth').value=String(d.getMonth()+1);$('holidayYear').value=d.getFullYear();if($('vacationYear'))$('vacationYear').value=d.getFullYear();$('absenceStart').value=localDate();$('absenceEnd').value=localDate();clearEmployeeAdminForm();customerPad=initPad('customerSignature');employeePad=null;toggleMaterial();togglePhotos();updateConnection();const a=auth();if(a.employee&&a.pin)openMain();else $('loginScreen').classList.remove('hidden');if(navigator.onLine)syncQueue()}
 
 /* DG 3.0: one request coordinator and one synchronization clock. */
-window.DG3={version:'5.1',backend:'',pending:0,reads:new Map(),reports:{},active:'Abgeschlossen',loaders:{},ready:false};window.DG_APP_VERSION='5.1';
+window.DG3={version:'5.1.1',backend:'',pending:0,reads:new Map(),reports:{},active:'Abgeschlossen',loaders:{},ready:false};window.DG_APP_VERSION='5.1.1';
 function d3Visible(e){return !!(e&&e.getClientRects().length);}
 function d3Notice(msg,type='info'){let e=$('d3Notice');if(!e){e=document.createElement('div');e.id='d3Notice';document.querySelector('#mainScreen .tabs').after(e);}e.className='status '+type;e.textContent=msg;}
 function d3Button(text,fn,args=[],kind='primary'){return '<button type="button" class="btn '+kind+'" data-d3-fn="'+esc(fn)+'" data-d3-args="'+esc(JSON.stringify(args))+'">'+esc(text)+'</button>';}
 async function d3CheckBackend(){try{const r=await api({action:'ping'});DG3.backend=String(r.version||'');if(!/^(?:3\.|5\.)/.test(DG3.backend))d3Notice('App 5.0: Bitte zuerst Google-GS 5.0 bereitstellen. Backend: '+DG3.backend+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return /^(?:3\.|5\.)/.test(DG3.backend);}catch(e){d3Notice('Verbindungspruefung fehlgeschlagen: '+e.message,'warn');return false;}}
-async function d3Api(payload){const action=String(payload.action||''),read=/^(get|check)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload);if(action!=='ping'&&!/^(?:3\.|5\.)/.test(DG3.backend)){await d3CheckBackend();if(!/^(?:3\.|5\.)/.test(DG3.backend))throw dgError('Google-Backend 5.0 noch nicht bereitgestellt.','version');}if(read&&DG3.reads.has(key))return DG3.reads.get(key);const promise=(async()=>{if(!read)DG3.pending++;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);try{let response;try{response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...payload,clientVersion:'5.1'}),signal:controller.signal});}catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Anlegen zuerst Daten neu laden.':'Keine Serververbindung.','network');}if(!response.ok)throw dgError('HTTP '+response.status,'network');let data;try{data=JSON.parse(await response.text());}catch(e){throw dgError('Ungueltige Serverantwort.','server');}if(!data.ok)throw dgError(data.error||'Serverfehler.','server');return data.data!==undefined?data.data:data;}finally{clearTimeout(timer);if(!read)DG3.pending--;}})();if(read)DG3.reads.set(key,promise);try{return await promise;}finally{if(read&&DG3.reads.get(key)===promise)DG3.reads.delete(key);}}
+async function d3Api(payload){const action=String(payload.action||''),read=/^(get|check)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload);if(action!=='ping'&&!/^(?:3\.|5\.)/.test(DG3.backend)){await d3CheckBackend();if(!/^(?:3\.|5\.)/.test(DG3.backend))throw dgError('Google-Backend 5.0 noch nicht bereitgestellt.','version');}if(read&&DG3.reads.has(key))return DG3.reads.get(key);const promise=(async()=>{if(!read)DG3.pending++;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);try{let response;try{response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...payload,clientVersion:'5.1.1'}),signal:controller.signal});}catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Anlegen zuerst Daten neu laden.':'Keine Serververbindung.','network');}if(!response.ok)throw dgError('HTTP '+response.status,'network');let data;try{data=JSON.parse(await response.text());}catch(e){throw dgError('Ungueltige Serverantwort.','server');}if(!data.ok)throw dgError(data.error||'Serverfehler.','server');return data.data!==undefined?data.data:data;}finally{clearTimeout(timer);if(!read)DG3.pending--;}})();if(read)DG3.reads.set(key,promise);try{return await promise;}finally{if(read&&DG3.reads.get(key)===promise)DG3.reads.delete(key);}}
 document.addEventListener('click',e=>{const b=e.target.closest?.('button');if(!b)return;const fn=b.dataset.d3Fn,handler=fn?window[fn]:b.getAttribute('onclick')?b.onclick:null;if(typeof handler!=='function')return;e.preventDefault();e.stopImmediatePropagation();if(b.dataset.d3Busy)return;try{const r=handler.apply(b,fn?JSON.parse(b.dataset.d3Args||'[]'):[e]);if(r&&typeof r.then==='function'){b.dataset.d3Busy='1';b.disabled=true;b.setAttribute('aria-busy','true');Promise.resolve(r).catch(err=>d3Notice(err.message,'error')).finally(()=>{delete b.dataset.d3Busy;b.disabled=false;b.removeAttribute('aria-busy');});}}catch(err){d3Notice(err.message,'error');}},true);
 function d3Dirty(){return !!(document.activeElement?.matches('input,textarea,select')||document.querySelector('[data-d3-busy]')||[...document.querySelectorAll('[id$="Modal"],.regie-merge-select:checked')].some(d3Visible)||(($('customer')?.value||'').trim())||(($('activity')?.value||'').trim())||(typeof preparedPhotos!=='undefined'&&preparedPhotos.length));}
 async function d3Sync(){if(DG3.syncing||DG3.pending||document.hidden||!navigator.onLine||!DG3.ready||!auth().employee||d3Dirty())return;DG3.syncing=true;try{await syncQueue(false);if(d3Visible($('employeeView'))){await loadDay();await loadCalendarEvents();}else{if(DG3.loaders[DG3.open])await DG3.loaders[DG3.open]();await d3Dashboard();}if($('d3Sync'))$('d3Sync').textContent='Aktualisierung angefordert: '+new Date().toLocaleTimeString('de-DE')+' - Ergebnis im jeweiligen Bereich.';}catch(e){if($('d3Sync'))$('d3Sync').textContent='Aktualisierung fehlgeschlagen: '+e.message;}finally{DG3.syncing=false;}}
@@ -2497,7 +2497,7 @@ if(typeof api501==='function')window.api=api=async function(payload){const r=awa
 
 /* Patchstand eindeutig erkennen. */
 window.d3CheckBackend=d3CheckBackend=async function(){
-  try{const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]===5&&(p[1]>0||(p[1]===0&&p[2]>=1));DG3.backend=ok?found:'';if(!ok)d3Notice('App 5.1 benötigt Google-GS 5.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return ok;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
+  try{const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]===5&&(p[1]>0||(p[1]===0&&p[2]>=1));DG3.backend=ok?found:'';if(!ok)d3Notice('App 5.1.1.1 benötigt Google-GS 5.1.1.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return ok;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
 };
 try{DG3.version=V501;window.DG_APP_VERSION=V501;}catch(_e){}
 })();
@@ -2783,7 +2783,7 @@ if(typeof open505==='function')window.d3Open=function(){const r=open505.apply(th
 
 /* 5.0.5 benötigt für die dauerhafte manuelle Zählung GS 5.0.2+. */
 window.d3CheckBackend=d3CheckBackend=async function(){
-  try{const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]>5||(p[0]===5&&(p[1]>0||(p[1]===0&&p[2]>=2)));DG3.backend=ok?found:'';if(!ok)d3Notice('App 5.1 benötigt Google-GS 5.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return ok;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
+  try{const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]>5||(p[0]===5&&(p[1]>0||(p[1]===0&&p[2]>=2)));DG3.backend=ok?found:'';if(!ok)d3Notice('App 5.1.1.1 benötigt Google-GS 5.1.1.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return ok;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
 };
 try{DG3.version=V505;window.DG_APP_VERSION=V505;}catch(_e){}
 })();
@@ -2906,7 +2906,7 @@ window.d3Dashboard=d3Dashboard=async function(force){
 window.d3CheckBackend=d3CheckBackend=async function(force){
   const cached=sget51('dg51_backend');
   if(!force&&valid51(cached,BACKEND_TTL)&&cached.version){DG3.backend=cached.version;$('d3Notice')?.remove();return true;}
-  try{const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]>5||(p[0]===5&&p[1]>=1);DG3.backend=ok?found:'';if(ok){sset51('dg51_backend',{ts:now51(),version:found});$('d3Notice')?.remove();return true;}d3Notice('App 5.1 benötigt Google-GS 5.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');return false;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
+  try{const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]>5||(p[0]===5&&p[1]>=1);DG3.backend=ok?found:'';if(ok){sset51('dg51_backend',{ts:now51(),version:found});$('d3Notice')?.remove();return true;}d3Notice('App 5.1.1 benötigt Google-GS 5.1.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');return false;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
 };
 
 /* Keine Wrapper-Kaskade mehr beim Hauptstart: nur wirklich benoetigte Daten. */
@@ -2950,6 +2950,99 @@ window.d3Sync=d3Sync=async function(force){
 
 try{if(window.DG38){DG38.loaded=false;DG38.overview=null;}}catch(_e){}
 try{DG3.version=V51;window.DG_APP_VERSION=V51;}catch(_e){}
+})();
+
+/* DG 5.1.1: Mitarbeiter bleibt auf diesem Gerät angemeldet, bis er sich selbst abmeldet. */
+(function(){
+'use strict';
+const V511='5.1.1',TOKEN_KEY='dg_device_session';
+
+function deviceToken511(){return localStorage.getItem(TOKEN_KEY)||'';}
+
+/* Bestehende API-Aufrufe benutzen statt des PINs den vom Backend ausgestellten, widerrufbaren Geräte-Token. */
+window.auth=auth=function(){
+  return {
+    employee:localStorage.getItem('dg_employee')||'',
+    pin:deviceToken511()||sessionStorage.getItem('dg_employee_pin')||''
+  };
+};
+
+window.loginEmployee=loginEmployee=async function(){
+  const employee=$('loginEmployee').value,pin=$('loginPin').value;
+  if(!employee){setMessage('loginStatus','Bitte Mitarbeiter auswählen.','error');return;}
+  if(!pin){setMessage('loginStatus','Bitte PIN eingeben.','error');return;}
+  if(!navigator.onLine){setMessage('loginStatus','Die erste Anmeldung muss online erfolgen.','error');return;}
+  try{
+    setMessage('loginStatus','Anmeldung wird geprüft ...','info');
+    const res=await api({action:'employeeLogin',employee:employee,pin:pin,createDeviceSession:true});
+    if(!res||!res.deviceSessionToken)throw new Error('Geräte-Anmeldung konnte nicht erstellt werden. Bitte Backend 5.1.1.1 prüfen.');
+    localStorage.setItem('dg_employee',res.employee||employee);
+    localStorage.setItem(TOKEN_KEY,res.deviceSessionToken);
+    sessionStorage.removeItem('dg_employee_pin');
+    localStorage.removeItem('dg_employee_pin');
+    localStorage.setItem('dg_chef_access',res.chefAccess?'1':'0');
+    $('loginPin').value='';
+    openMain();
+  }catch(e){setMessage('loginStatus',e.message,'error');}
+};
+
+window.logout=logout=function(){
+  const employee=localStorage.getItem('dg_employee')||'',token=deviceToken511();
+  /* Oberfläche sofort abmelden. Der Server-Token wird im Hintergrund widerrufen. */
+  localStorage.removeItem('dg_employee');
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem('dg_chef_access');
+  localStorage.removeItem('dg_employee_pin');
+  sessionStorage.removeItem('dg_employee_pin');
+  try{sessionStorage.removeItem('dg51_backend');}catch(_e){}
+  if($('mainScreen'))$('mainScreen').classList.add('hidden');
+  if($('loginScreen'))$('loginScreen').classList.remove('hidden');
+  if($('loginPin'))$('loginPin').value='';
+  if(navigator.onLine&&employee&&token){
+    fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'employeeLogout',employee:employee,deviceSessionToken:token,clientVersion:V511})}).catch(()=>{});
+  }
+};
+
+/* Veraltete Sitzung automatisch zum Login zurückführen, statt den Mitarbeiter in einer defekten Ansicht zu lassen. */
+const api511=window.api;
+if(typeof api511==='function')window.api=api=async function(payload){
+  try{return await api511.apply(this,arguments);}catch(e){
+    const msg=String(e&&e.message||'');
+    if(deviceToken511()&&/Sitzung.*ungültig|Sitzung.*abgemeldet|Mitarbeiter.*inaktiv|Anmeldung erforderlich/i.test(msg)){
+      localStorage.removeItem(TOKEN_KEY);localStorage.removeItem('dg_employee');localStorage.removeItem('dg_chef_access');
+      if($('mainScreen'))$('mainScreen').classList.add('hidden');if($('loginScreen'))$('loginScreen').classList.remove('hidden');
+      setMessage('loginStatus','Die Anmeldung auf diesem Gerät wurde beendet. Bitte einmal neu anmelden.','warn');
+    }
+    throw e;
+  }
+};
+
+/* Bereits eingeloggte 5.1-Nutzer einmalig im Hintergrund auf die dauerhafte Geräte-Session umstellen. */
+async function migrateExistingLogin511(){
+  if(deviceToken511()||!navigator.onLine)return;
+  const employee=localStorage.getItem('dg_employee')||'',pin=sessionStorage.getItem('dg_employee_pin')||'';
+  if(!employee||!pin)return;
+  try{
+    const res=await api({action:'employeeLogin',employee:employee,pin:pin,createDeviceSession:true});
+    if(res&&res.deviceSessionToken){localStorage.setItem(TOKEN_KEY,res.deviceSessionToken);sessionStorage.removeItem('dg_employee_pin');localStorage.removeItem('dg_employee_pin');}
+  }catch(_e){}
+}
+const openMain511=window.openMain;
+if(typeof openMain511==='function')window.openMain=function(){const r=openMain511.apply(this,arguments);setTimeout(migrateExistingLogin511,0);return r;};
+
+/* Backend 5.1.1.1 ist für die widerrufbare Geräte-Session erforderlich. */
+window.d3CheckBackend=d3CheckBackend=async function(force){
+  const cached=(()=>{try{return JSON.parse(sessionStorage.getItem('dg51_backend')||'null');}catch(_e){return null;}})();
+  if(!force&&cached&&cached.version&&Date.now()-Number(cached.ts||0)<1800000&&/^5\.1(?:\.\d+)?$/.test(String(cached.version))){DG3.backend=cached.version;$('d3Notice')?.remove();return true;}
+  try{
+    const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]>5||(p[0]===5&&(p[1]>1||(p[1]===1&&(p[2]||0)>=1)));
+    DG3.backend=ok?found:'';
+    if(ok){try{sessionStorage.setItem('dg51_backend',JSON.stringify({ts:Date.now(),version:found}));}catch(_e){}$('d3Notice')?.remove();return true;}
+    d3Notice('App 5.1.1.1 benötigt Google-GS 5.1.1.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');return false;
+  }catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
+};
+
+try{DG3.version=V511;window.DG_APP_VERSION=V511;}catch(_e){}
 })();
 
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',d3Startup,{once:true});else d3Startup();
