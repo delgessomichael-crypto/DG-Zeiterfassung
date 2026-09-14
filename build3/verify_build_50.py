@@ -18,7 +18,7 @@ assert 'Gerätebilder &amp; Unterlagen / Wartungsberichte' in js
 assert 'getMaintenanceAttachment' in js and 'deleteMaintenanceAttachment' in js
 assert 'setPointerCapture' in js and 'pointercancel' in js and 'lostpointercapture' in js
 assert 'Kunde korrigieren' in js and 'dgRequestCustomerCorrection' in js and 'dgOpenCustomerCorrection' in js
-assert 'Ausführungsort entspricht Kundendaten' in js and 'copyBillingToObject504' in js
+assert 'Ausführungsort entspricht Kundendaten' in js and 'copy504' in js and 'setMode504' in js
 assert "relabel504(form,'billingStreet','Straße / Hausnummer')" in js
 assert "relabel504(form,'billingZip','PLZ')" in js
 assert "relabel504(form,'billingCity','Ort')" in js
