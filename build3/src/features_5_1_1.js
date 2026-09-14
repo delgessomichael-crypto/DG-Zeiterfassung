@@ -63,6 +63,19 @@ if(typeof api511==='function')window.api=api=async function(payload){
   }
 };
 
+/* Bereits eingeloggte 5.1-Nutzer einmalig im Hintergrund auf die dauerhafte Geräte-Session umstellen. */
+async function migrateExistingLogin511(){
+  if(deviceToken511()||!navigator.onLine)return;
+  const employee=localStorage.getItem('dg_employee')||'',pin=sessionStorage.getItem('dg_employee_pin')||'';
+  if(!employee||!pin)return;
+  try{
+    const res=await api({action:'employeeLogin',employee:employee,pin:pin,createDeviceSession:true});
+    if(res&&res.deviceSessionToken){localStorage.setItem(TOKEN_KEY,res.deviceSessionToken);sessionStorage.removeItem('dg_employee_pin');localStorage.removeItem('dg_employee_pin');}
+  }catch(_e){}
+}
+const openMain511=window.openMain;
+if(typeof openMain511==='function')window.openMain=function(){const r=openMain511.apply(this,arguments);setTimeout(migrateExistingLogin511,0);return r;};
+
 /* Backend 5.1.1 ist für die widerrufbare Geräte-Session erforderlich. */
 window.d3CheckBackend=d3CheckBackend=async function(force){
   const cached=(()=>{try{return JSON.parse(sessionStorage.getItem('dg51_backend')||'null');}catch(_e){return null;}})();
