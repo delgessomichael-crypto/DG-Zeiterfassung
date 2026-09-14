@@ -614,12 +614,12 @@ function fillMonths(id){const n=['Januar','Februar','März','April','Mai','Juni'
 function init(){initEnterSupport();fillMonths('empMonth');fillMonths('bossMonth');fillMonths('regieMonth');$('regieMonth').insertAdjacentHTML('afterbegin','<option value="0">Alle Monate</option>');const d=new Date();loadEmployeeDirectory();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('regieYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);$('regieMonth').value=String(d.getMonth()+1);$('holidayYear').value=d.getFullYear();if($('vacationYear'))$('vacationYear').value=d.getFullYear();$('absenceStart').value=localDate();$('absenceEnd').value=localDate();clearEmployeeAdminForm();customerPad=initPad('customerSignature');employeePad=null;toggleMaterial();togglePhotos();updateConnection();const a=auth();if(a.employee&&a.pin)openMain();else $('loginScreen').classList.remove('hidden');if(navigator.onLine)syncQueue()}
 
 /* DG 3.0: one request coordinator and one synchronization clock. */
-window.DG3={version:'5.1.1',backend:'',pending:0,reads:new Map(),reports:{},active:'Abgeschlossen',loaders:{},ready:false};window.DG_APP_VERSION='5.1.1';
+window.DG3={version:'5.1.2',backend:'',pending:0,reads:new Map(),reports:{},active:'Abgeschlossen',loaders:{},ready:false};window.DG_APP_VERSION='5.1.2';
 function d3Visible(e){return !!(e&&e.getClientRects().length);}
 function d3Notice(msg,type='info'){let e=$('d3Notice');if(!e){e=document.createElement('div');e.id='d3Notice';document.querySelector('#mainScreen .tabs').after(e);}e.className='status '+type;e.textContent=msg;}
 function d3Button(text,fn,args=[],kind='primary'){return '<button type="button" class="btn '+kind+'" data-d3-fn="'+esc(fn)+'" data-d3-args="'+esc(JSON.stringify(args))+'">'+esc(text)+'</button>';}
 async function d3CheckBackend(){try{const r=await api({action:'ping'});DG3.backend=String(r.version||'');if(!/^(?:3\.|5\.)/.test(DG3.backend))d3Notice('App 5.0: Bitte zuerst Google-GS 5.0 bereitstellen. Backend: '+DG3.backend+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return /^(?:3\.|5\.)/.test(DG3.backend);}catch(e){d3Notice('Verbindungspruefung fehlgeschlagen: '+e.message,'warn');return false;}}
-async function d3Api(payload){const action=String(payload.action||''),read=/^(get|check)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload);if(action!=='ping'&&!/^(?:3\.|5\.)/.test(DG3.backend)){await d3CheckBackend();if(!/^(?:3\.|5\.)/.test(DG3.backend))throw dgError('Google-Backend 5.0 noch nicht bereitgestellt.','version');}if(read&&DG3.reads.has(key))return DG3.reads.get(key);const promise=(async()=>{if(!read)DG3.pending++;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);try{let response;try{response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...payload,clientVersion:'5.1.1'}),signal:controller.signal});}catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Anlegen zuerst Daten neu laden.':'Keine Serververbindung.','network');}if(!response.ok)throw dgError('HTTP '+response.status,'network');let data;try{data=JSON.parse(await response.text());}catch(e){throw dgError('Ungueltige Serverantwort.','server');}if(!data.ok)throw dgError(data.error||'Serverfehler.','server');return data.data!==undefined?data.data:data;}finally{clearTimeout(timer);if(!read)DG3.pending--;}})();if(read)DG3.reads.set(key,promise);try{return await promise;}finally{if(read&&DG3.reads.get(key)===promise)DG3.reads.delete(key);}}
+async function d3Api(payload){const action=String(payload.action||''),read=/^(get|check)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload);if(action!=='ping'&&!/^(?:3\.|5\.)/.test(DG3.backend)){await d3CheckBackend();if(!/^(?:3\.|5\.)/.test(DG3.backend))throw dgError('Google-Backend 5.0 noch nicht bereitgestellt.','version');}if(read&&DG3.reads.has(key))return DG3.reads.get(key);const promise=(async()=>{if(!read)DG3.pending++;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);try{let response;try{response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...payload,clientVersion:'5.1.2'}),signal:controller.signal});}catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Anlegen zuerst Daten neu laden.':'Keine Serververbindung.','network');}if(!response.ok)throw dgError('HTTP '+response.status,'network');let data;try{data=JSON.parse(await response.text());}catch(e){throw dgError('Ungueltige Serverantwort.','server');}if(!data.ok)throw dgError(data.error||'Serverfehler.','server');return data.data!==undefined?data.data:data;}finally{clearTimeout(timer);if(!read)DG3.pending--;}})();if(read)DG3.reads.set(key,promise);try{return await promise;}finally{if(read&&DG3.reads.get(key)===promise)DG3.reads.delete(key);}}
 document.addEventListener('click',e=>{const b=e.target.closest?.('button');if(!b)return;const fn=b.dataset.d3Fn,handler=fn?window[fn]:b.getAttribute('onclick')?b.onclick:null;if(typeof handler!=='function')return;e.preventDefault();e.stopImmediatePropagation();if(b.dataset.d3Busy)return;try{const r=handler.apply(b,fn?JSON.parse(b.dataset.d3Args||'[]'):[e]);if(r&&typeof r.then==='function'){b.dataset.d3Busy='1';b.disabled=true;b.setAttribute('aria-busy','true');Promise.resolve(r).catch(err=>d3Notice(err.message,'error')).finally(()=>{delete b.dataset.d3Busy;b.disabled=false;b.removeAttribute('aria-busy');});}}catch(err){d3Notice(err.message,'error');}},true);
 function d3Dirty(){return !!(document.activeElement?.matches('input,textarea,select')||document.querySelector('[data-d3-busy]')||[...document.querySelectorAll('[id$="Modal"],.regie-merge-select:checked')].some(d3Visible)||(($('customer')?.value||'').trim())||(($('activity')?.value||'').trim())||(typeof preparedPhotos!=='undefined'&&preparedPhotos.length));}
 async function d3Sync(){if(DG3.syncing||DG3.pending||document.hidden||!navigator.onLine||!DG3.ready||!auth().employee||d3Dirty())return;DG3.syncing=true;try{await syncQueue(false);if(d3Visible($('employeeView'))){await loadDay();await loadCalendarEvents();}else{if(DG3.loaders[DG3.open])await DG3.loaders[DG3.open]();await d3Dashboard();}if($('d3Sync'))$('d3Sync').textContent='Aktualisierung angefordert: '+new Date().toLocaleTimeString('de-DE')+' - Ergebnis im jeweiligen Bereich.';}catch(e){if($('d3Sync'))$('d3Sync').textContent='Aktualisierung fehlgeschlagen: '+e.message;}finally{DG3.syncing=false;}}
@@ -2497,7 +2497,7 @@ if(typeof api501==='function')window.api=api=async function(payload){const r=awa
 
 /* Patchstand eindeutig erkennen. */
 window.d3CheckBackend=d3CheckBackend=async function(){
-  try{const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]===5&&(p[1]>0||(p[1]===0&&p[2]>=1));DG3.backend=ok?found:'';if(!ok)d3Notice('App 5.1.1.1 benötigt Google-GS 5.1.1.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return ok;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
+  try{const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]===5&&(p[1]>0||(p[1]===0&&p[2]>=1));DG3.backend=ok?found:'';if(!ok)d3Notice('App 5.1.2.2 benötigt Google-GS 5.1.2.2 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return ok;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
 };
 try{DG3.version=V501;window.DG_APP_VERSION=V501;}catch(_e){}
 })();
@@ -2783,7 +2783,7 @@ if(typeof open505==='function')window.d3Open=function(){const r=open505.apply(th
 
 /* 5.0.5 benötigt für die dauerhafte manuelle Zählung GS 5.0.2+. */
 window.d3CheckBackend=d3CheckBackend=async function(){
-  try{const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]>5||(p[0]===5&&(p[1]>0||(p[1]===0&&p[2]>=2)));DG3.backend=ok?found:'';if(!ok)d3Notice('App 5.1.1.1 benötigt Google-GS 5.1.1.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return ok;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
+  try{const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]>5||(p[0]===5&&(p[1]>0||(p[1]===0&&p[2]>=2)));DG3.backend=ok?found:'';if(!ok)d3Notice('App 5.1.2.2 benötigt Google-GS 5.1.2.2 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return ok;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
 };
 try{DG3.version=V505;window.DG_APP_VERSION=V505;}catch(_e){}
 })();
@@ -2906,7 +2906,7 @@ window.d3Dashboard=d3Dashboard=async function(force){
 window.d3CheckBackend=d3CheckBackend=async function(force){
   const cached=sget51('dg51_backend');
   if(!force&&valid51(cached,BACKEND_TTL)&&cached.version){DG3.backend=cached.version;$('d3Notice')?.remove();return true;}
-  try{const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]>5||(p[0]===5&&p[1]>=1);DG3.backend=ok?found:'';if(ok){sset51('dg51_backend',{ts:now51(),version:found});$('d3Notice')?.remove();return true;}d3Notice('App 5.1.1 benötigt Google-GS 5.1.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');return false;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
+  try{const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]>5||(p[0]===5&&p[1]>=1);DG3.backend=ok?found:'';if(ok){sset51('dg51_backend',{ts:now51(),version:found});$('d3Notice')?.remove();return true;}d3Notice('App 5.1.2 benötigt Google-GS 5.1.2 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');return false;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
 };
 
 /* Keine Wrapper-Kaskade mehr beim Hauptstart: nur wirklich benoetigte Daten. */
@@ -2975,7 +2975,7 @@ window.loginEmployee=loginEmployee=async function(){
   try{
     setMessage('loginStatus','Anmeldung wird geprüft ...','info');
     const res=await api({action:'employeeLogin',employee:employee,pin:pin,createDeviceSession:true});
-    if(!res||!res.deviceSessionToken)throw new Error('Geräte-Anmeldung konnte nicht erstellt werden. Bitte Backend 5.1.1.1 prüfen.');
+    if(!res||!res.deviceSessionToken)throw new Error('Geräte-Anmeldung konnte nicht erstellt werden. Bitte Backend 5.1.2.1 prüfen.');
     localStorage.setItem('dg_employee',res.employee||employee);
     localStorage.setItem(TOKEN_KEY,res.deviceSessionToken);
     sessionStorage.removeItem('dg_employee_pin');
@@ -3030,7 +3030,7 @@ async function migrateExistingLogin511(){
 const openMain511=window.openMain;
 if(typeof openMain511==='function')window.openMain=function(){const r=openMain511.apply(this,arguments);setTimeout(migrateExistingLogin511,0);return r;};
 
-/* Backend 5.1.1.1 ist für die widerrufbare Geräte-Session erforderlich. */
+/* Backend 5.1.2.1 ist für die widerrufbare Geräte-Session erforderlich. */
 window.d3CheckBackend=d3CheckBackend=async function(force){
   const cached=(()=>{try{return JSON.parse(sessionStorage.getItem('dg51_backend')||'null');}catch(_e){return null;}})();
   if(!force&&cached&&cached.version&&Date.now()-Number(cached.ts||0)<1800000&&/^5\.1(?:\.\d+)?$/.test(String(cached.version))){DG3.backend=cached.version;$('d3Notice')?.remove();return true;}
@@ -3038,11 +3038,97 @@ window.d3CheckBackend=d3CheckBackend=async function(force){
     const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]>5||(p[0]===5&&(p[1]>1||(p[1]===1&&(p[2]||0)>=1)));
     DG3.backend=ok?found:'';
     if(ok){try{sessionStorage.setItem('dg51_backend',JSON.stringify({ts:Date.now(),version:found}));}catch(_e){}$('d3Notice')?.remove();return true;}
-    d3Notice('App 5.1.1.1 benötigt Google-GS 5.1.1.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');return false;
+    d3Notice('App 5.1.2.1 benötigt Google-GS 5.1.2.1 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');return false;
   }catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
 };
 
 try{DG3.version=V511;window.DG_APP_VERSION=V511;}catch(_e){}
+})();
+
+/* DG 5.1.2: Büro kann fehlerhafte Tages-/Regieberichtseinträge direkt löschen. */
+(function(){
+'use strict';
+const V512='5.1.2';
+
+function clearDayCaches512(employee,date){
+  try{localStorage.removeItem('dg_day_'+employee+'_'+date);}catch(_e){}
+  try{localStorage.removeItem('dg51_day_ts_'+employee+'_'+date);}catch(_e){}
+  try{localStorage.removeItem('dg51_dashboard');}catch(_e){}
+  try{if(window.DG51){DG51.forceDay=true;DG51.forceDashboard=true;}}catch(_e){}
+}
+
+window.deleteBossDayEntry512=async function(employee,date,entryId,customer,hours){
+  employee=String(employee||'');date=String(date||'');entryId=String(entryId||'');
+  if(!entryId)return false;
+  const label=(customer||'Ohne Baustellenangabe')+' · '+formatHours(hours||0)+' Std.';
+  if(!confirm('Diesen Eintrag wirklich löschen?\n\n'+label+'\n'+formatDateDE(date)+' · '+employee+'\n\nDie Stunden werden aus Tagesstunden, Monatsstunden und den zugehörigen Regieberichten entfernt.'))return false;
+  try{
+    setMessage('dg48DayStatus','Eintrag wird gelöscht und Stunden werden neu berechnet ...','info');
+    const r=await api(chefPayload({action:'deleteBossDayEntry',targetEmployee:employee,date:date,entryId:entryId}));
+    clearDayCaches512(employee,date);
+    setMessage('dg48DayStatus','✓ Eintrag gelöscht. Tages- und Monatssummen wurden neu berechnet.','ok');
+    await loadBossDayClosuresV48();
+    const work=[];
+    if(typeof window.loadBossMonth==='function')work.push(Promise.resolve().then(()=>window.loadBossMonth()));
+    if(typeof window.d3Dashboard==='function')work.push(Promise.resolve().then(()=>window.d3Dashboard(true)));
+    await Promise.allSettled(work);
+    return r;
+  }catch(e){
+    setMessage('dg48DayStatus',e&&e.message?e.message:'Eintrag konnte nicht gelöscht werden.','error');
+    return false;
+  }
+};
+
+/* Nach dem bestehenden Renderer direkt an jedem Einzelbericht einen klaren Löschbutton ergänzen. */
+const renderClosures512=window.renderBossDayClosuresV48;
+if(typeof renderClosures512==='function')window.renderBossDayClosuresV48=function(rows){
+  const r=renderClosures512.apply(this,arguments);
+  const employeeBoxes=[...document.querySelectorAll('#dg48DayResult .dg48-days-employee')];
+  (rows||[]).forEach((emp,ei)=>{
+    const box=employeeBoxes[ei];if(!box)return;
+    const dayCards=[...box.querySelectorAll(':scope > .dg48-day-grid > .dg48-day')];
+    (emp.days||[]).forEach((day,di)=>{
+      const card=dayCards[di];if(!card)return;
+      const reportEls=[...card.querySelectorAll('.dg49-detail .dg49-report')];
+      (day.reports||[]).forEach((rep,ri)=>{
+        const report=reportEls[ri];if(!report||!rep||!rep.id||report.querySelector('.dg512-delete-entry'))return;
+        const billed=String(rep.billingStatus||'Offen')==='Abgerechnet';
+        if(billed){
+          const n=document.createElement('div');n.className='muted small';n.style.marginTop='8px';n.textContent='Bereits abgerechnet – Löschen gesperrt.';report.appendChild(n);return;
+        }
+        const b=document.createElement('button');b.type='button';b.className='btn danger dg512-delete-entry';b.style.marginTop='10px';b.style.width='100%';b.textContent='Fehleintrag löschen';
+        b.addEventListener('click',ev=>{ev.preventDefault();ev.stopPropagation();deleteBossDayEntry512(emp.employee,day.date,rep.id,rep.customer,rep.hours);});
+        report.appendChild(b);
+      });
+    });
+  });
+  return r;
+};
+
+/* Performance-Caches nach Büro-Löschung als veraltet markieren. */
+const api512=window.api;
+if(typeof api512==='function')window.api=api=async function(payload){
+  const r=await api512.apply(this,arguments);
+  if(payload&&payload.action==='deleteBossDayEntry')clearDayCaches512(payload.targetEmployee,payload.date);
+  return r;
+};
+
+/* Für diese Funktion muss der passende 5.1.2-Backendstand vorhanden sein. */
+window.d3CheckBackend=d3CheckBackend=async function(force){
+  const cached=(()=>{try{return JSON.parse(sessionStorage.getItem('dg51_backend')||'null');}catch(_e){return null;}})();
+  if(!force&&cached&&cached.version&&Date.now()-Number(cached.ts||0)<1800000){
+    const p=String(cached.version).split('.').map(Number),ok=p[0]>5||(p[0]===5&&(p[1]>1||(p[1]===1&&(p[2]||0)>=2)));
+    if(ok){DG3.backend=String(cached.version);$('d3Notice')?.remove();return true;}
+  }
+  try{
+    const res=await api({action:'ping'}),found=String(res&&res.version||''),p=found.split('.').map(Number),ok=p[0]>5||(p[0]===5&&(p[1]>1||(p[1]===1&&(p[2]||0)>=2)));
+    DG3.backend=ok?found:'';
+    if(ok){try{sessionStorage.setItem('dg51_backend',JSON.stringify({ts:Date.now(),version:found}));}catch(_e){}$('d3Notice')?.remove();return true;}
+    d3Notice('App 5.1.2.2 benötigt Google-GS 5.1.2.2 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');return false;
+  }catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
+};
+
+try{DG3.version=V512;window.DG_APP_VERSION=V512;}catch(_e){}
 })();
 
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',d3Startup,{once:true});else d3Startup();
