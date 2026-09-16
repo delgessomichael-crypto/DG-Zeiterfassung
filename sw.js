@@ -1,4 +1,4 @@
-const CACHE_NAME='dg-zeiterfassung-5-2-7-regie-20260916a';
+const CACHE_NAME='dg-zeiterfassung-5-2-7-pwa-20260916b';
 const OFFER_PATCH='./app-5.2.6-offers.js?v=20260916b';
 const REGIE_PATCH='./app-5.2.7-regie.js?v=20260916a';
 const APP_SHELL=["./","./index.html","./app-5.0.js?v=e3c82c090f11","./app-5.0.css?v=799b73f6d5b0","./manifest.json","./dg_icon_192.png","./dg_icon_512.png",OFFER_PATCH,REGIE_PATCH];
