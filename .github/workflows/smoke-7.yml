@@ -1,0 +1,41 @@
+name: DG 7.0 Live Smoke Test
+on:
+  push:
+    branches: ['main']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify frontend bundle
+        run: |
+          node --check app-7.0.js
+          node --check sw.js
+          grep -q '20260917-final3' sw.js
+          grep -q 'app-7.0.js?v=20260917-final3' index.html
+          ! grep -q 'new MutationObserver(stamp)' app-7.0.js
+      - name: Verify live Google Apps Script 7.0 backend
+        run: |
+          python - <<'PY'
+          import json, urllib.request
+          url='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec'
+          def post(payload):
+              req=urllib.request.Request(url,data=json.dumps(payload).encode('utf-8'),headers={'Content-Type':'text/plain;charset=utf-8'},method='POST')
+              with urllib.request.urlopen(req,timeout=40) as r:
+                  return json.loads(r.read().decode('utf-8'))
+          ping=post({'action':'ping','clientVersion':'7.0'})
+          version=str(ping.get('version') or (ping.get('data') or {}).get('version') or '')
+          if not ping.get('ok') or version!='7.0':
+              raise SystemExit('Live backend is not 7.0: '+json.dumps(ping,ensure_ascii=False))
+          employees=post({'action':'getEmployees','clientVersion':'7.0'})
+          data=employees.get('data')
+          if not employees.get('ok') or not isinstance(data,list) or not data:
+              raise SystemExit('getEmployees failed: '+json.dumps(employees,ensure_ascii=False))
+          print('Backend 7.0 OK; employees:',len(data))
+          PY
