@@ -1,4 +1,18 @@
-/* ===== SOURCE: app-5.0.js ===== */
+/* DG 7.0 FINAL - einheitlicher sichtbarer Versionsstand */
+(function(){
+'use strict';
+const V='7.0';let busy=false;
+function stamp(){if(busy)return;busy=true;try{
+  document.title='DG Zeiterfassung '+V;
+  document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim()))x.textContent='Version '+V;});
+  document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(x.textContent||''))x.textContent='Zeiterfassung - '+V;});
+  try{window.DG_APP_VERSION=V;window.DG_RELEASE=V;if(window.DG3)DG3.version=V;}catch(_e){}
+}finally{busy=false;}}
+function boot(){stamp();const o=new MutationObserver(stamp);o.observe(document.documentElement,{subtree:true,childList:true,characterData:true});window.__DG70_RELEASE_OBSERVER=o;}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
+})();
+
+/* ===== CONSOLIDATED SOURCE: app-5.0.js ===== */
 const API_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
 
 let preparedPhotos=[],lastDayData={entries:[],total:0,closed:false},customerPad=null,employeePad=null,noCustomerPresent=false,employeeDirectory=[],cameraStream=null,selectedCalendarEventId='',bossFilter='all',bossDetailIndex=-1,bossDetailTab='overview';
@@ -3428,11 +3442,11 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',d3Startup,{once:true});else d3Startup();
 ;
 
-/* ===== SOURCE: app-6.0-runtime.js ===== */
-/* DG Zeiterfassung 6.0 - konsolidierter Runtime-Layer */
+/* ===== CONSOLIDATED SOURCE: app-6.0-runtime.js ===== */
+/* DG Zeiterfassung 7.0 - konsolidierter Runtime-Layer */
 (function(){
 'use strict';
-const V='6.0.3',VIEW='dg60_view',STATE='dg60_office_state',BACK='dg60_backend',BACK_TTL=1800000,OFFER_TTL=30000;
+const V='7.0',VIEW='dg60_view',STATE='dg60_office_state',BACK='dg60_backend',BACK_TTL=1800000,OFFER_TTL=30000;
 const q=id=>document.getElementById(id),esc60=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let offerAt=0,offerPromise=null;
 const parts=v=>String(v||'').split('.').map(x=>Number(x)||0);
@@ -3443,10 +3457,10 @@ function stamp(){document.title='DG Zeiterfassung '+V;document.querySelectorAll(
 function css(){if(q('dg60Css'))return;const s=document.createElement('style');s.id='dg60Css';s.textContent='.dg60-count{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;padding:0 7px;margin-left:7px;border-radius:999px;background:#e2e8f0;color:#334155;font-size:12px;font-weight:900}.dg60-rem-ok{margin-top:8px;padding:8px 10px;border-radius:10px;background:#f0fdf4;color:#166534;font-size:12px;font-weight:800}.dg60-rem-warn{margin-top:8px;padding:8px 10px;border-radius:10px;background:#fff7ed;color:#9a3412;font-size:12px;font-weight:800}#dg60OfficeToolbar{display:flex;justify-content:flex-end;margin:0 0 14px;padding:10px 12px;border:1px solid #d7dee8;border-radius:14px;background:#f8fafc}#dg60OpenWindow{border:0;border-radius:11px;padding:11px 16px;background:#1f5f36;color:#fff;font-weight:800;cursor:pointer}@media(max-width:700px){#dg60OpenWindow{width:100%}}';document.head.appendChild(s);}
 
 /* Ein Backend-Ping hoechstens alle 30 Minuten. 5.2.0.8 bleibt waehrend der Umstellung kompatibel. */
-window.d3CheckBackend=d3CheckBackend=async function(force){if(!force){try{const c=JSON.parse(sessionStorage.getItem(BACK)||'null');if(c&&backendOk(c.version)&&Date.now()-Number(c.ts||0)<BACK_TTL){DG3.backend=String(c.version);if(backend60(c.version))q('d3Notice')?.remove();else if(typeof d3Notice==='function')d3Notice('App 6.0: Google-GS 6.0 bitte noch bereitstellen. Aktuell '+c.version+'.','warn');return true;}}catch(_e){}}try{const r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'ping',clientVersion:V})});if(!r.ok)throw new Error('HTTP '+r.status);const raw=JSON.parse(await r.text());if(!raw.ok)throw new Error(raw.error||'Serverfehler.');const data=raw.data!==undefined?raw.data:raw,found=String(data&&data.version||'');DG3.backend=backendOk(found)?found:'';if(!DG3.backend){d3Notice('App 6.0 benötigt Google-GS 6.0. Gefunden: '+(found||'unbekannt')+'.','warn');return false;}sessionStorage.setItem(BACK,JSON.stringify({ts:Date.now(),version:found}));if(backend60(found))q('d3Notice')?.remove();else d3Notice('App 6.0: Google-GS 6.0 bitte noch bereitstellen. Aktuell '+found+'.','warn');return true;}catch(e){DG3.backend='';if(typeof d3Notice==='function')d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}};
+window.d3CheckBackend=d3CheckBackend=async function(force){if(!force){try{const c=JSON.parse(sessionStorage.getItem(BACK)||'null');if(c&&backendOk(c.version)&&Date.now()-Number(c.ts||0)<BACK_TTL){DG3.backend=String(c.version);if(backend60(c.version))q('d3Notice')?.remove();else if(typeof d3Notice==='function')d3Notice('App 7.0: Google-GS 7.0 bitte noch bereitstellen. Aktuell '+c.version+'.','warn');return true;}}catch(_e){}}try{const r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'ping',clientVersion:V})});if(!r.ok)throw new Error('HTTP '+r.status);const raw=JSON.parse(await r.text());if(!raw.ok)throw new Error(raw.error||'Serverfehler.');const data=raw.data!==undefined?raw.data:raw,found=String(data&&data.version||'');DG3.backend=backendOk(found)?found:'';if(!DG3.backend){d3Notice('App 7.0 benötigt Google-GS 7.0. Gefunden: '+(found||'unbekannt')+'.','warn');return false;}sessionStorage.setItem(BACK,JSON.stringify({ts:Date.now(),version:found}));if(backend60(found))q('d3Notice')?.remove();else d3Notice('App 7.0: Google-GS 7.0 bitte noch bereitstellen. Aktuell '+found+'.','warn');return true;}catch(e){DG3.backend='';if(typeof d3Notice==='function')d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}};
 
-/* Zentraler Transport 6.0: Request-Deduplizierung bleibt erhalten. */
-window.d3Api=d3Api=async function(payload){const action=String(payload&&payload.action||''),read=/^(get|check)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload||{});if(read&&DG3.reads.has(key))return DG3.reads.get(key);const run=(async()=>{if(action!=='ping'&&!backendOk(DG3.backend)){if(!await d3CheckBackend())throw dgError('Google-Backend 6.0 noch nicht bereitgestellt.','version');}if(!read)DG3.pending++;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);try{let response;try{response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({},payload,{clientVersion:V})),signal:controller.signal});}catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Anlegen zuerst Daten neu laden.':'Keine Serververbindung.','network');}if(!response.ok)throw dgError('HTTP '+response.status,'network');let data;try{data=JSON.parse(await response.text());}catch(_e){throw dgError('Ungültige Serverantwort.','server');}if(!data.ok)throw dgError(data.error||'Serverfehler.','server');return data.data!==undefined?data.data:data;}finally{clearTimeout(timer);if(!read)DG3.pending--;}})();if(read)DG3.reads.set(key,run);try{return await run;}finally{if(read&&DG3.reads.get(key)===run)DG3.reads.delete(key);}};
+/* Zentraler Transport 7.0: Request-Deduplizierung bleibt erhalten. */
+window.d3Api=d3Api=async function(payload){const action=String(payload&&payload.action||''),read=/^(get|check)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload||{});if(read&&DG3.reads.has(key))return DG3.reads.get(key);const run=(async()=>{if(action!=='ping'&&!backendOk(DG3.backend)){if(!await d3CheckBackend())throw dgError('Google-Backend 7.0 noch nicht bereitgestellt.','version');}if(!read)DG3.pending++;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);try{let response;try{response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({},payload,{clientVersion:V})),signal:controller.signal});}catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Anlegen zuerst Daten neu laden.':'Keine Serververbindung.','network');}if(!response.ok)throw dgError('HTTP '+response.status,'network');let data;try{data=JSON.parse(await response.text());}catch(_e){throw dgError('Ungültige Serverantwort.','server');}if(!data.ok)throw dgError(data.error||'Serverfehler.','server');return data.data!==undefined?data.data:data;}finally{clearTimeout(timer);if(!read)DG3.pending--;}})();if(read)DG3.reads.set(key,run);try{return await run;}finally{if(read&&DG3.reads.get(key)===run)DG3.reads.delete(key);}};
 
 /* Angebote: kein automatischer Dreifach-Reload beim Start; Zaehler nur bei sichtbarem Bereich/Mutation. */
 function offerBtn(id){return document.querySelector('#d3Offers .d3-menu [data-panel="'+id+'"]');}
@@ -3459,7 +3473,7 @@ window.d3OfferCreated=function(offerId){const r=d3Offer(offerId);d3Form('Angebot
 window.loadOffers=async function(stage='Offen'){const id=stage==='Offen'?'d3OfferOpen':stage==='Zu erstellen'?'d3OfferCreate':'d3OfferArchive';setMessage(id+'Status','Angebote werden geladen ...','info');try{const jobs=[api(chefPayload({action:'getOfferReports',stage}))];if(stage==='Offen')jobs.push(api(chefPayload({action:'getOfferReminders',includeDone:false})));const got=await Promise.all(jobs),rows=got[0]||[],rems=got[1]||[],by={};rems.forEach(x=>{if(x&&x.offerId)by[x.offerId]=x;});DG3.offers=DG3.offers||{};DG3.offers[stage]=rows;q(id+'List').innerHTML=rows.map((r,i)=>{let buttons='';if(stage==='Offen')buttons=d3Button('Angenommen','d3OfferDecision',[r.offerId,true],'success')+d3Button('Abgelehnt','d3OfferDecision',[r.offerId,false],'secondary')+d3Button('Zu „Angebote zu erstellen“','d3MoveOfferBackToCreate',[r.offerId],'danger');if(stage==='Zu erstellen')buttons=d3Button('Angebot erstellt','d3OfferCreated',[r.offerId],'success')+d3Button('Auftrag entfernen','d3DiscardOffer',[r.offerId],'danger');const rem=stage==='Offen'?by[r.offerId]:null,due=rem&&rem.dueDate?(typeof formatDateDE==='function'?formatDateDE(rem.dueDate):rem.dueDate):'',ri=stage!=='Offen'?'':rem?'<div class="dg60-rem-ok">Reminder verknüpft · fällig '+esc60(due)+'</div>':'<div class="dg60-rem-warn">⚠ Kein offener Reminder verknüpft.</div>';return '<div class="report-card'+(i%2?' d3-alt':'')+'"><strong>'+esc(r.customer)+'</strong><div class="report-meta">'+esc(r.status)+' - '+Number(r.reportCount||0)+' Berichte - '+formatHours(r.totalHours)+' Std.</div><div>'+esc(r.description||'')+'</div>'+((r.reports||[]).length?'<details><summary>Einzelberichte anzeigen</summary>'+r.reports.map(d3Single).join('')+'</details>':'<div class="muted small">Angebot ohne bereits erfasste Arbeitszeit.</div>')+ri+'<div class="report-actions">'+buttons+'</div></div>';}).join('')||'Keine Angebote vorhanden.';setMessage(id+'Status',rows.length+' Angebot(e) geladen.','ok');offerAt=Date.now();if(stage==='Offen')offerCount('d3OfferOpen','Offene Angebote',rows.length);if(stage==='Zu erstellen'){offerCount('d3OfferCreate','Angebote zu erstellen',rows.length);if(typeof d3Count==='function')d3Count('offers',rows.length);relabelOffers();}if(stage==='Archiv')offerCount('d3OfferArchive','Angebotsarchiv',rows.length);}catch(e){setMessage(id+'Status',e.message,'error');}};
 ['d3OfferDecision','d3DiscardOffer','d3ReminderDecision'].forEach(name=>{const old=window[name];if(typeof old!=='function')return;window[name]=async function(){const r=await old.apply(this,arguments);offerAt=0;await refreshOffers(true);return r;};});
 
-/* Regie: keine N+1-getObjectReports-Nachladung mehr. GS 6.0 liefert die Historie komplett. */
+/* Regie: keine N+1-getObjectReports-Nachladung mehr. GS 7.0 liefert die Historie komplett. */
 const oldSingle=window.d3Single;if(typeof oldSingle==='function')window.d3Single=d3Single=function(r){let html=oldSingle(r);if(String(r&&r.status||'')!=='Abgerechnet'||/Bereits abgerechnet/.test(html))return html;return html.replace('</div>','<div class="muted small" style="margin-top:4px;font-weight:800">✓ Bereits abgerechnet'+(r&&r.billedAt?' · '+esc(r.billedAt):'')+'</div></div>');};
 function regieRoot(view){return q(view==='Laufend'?'d3RunningList':'regieResult');}
 window.requestMergeSelectedRegieReports=async function(view){const v=view||((DG3&&DG3.active)||'Abgeschlossen'),root=regieRoot(v);if(!root)return false;const boxes=[...root.querySelectorAll('.regie-merge-select:checked')],ids=[...new Set(boxes.flatMap(x=>String(x.dataset.objectIds||'').split(',').map(s=>s.trim()).filter(Boolean)))];if(ids.length<2){alert('Bitte mindestens zwei Kundenkarten im aktuell geöffneten Bereich markieren.');return false;}if(!confirm('Die '+boxes.length+' markierten Kundenkarten wirklich zusammenführen?'))return false;try{d3Notice('Regieberichte werden zusammengeführt ...','info');await api(chefPayload({action:'mergeRegieObjects',objectIds:ids}));boxes.forEach(x=>x.checked=false);await loadRegieReports(v);if(typeof d3Dashboard==='function')await d3Dashboard(true);d3Notice('✓ Regieberichte wurden zusammengeführt.','ok');}catch(e){d3Notice(e.message,'error');}return false;};
@@ -3480,11 +3494,11 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 ;
 
-/* ===== SOURCE: app-6.0.3-backend.js ===== */
-/* DG Zeiterfassung 6.0.3 - strikte, einheitliche Backend-Anbindung */
+/* ===== CONSOLIDATED SOURCE: app-6.0.3-backend.js ===== */
+/* DG Zeiterfassung 7.0 - strikte, einheitliche Backend-Anbindung */
 (function(){
 'use strict';
-const V='6.0.3',KEY='dg603_backend',TTL=5*60*1000;
+const V='7.0',KEY='dg70_backend',TTL=5*60*1000;
 const BACKEND_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
 function byId(id){return document.getElementById(id);}
 function exact(v){return String(v||'').trim()===V;}
@@ -3527,12 +3541,12 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 ;
 
-/* ===== SOURCE: app-6.0-ui.js ===== */
-/* DG Zeiterfassung 6.0.1 - Monteur-Eingabe: Ja/Nein-Tasten und Sprache-zu-Text */
+/* ===== CONSOLIDATED SOURCE: app-6.0-ui.js ===== */
+/* DG Zeiterfassung 7.0 - Monteur-Eingabe: Ja/Nein-Tasten und Sprache-zu-Text */
 (function(){
 'use strict';
 
-const V60='6.0.3';
+const V60='7.0';
 let activeRecognition60=null;
 let activeSpeechTarget60='';
 let activeSpeechButton60=null;
@@ -3751,11 +3765,11 @@ setTimeout(install60,500);
 })();
 ;
 
-/* ===== SOURCE: app-6.0.1-fix.js ===== */
-/* DG Zeiterfassung 6.0.2 - UI-Farben, Kalender-Refresh und zentraler Versionsstempel */
+/* ===== CONSOLIDATED SOURCE: app-6.0.1-fix.js ===== */
+/* DG Zeiterfassung 7.0 - UI-Farben, Kalender-Refresh und zentraler Versionsstempel */
 (function(){
 'use strict';
-const V='6.0.3';
+const V='7.0';
 const q=id=>document.getElementById(id);
 let stamping=false;
 
@@ -3819,11 +3833,11 @@ setTimeout(stamp,750);
 })();
 ;
 
-/* ===== SOURCE: app-6.0.2-reminders.js ===== */
-/* DG Zeiterfassung 6.0.2 - Eigene Reminder mit Sprache, Bildern und Dateien */
+/* ===== CONSOLIDATED SOURCE: app-6.0.2-reminders.js ===== */
+/* DG Zeiterfassung 7.0 - Eigene Reminder mit Sprache, Bildern und Dateien */
 (function(){
 'use strict';
-const V='6.0.3';
+const V='7.0';
 const $2=id=>document.getElementById(id);
 let ownSpeech=null;
 
@@ -3933,11 +3947,11 @@ setTimeout(install,100);setTimeout(install,600);setTimeout(install,1600);
 })();
 ;
 
-/* ===== SOURCE: app-6.0.3-final.js ===== */
-/* DG Zeiterfassung 6.0.3 - finaler Produktions-Hardening-Layer */
+/* ===== CONSOLIDATED SOURCE: app-6.0.3-final.js ===== */
+/* DG Zeiterfassung 7.0 - finaler Produktions-Hardening-Layer */
 (function(){
 'use strict';
-const V='6.0.3';
+const V='7.0';
 const BACKEND_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
 const TOKEN_KEY='dg_device_session';
 function $(id){return document.getElementById(id);}
@@ -3997,8 +4011,8 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 ;
 
-/* ===== SOURCE: app-6.0.3-reminder-notes.js ===== */
-/* DG Zeiterfassung 6.0.3 - Interne Notizen fuer eigene Reminder */
+/* ===== CONSOLIDATED SOURCE: app-6.0.3-reminder-notes.js ===== */
+/* DG Zeiterfassung 7.0 - Interne Notizen fuer eigene Reminder */
 (function(){
 'use strict';
 if(window.__dg603ReminderNotes)return;
