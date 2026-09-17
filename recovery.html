@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DG Zeiterfassung 7.0 Reparatur</title>
+<style>body{font-family:Arial,Helvetica,sans-serif;background:#f3f4f6;color:#111827;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}.card{width:min(620px,100%);background:#fff;border-radius:18px;padding:26px;box-shadow:0 12px 40px rgba(0,0,0,.15)}h1{margin:0 0 12px;color:#31589e}.ok{color:#166534;font-weight:800}.err{color:#991b1b;font-weight:800}.muted{color:#64748b}.btn{display:inline-block;margin-top:16px;padding:12px 16px;border-radius:10px;background:#31589e;color:#fff;text-decoration:none;font-weight:800}</style>
+</head>
+<body><div class="card"><h1>DG Zeiterfassung 7.0 wird neu gestartet</h1><div id="status">Alter App-Cache und Service Worker werden entfernt …</div><div class="muted" style="margin-top:10px">Arbeitszeit-, Auftrags- und Kundendaten werden nicht gelöscht.</div><a id="manual" class="btn" style="display:none" href="./?build=20260917-final3">App öffnen</a></div>
+<script>
+(async function(){
+ const status=document.getElementById('status'),manual=document.getElementById('manual');
+ try{
+   if('serviceWorker' in navigator){const regs=await navigator.serviceWorker.getRegistrations();await Promise.all(regs.map(r=>r.unregister()));}
+   if('caches' in window){const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith('dg-zeiterfassung-')).map(k=>caches.delete(k)));}
+   try{['dg60_backend','dg602_backend','dg603_backend','dg70_backend','dg51_backend'].forEach(k=>sessionStorage.removeItem(k));sessionStorage.removeItem('dg_employee_pin');}catch(_e){}
+   try{localStorage.removeItem('dg_employee');localStorage.removeItem('dg_chef_access');localStorage.removeItem('dg_device_session');localStorage.removeItem('dg_employee_pin');}catch(_e){}
+   status.className='ok';status.textContent='Bereinigung abgeschlossen. DG Zeiterfassung 7.0 wird jetzt frisch geladen …';manual.style.display='inline-block';
+   setTimeout(()=>location.replace('./?build=20260917-final3&ts='+Date.now()),700);
+ }catch(e){status.className='err';status.textContent='Bereinigung nicht vollständig: '+(e&&e.message?e.message:e);manual.style.display='inline-block';}
+})();
+</script></body></html>
