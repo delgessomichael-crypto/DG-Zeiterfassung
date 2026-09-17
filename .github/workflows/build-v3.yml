@@ -38,29 +38,50 @@ jobs:
           ]
           old_url = 'https://script.google.com/macros/s/AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc/exec'
           new_url = 'https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec'
-          chunks = []
+          guard = r'''/* DG 6.0.3 release guard: verhindert Versionsspruenge waehrend Altcode initialisiert. */
+(function(){
+'use strict';
+const V='6.0.3';
+let busy=false;
+function stamp(){
+  if(busy)return;busy=true;
+  try{
+    document.title='DG Zeiterfassung '+V;
+    document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim()))x.textContent='Version '+V;});
+    document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(x.textContent||''))x.textContent='Zeiterfassung - '+V;});
+    try{window.DG_APP_VERSION=V;window.DG_RELEASE=V;if(window.DG3)DG3.version=V;}catch(_e){}
+  }finally{busy=false;}
+}
+function boot(){stamp();const o=new MutationObserver(stamp);o.observe(document.documentElement,{subtree:true,childList:true,characterData:true});window.__DG603_RELEASE_OBSERVER=o;}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
+})();'''
+          chunks = [guard]
           for name in files:
               p = Path(name)
               if not p.exists():
                   raise SystemExit(f'Missing source: {name}')
-              text = p.read_text(encoding='utf-8')
-              text = text.replace(old_url, new_url)
+              text = p.read_text(encoding='utf-8').replace(old_url, new_url)
               if name == 'app-6.0-runtime.js':
                   text = text.replace("const V='6.0',VIEW=", "const V='6.0.3',VIEW=", 1)
               elif name == 'app-6.0-ui.js':
                   text = text.replace("const V60='6.0.1';", "const V60='6.0.3';", 1)
               elif name in ('app-6.0.1-fix.js','app-6.0.2-reminders.js'):
+                  text = text.replace("const V='6.0.1';", "const V='6.0.3';", 1)
                   text = text.replace("const V='6.0.2';", "const V='6.0.3';", 1)
               chunks.append(f'/* ===== SOURCE: {name} ===== */\n{text.rstrip()}\n;')
           out = '\n\n'.join(chunks) + '\n'
-          if old_url in out:
-              raise SystemExit('Old Apps Script URL still present in production bundle')
-          if 'app-6.0-backend-compat.js' in out:
-              raise SystemExit('Deprecated backend compatibility layer leaked into production bundle')
+          checks = {
+              'old Apps Script URL': old_url,
+              'deprecated compatibility layer': 'app-6.0-backend-compat.js',
+              'runtime 6.0 constant': "const V='6.0',VIEW=",
+              'UI 6.0.1 constant': "const V60='6.0.1';",
+              'patch 6.0.2 constant': "const V='6.0.2';",
+          }
+          for label, needle in checks.items():
+              if needle in out:
+                  raise SystemExit(label+' still present in production bundle')
           if new_url not in out:
               raise SystemExit('Current Apps Script URL missing from production bundle')
-          if "const V='6.0',VIEW=" in out or "const V60='6.0.1';" in out or "const V='6.0.2';" in out:
-              raise SystemExit('Old release constant still present in production bundle')
           Path('app-6.0.3.js').write_text(out, encoding='utf-8')
           PY
           node --check app-6.0.3.js
