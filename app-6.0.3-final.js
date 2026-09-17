@@ -14,7 +14,7 @@ function stamp(){
 }
 function clearOldCaches(){try{['dg60_backend','dg602_backend','dg51_backend'].forEach(function(k){sessionStorage.removeItem(k);});}catch(_e){}}
 
-/* Alte Basisversionen koennen im Hintergrund Chef-Leseaktionen anstossen. Normale Monteure erhalten lokal leere Listen statt unnoetiger 403-/Logeintraege. */
+/* Alte Basisversionen koennen im Hintergrund Chef-Leseaktionen anstossen. Normale Monteure erhalten lokal leere Daten statt unnoetiger Backend-Fehler. */
 const bossReadArray=new Set(['getPlannerWorkers','getOfferReports','getOfferReminders','getBossDayClosures','getCustomerInquiries','getRegieReports','getAbsences','getMaintenanceOverview']);
 const rawApi=window.api;
 if(typeof rawApi==='function')window.api=api=async function(payload){
@@ -24,6 +24,20 @@ if(typeof rawApi==='function')window.api=api=async function(payload){
     return [];
   }
   return rawApi.apply(this,arguments);
+};
+
+/* Falls alte Erweiterungsschichten mehrere Sync-Timer gestartet haben, werden deren Aufrufe zentral entprellt. */
+const rawSync=window.d3Sync;let lastSync=0,syncPromise=null;
+if(typeof rawSync==='function')window.d3Sync=d3Sync=function(){
+  const now=Date.now();
+  if(syncPromise)return syncPromise;
+  if(now-lastSync<45000)return Promise.resolve();
+  lastSync=now;
+  try{
+    const r=rawSync.apply(this,arguments);
+    if(r&&typeof r.then==='function'){syncPromise=Promise.resolve(r).finally(function(){syncPromise=null;});return syncPromise;}
+    return r;
+  }catch(e){syncPromise=null;throw e;}
 };
 
 /* Abmelden immer ueber den aktuellen Backend-Pfad. Lokale Sitzung wird sofort beendet; Server-Token wird best effort widerrufen. */
@@ -41,14 +55,6 @@ window.logout=logout=function(){
     fetch(BACKEND_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'employeeLogout',employee:employee,deviceSessionToken:token,clientVersion:V})}).catch(function(){});
   }
 };
-
-/* Nur eine Synchronisationsrunde pro Minute aktiv halten, auch wenn alte Schichten mehrfach initialisiert wurden. */
-try{
-  if(window.DG3){
-    if(DG3.finalSyncTimer)clearInterval(DG3.finalSyncTimer);
-    DG3.finalSyncTimer=setInterval(function(){try{if(!document.hidden&&navigator.onLine&&typeof window.d3Sync==='function')window.d3Sync();}catch(_e){}},60000);
-  }
-}catch(_e){}
 
 function boot(){clearOldCaches();stamp();setTimeout(stamp,350);setTimeout(stamp,1200);}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
