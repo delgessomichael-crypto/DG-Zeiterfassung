@@ -1,8 +1,16 @@
-name: Build DG 5.2.5
+name: Build DG 6.0.3 Production
 on:
   push:
-    branches: ['main','release/v5.0-final','release/v5.0.1-maintenance-files','release/v5.0.2-signature-stability','release/v5.0.3-customer-correction','release/v5.0.4-object-address-toggle','release/v5.0.5-manual-maintenance-count','release/v5.1-performance','release/v5.1.2-day-entry-delete','feature/monthly-payroll-5.2','feature/v5.2.1-office-fixes']
-    paths: ['build3/**', '.github/workflows/build-v3.yml', 'app-5.2.0-payroll.js', 'app-5.2.1-fixes.js', 'app-5.2.2-review.js', 'app-5.2.5-performance.js']
+    branches: ['main']
+    paths:
+      - 'app-5.0.js'
+      - 'app-6.0-runtime.js'
+      - 'app-6.0-ui.js'
+      - 'app-6.0.1-fix.js'
+      - 'app-6.0.2-reminders.js'
+      - 'app-6.0.3-backend.js'
+      - 'app-6.0.3-final.js'
+      - '.github/workflows/build-v3.yml'
 permissions:
   contents: write
 jobs:
@@ -15,20 +23,53 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Compile and verify DG 5.2.5
+      - name: Build single 6.0.3 browser bundle
         run: |
-          python -m pip install beautifulsoup4
-          rm -rf build3/release
-          mkdir -p build3/release
-          python build3/build_frontend_50.py
-          node --check build3/release/app-5.0.js
-          node --check build3/release/sw.js
-          python build3/verify_build_50.py
-      - name: Commit verified 5.2.5 frontend on current branch
+          python - <<'PY'
+          from pathlib import Path
+          files = [
+              'app-5.0.js',
+              'app-6.0-runtime.js',
+              'app-6.0.3-backend.js',
+              'app-6.0-ui.js',
+              'app-6.0.1-fix.js',
+              'app-6.0.2-reminders.js',
+              'app-6.0.3-final.js',
+          ]
+          old_url = 'https://script.google.com/macros/s/AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc/exec'
+          new_url = 'https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec'
+          chunks = []
+          for name in files:
+              p = Path(name)
+              if not p.exists():
+                  raise SystemExit(f'Missing source: {name}')
+              text = p.read_text(encoding='utf-8')
+              text = text.replace(old_url, new_url)
+              if name == 'app-6.0-runtime.js':
+                  text = text.replace("const V='6.0',VIEW=", "const V='6.0.3',VIEW=", 1)
+              elif name == 'app-6.0-ui.js':
+                  text = text.replace("const V60='6.0.1';", "const V60='6.0.3';", 1)
+              elif name in ('app-6.0.1-fix.js','app-6.0.2-reminders.js'):
+                  text = text.replace("const V='6.0.2';", "const V='6.0.3';", 1)
+              chunks.append(f'/* ===== SOURCE: {name} ===== */\n{text.rstrip()}\n;')
+          out = '\n\n'.join(chunks) + '\n'
+          if old_url in out:
+              raise SystemExit('Old Apps Script URL still present in production bundle')
+          if 'app-6.0-backend-compat.js' in out:
+              raise SystemExit('Deprecated backend compatibility layer leaked into production bundle')
+          if new_url not in out:
+              raise SystemExit('Current Apps Script URL missing from production bundle')
+          if "const V='6.0',VIEW=" in out or "const V60='6.0.1';" in out or "const V='6.0.2';" in out:
+              raise SystemExit('Old release constant still present in production bundle')
+          Path('app-6.0.3.js').write_text(out, encoding='utf-8')
+          PY
+          node --check app-6.0.3.js
+          test "$(grep -c 'AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO' app-6.0.3.js)" -ge 1
+          ! grep -q 'AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc' app-6.0.3.js
+      - name: Commit verified 6.0.3 bundle
         run: |
           git config user.name 'DG Build'
           git config user.email 'build@users.noreply.github.com'
-          cp build3/release/index.html build3/release/app-5.0.js build3/release/app-5.0.css build3/release/sw.js build3/release/manifest.json .
-          git add index.html app-5.0.js app-5.0.css sw.js manifest.json
-          git commit -m 'v5.2.5: Hintergrundlast und Timeout-Meldungen reduziert' || true
+          git add app-6.0.3.js
+          git commit -m 'v6.0.3: verified single production bundle' || true
           git push origin HEAD:${GITHUB_REF_NAME}
