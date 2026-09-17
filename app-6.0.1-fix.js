@@ -1,7 +1,7 @@
-/* DG Zeiterfassung 6.0.1 - UI-Farben, Kalender-Refresh und zentraler Versionsstempel */
+/* DG Zeiterfassung 6.0.2 - UI-Farben, Kalender-Refresh und zentraler Versionsstempel */
 (function(){
 'use strict';
-const V='6.0.1';
+const V='6.0.2';
 const q=id=>document.getElementById(id);
 let stamping=false;
 
@@ -21,8 +21,8 @@ function stamp(){
 }
 
 function watchVersion(){
-  if(window.__dg601VersionWatch)return;
-  window.__dg601VersionWatch=true;
+  if(window.__dg602VersionWatch)return;
+  window.__dg602VersionWatch=true;
   const obs=new MutationObserver(()=>stamp());
   obs.observe(document.documentElement,{subtree:true,childList:true,characterData:true});
 }
