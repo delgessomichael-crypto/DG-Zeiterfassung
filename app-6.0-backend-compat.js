@@ -2,6 +2,7 @@
 (function(){
 'use strict';
 const V='6.0.2',KEY='dg602_backend',TTL=5*60*1000;
+const BACKEND_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
 function byId(id){return document.getElementById(id);}
 function clearOldNotices(){
   const notice=byId('d3Notice');
@@ -30,7 +31,7 @@ window.d3CheckBackend=d3CheckBackend=async function(force){
     }catch(_e){}
   }
   try{
-    const r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'ping',clientVersion:V})});
+    const r=await fetch(BACKEND_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'ping',clientVersion:V})});
     if(!r.ok)throw new Error('HTTP '+r.status);
     const raw=JSON.parse(await r.text());
     if(!raw.ok)throw new Error(raw.error||'Serverfehler.');
@@ -67,7 +68,7 @@ window.d3Api=d3Api=async function(payload){
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);
     try{
       let response;
-      try{response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({},payload,{clientVersion:V})),signal:controller.signal});}
+      try{response=await fetch(BACKEND_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({},payload,{clientVersion:V})),signal:controller.signal});}
       catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Speichern zuerst Daten neu laden.':'Keine Serververbindung.','network');}
       if(!response.ok)throw dgError('HTTP '+response.status,'network');
       let data;try{data=JSON.parse(await response.text());}catch(_e){throw dgError('Ungültige Serverantwort.','server');}
