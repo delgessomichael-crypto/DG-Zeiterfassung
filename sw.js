@@ -1,6 +1,6 @@
-const CACHE_NAME='dg-zeiterfassung-6-0-2-20260917b';
+const CACHE_NAME='dg-zeiterfassung-6-0-2-20260917c';
 const APP60='./app-6.0-runtime.js?v=20260916b';
-const BACKEND_COMPAT='./app-6.0-backend-compat.js?v=20260917c';
+const BACKEND_COMPAT='./app-6.0-backend-compat.js?v=20260917d';
 const UI60='./app-6.0-ui.js?v=20260917b';
 const FIX601='./app-6.0.1-fix.js?v=20260917c';
 const REM602='./app-6.0.2-reminders.js?v=20260917a';
