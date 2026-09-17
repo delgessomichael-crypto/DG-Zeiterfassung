@@ -1,7 +1,8 @@
-const CACHE_NAME='dg-zeiterfassung-6-0-20260916c';
+const CACHE_NAME='dg-zeiterfassung-6-0-20260917-ui1';
 const APP60='./app-6.0-runtime.js?v=20260916b';
 const BACKEND_COMPAT='./app-6.0-backend-compat.js?v=20260916c';
-const APP_SHELL=["./","./index.html","./app-5.0.js?v=e3c82c090f11","./app-5.0.css?v=799b73f6d5b0","./manifest.json","./dg_icon_192.png","./dg_icon_512.png",APP60,BACKEND_COMPAT];
+const UI60='./app-6.0-ui.js?v=20260917a';
+const APP_SHELL=["./","./index.html","./app-5.0.js?v=e3c82c090f11","./app-5.0.css?v=799b73f6d5b0","./manifest.json","./dg_icon_192.png","./dg_icon_512.png",APP60,BACKEND_COMPAT,UI60];
 
 async function dg60PatchedHtml(response){
   if(!response)return response;
@@ -17,9 +18,12 @@ async function dg60PatchedHtml(response){
     .replace(/<script[^>]+app-5\.2\.9-office\.js[^>]*><\/script>/g,'')
     .replace(/<script[^>]+app-5\.3\.0-office-state\.js[^>]*><\/script>/g,'')
     .replace(/<script[^>]+app-6\.0\.js[^>]*><\/script>/g,'')
-    .replace(/<script[^>]+app-6\.0-backend-compat\.js[^>]*><\/script>/g,'');
+    .replace(/<script[^>]+app-6\.0-runtime\.js[^>]*><\/script>/g,'')
+    .replace(/<script[^>]+app-6\.0-backend-compat\.js[^>]*><\/script>/g,'')
+    .replace(/<script[^>]+app-6\.0-ui\.js[^>]*><\/script>/g,'');
   if(!html.includes('app-6.0-runtime.js'))html=html.replace('</body>','<script defer src="'+APP60+'"></script></body>');
   if(!html.includes('app-6.0-backend-compat.js'))html=html.replace('</body>','<script defer src="'+BACKEND_COMPAT+'"></script></body>');
+  if(!html.includes('app-6.0-ui.js'))html=html.replace('</body>','<script defer src="'+UI60+'"></script></body>');
   const headers=new Headers(response.headers);headers.set('content-type','text/html; charset=utf-8');headers.delete('content-length');
   return new Response(html,{status:response.status,statusText:response.statusText,headers});
 }
