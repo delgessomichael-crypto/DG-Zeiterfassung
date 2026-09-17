@@ -1,15 +1,14 @@
 /* DG 7.0 FINAL - einheitlicher sichtbarer Versionsstand */
 (function(){
 'use strict';
-const V='7.0';let busy=false;
-function stamp(){if(busy)return;busy=true;try{
-  document.title='DG Zeiterfassung '+V;
-  document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim()))x.textContent='Version '+V;});
-  document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(x.textContent||''))x.textContent='Zeiterfassung - '+V;});
+const V='7.0';
+function stamp(){
+  if(document.title!=='DG Zeiterfassung '+V)document.title='DG Zeiterfassung '+V;
+  document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim())&&x.textContent!=='Version '+V)x.textContent='Version '+V;});
+  document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(x.textContent||'')&&x.textContent!=='Zeiterfassung - '+V)x.textContent='Zeiterfassung - '+V;});
   try{window.DG_APP_VERSION=V;window.DG_RELEASE=V;if(window.DG3)DG3.version=V;}catch(_e){}
-}finally{busy=false;}}
-function boot(){stamp();const o=new MutationObserver(stamp);o.observe(document.documentElement,{subtree:true,childList:true,characterData:true});window.__DG70_RELEASE_OBSERVER=o;}
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',stamp,{once:true});else stamp();
 })();
 
 /* ===== CONSOLIDATED SOURCE: app-5.0.js ===== */
