@@ -1,14 +1,30 @@
-/* DG Zeiterfassung 6.0.1 - UI-Farben, Kalender-Refresh und Versionsstempel */
+/* DG Zeiterfassung 6.0.1 - UI-Farben, Kalender-Refresh und zentraler Versionsstempel */
 (function(){
 'use strict';
 const V='6.0.1';
 const q=id=>document.getElementById(id);
+let stamping=false;
 
 function stamp(){
-  document.title='DG Zeiterfassung '+V;
-  document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version '+V;});
-  document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - '+V;});
-  try{window.DG_APP_VERSION=V;if(window.DG3)DG3.version=V;}catch(_e){}
+  if(stamping)return;
+  stamping=true;
+  try{
+    if(document.title!=='DG Zeiterfassung '+V)document.title='DG Zeiterfassung '+V;
+    document.querySelectorAll('.login-card .muted.small,#loginScreen .center.muted.small').forEach(x=>{
+      if(/^Version /.test((x.textContent||'').trim())&&x.textContent!=='Version '+V)x.textContent='Version '+V;
+    });
+    document.querySelectorAll('.hero strong,#mainScreen .hero .head-row strong').forEach(x=>{
+      if(/Zeiterfassung/.test(x.textContent||'')&&x.textContent!=='Zeiterfassung - '+V)x.textContent='Zeiterfassung - '+V;
+    });
+    try{window.DG_APP_VERSION=V;if(window.DG3)DG3.version=V;}catch(_e){}
+  }finally{stamping=false;}
+}
+
+function watchVersion(){
+  if(window.__dg601VersionWatch)return;
+  window.__dg601VersionWatch=true;
+  const obs=new MutationObserver(()=>stamp());
+  obs.observe(document.documentElement,{subtree:true,childList:true,characterData:true});
 }
 
 function css(){
@@ -22,24 +38,28 @@ function css(){
 }
 
 /* Nach einer Besichtigung muss die Kalenderliste zwingend frisch vom Backend geladen werden.
-   Sonst zeigt der 30-Sekunden-Cache den bereits erledigten Termin erneut an. */
+   Sonst zeigt ein alter lokaler Kalendercache den bereits erledigten Termin erneut an. */
 const oldApi=window.api;
-if(typeof oldApi==='function')window.api=api=async function(payload){
-  const r=await oldApi.apply(this,arguments);
-  if(payload&&payload.action==='createInspectionOffer'){
-    try{
-      const employee=(typeof auth==='function'?auth().employee:'')||payload.employee||'';
-      if(employee){
-        localStorage.removeItem('dg_calendar_'+employee);
-        localStorage.removeItem('dg51_calendar_ts_'+employee);
-      }
-      if(window.DG51)DG51.forceCalendar=true;
-    }catch(_e){}
-  }
-  return r;
-};
+if(typeof oldApi==='function'&&!window.__dg601ApiWrapped){
+  window.__dg601ApiWrapped=true;
+  window.api=api=async function(payload){
+    const r=await oldApi.apply(this,arguments);
+    if(payload&&payload.action==='createInspectionOffer'){
+      try{
+        const employee=(typeof auth==='function'?auth().employee:'')||payload.employee||'';
+        if(employee){
+          localStorage.removeItem('dg_calendar_'+employee);
+          localStorage.removeItem('dg51_calendar_ts_'+employee);
+        }
+      }catch(_e){}
+    }
+    return r;
+  };
+}
 
-function boot(){stamp();css();}
+function boot(){stamp();watchVersion();css();}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
-setTimeout(boot,250);
+setTimeout(boot,50);
+setTimeout(stamp,250);
+setTimeout(stamp,750);
 })();
