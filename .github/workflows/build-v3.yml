@@ -31,7 +31,7 @@ jobs:
           import re, json
 
           VERSION='7.0'
-          BUILD='20260917-final'
+          BUILD='20260917-final3'
           OLD_URL='https://script.google.com/macros/s/AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc/exec'
           BACKEND_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec'
           sources=[
@@ -49,15 +49,14 @@ jobs:
           release_guard=r'''/* DG 7.0 FINAL - einheitlicher sichtbarer Versionsstand */
           (function(){
           'use strict';
-          const V='7.0';let busy=false;
-          function stamp(){if(busy)return;busy=true;try{
-            document.title='DG Zeiterfassung '+V;
-            document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim()))x.textContent='Version '+V;});
-            document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(x.textContent||''))x.textContent='Zeiterfassung - '+V;});
+          const V='7.0';
+          function stamp(){
+            if(document.title!=='DG Zeiterfassung '+V)document.title='DG Zeiterfassung '+V;
+            document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim())&&x.textContent!=='Version '+V)x.textContent='Version '+V;});
+            document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(x.textContent||'')&&x.textContent!=='Zeiterfassung - '+V)x.textContent='Zeiterfassung - '+V;});
             try{window.DG_APP_VERSION=V;window.DG_RELEASE=V;if(window.DG3)DG3.version=V;}catch(_e){}
-          }finally{busy=false;}}
-          function boot(){stamp();const o=new MutationObserver(stamp);o.observe(document.documentElement,{subtree:true,childList:true,characterData:true});window.__DG70_RELEASE_OBSERVER=o;}
-          if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
+          }
+          if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',stamp,{once:true});else stamp();
           })();'''
           chunks.append(release_guard)
 
@@ -79,6 +78,8 @@ jobs:
           required=[BACKEND_URL,'saveOwnReminderInternalNote','d3OwnReminderNote',"const V='7.0'"]
           for needle in required:
               if needle not in bundle: raise SystemExit('Required DG 7.0 feature missing: '+needle)
+          if 'new MutationObserver(stamp)' in bundle:
+              raise SystemExit('Unsafe recursive release observer detected')
           Path('app-7.0.js').write_text(bundle,encoding='utf-8')
 
           # index.html: nur EIN produktives App-Script laden.
@@ -114,11 +115,12 @@ jobs:
           grep -q 'app-7.0.js' index.html
           grep -q 'DG Zeiterfassung 7.0' manifest.json
           ! grep -q 'app-6.0-backend-compat.js' app-7.0.js
+          ! grep -q 'new MutationObserver(stamp)' app-7.0.js
       - name: Publish final DG 7.0 files
         run: |
           git config user.name 'DG Build'
           git config user.email 'build@users.noreply.github.com'
           git rm -f --ignore-unmatch app-6.0.3.js app-6.0-backend-compat.js
           git add app-7.0.js index.html sw.js manifest.json
-          git commit -m 'v7.0: final single-bundle production release' || true
+          git commit -m 'v7.0: final3 start-freeze fix' || true
           git push origin HEAD:${GITHUB_REF_NAME}
