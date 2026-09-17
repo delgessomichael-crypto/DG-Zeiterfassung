@@ -1,8 +1,8 @@
-/* DG Zeiterfassung 6.0 - Monteur-Eingabe: Ja/Nein-Tasten und Sprache-zu-Text */
+/* DG Zeiterfassung 6.0.1 - Monteur-Eingabe: Ja/Nein-Tasten und Sprache-zu-Text */
 (function(){
 'use strict';
 
-const V60='6.0';
+const V60='6.0.1';
 let activeRecognition60=null;
 let activeSpeechTarget60='';
 let activeSpeechButton60=null;
@@ -211,7 +211,6 @@ function install60(){
   addSpeechTools60('material');
 }
 
-/* Einige Bereiche werden nach Login neu aufgebaut. Darum nach Login und beim Wechsel in die Mitarbeiteransicht nochmals sicherstellen. */
 const oldOpenMain60=window.openMain;
 if(typeof oldOpenMain60==='function')window.openMain=function(){const r=oldOpenMain60.apply(this,arguments);setTimeout(install60,0);setTimeout(install60,300);return r;};
 const oldShowEmployee60=window.showEmployee;
