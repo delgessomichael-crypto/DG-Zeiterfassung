@@ -10,6 +10,7 @@ on:
       - 'app-6.0.2-reminders.js'
       - 'app-6.0.3-backend.js'
       - 'app-6.0.3-final.js'
+      - 'app-6.0.3-reminder-notes.js'
       - '.github/workflows/build-v3.yml'
 permissions:
   contents: write
@@ -35,6 +36,7 @@ jobs:
               'app-6.0.1-fix.js',
               'app-6.0.2-reminders.js',
               'app-6.0.3-final.js',
+              'app-6.0.3-reminder-notes.js',
           ]
           old_url = 'https://script.google.com/macros/s/AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc/exec'
           new_url = 'https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec'
@@ -65,6 +67,8 @@ jobs:
                   raise SystemExit('Forbidden legacy value in production bundle: '+needle)
           if new_url not in out:
               raise SystemExit('Current Apps Script URL missing from production bundle')
+          if 'saveOwnReminderInternalNote' not in out or 'd3OwnReminderNote' not in out:
+              raise SystemExit('Reminder note feature missing from production bundle')
           Path('app-6.0.3.js').write_text(out, encoding='utf-8')
           PY
           node --check app-6.0.3.js
