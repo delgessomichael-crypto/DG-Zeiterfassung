@@ -1,20 +1,21 @@
-const CACHE_NAME='dg-zeiterfassung-6-0-1-20260917b';
+const CACHE_NAME='dg-zeiterfassung-6-0-2-20260917a';
 const APP60='./app-6.0-runtime.js?v=20260916b';
 const BACKEND_COMPAT='./app-6.0-backend-compat.js?v=20260917b';
 const UI60='./app-6.0-ui.js?v=20260917b';
-const FIX601='./app-6.0.1-fix.js?v=20260917b';
-const APP_SHELL=["./","./index.html","./app-5.0.js?v=e3c82c090f11","./app-5.0.css?v=799b73f6d5b0","./manifest.json","./dg_icon_192.png","./dg_icon_512.png",APP60,BACKEND_COMPAT,UI60,FIX601];
+const FIX601='./app-6.0.1-fix.js?v=20260917c';
+const REM602='./app-6.0.2-reminders.js?v=20260917a';
+const APP_SHELL=["./","./index.html","./app-5.0.js?v=e3c82c090f11","./app-5.0.css?v=799b73f6d5b0","./manifest.json","./dg_icon_192.png","./dg_icon_512.png",APP60,BACKEND_COMPAT,UI60,FIX601,REM602];
 
 async function dg60PatchedHtml(response){
   if(!response)return response;
   const text=await response.text();
   let html=text
-    .replace(/DG Zeiterfassung 5\.2\.5/g,'DG Zeiterfassung 6.0.1')
-    .replace(/Version 5\.2\.5/g,'Version 6.0.1')
-    .replace(/Zeiterfassung - 5\.2\.5/g,'Zeiterfassung - 6.0.1')
-    .replace(/DG Zeiterfassung 6\.0(?!\.1)/g,'DG Zeiterfassung 6.0.1')
-    .replace(/Version 6\.0(?!\.1)/g,'Version 6.0.1')
-    .replace(/Zeiterfassung - 6\.0(?!\.1)/g,'Zeiterfassung - 6.0.1');
+    .replace(/DG Zeiterfassung 5\.2\.5/g,'DG Zeiterfassung 6.0.2')
+    .replace(/Version 5\.2\.5/g,'Version 6.0.2')
+    .replace(/Zeiterfassung - 5\.2\.5/g,'Zeiterfassung - 6.0.2')
+    .replace(/DG Zeiterfassung 6\.0(?:\.1)?/g,'DG Zeiterfassung 6.0.2')
+    .replace(/Version 6\.0(?:\.1)?/g,'Version 6.0.2')
+    .replace(/Zeiterfassung - 6\.0(?:\.1)?/g,'Zeiterfassung - 6.0.2');
   html=html
     .replace(/<script[^>]+app-5\.2\.6-offers\.js[^>]*><\/script>/g,'')
     .replace(/<script[^>]+app-5\.2\.7-regie\.js[^>]*><\/script>/g,'')
@@ -25,11 +26,13 @@ async function dg60PatchedHtml(response){
     .replace(/<script[^>]+app-6\.0-runtime\.js[^>]*><\/script>/g,'')
     .replace(/<script[^>]+app-6\.0-backend-compat\.js[^>]*><\/script>/g,'')
     .replace(/<script[^>]+app-6\.0-ui\.js[^>]*><\/script>/g,'')
-    .replace(/<script[^>]+app-6\.0\.1-fix\.js[^>]*><\/script>/g,'');
+    .replace(/<script[^>]+app-6\.0\.1-fix\.js[^>]*><\/script>/g,'')
+    .replace(/<script[^>]+app-6\.0\.2-reminders\.js[^>]*><\/script>/g,'');
   if(!html.includes('app-6.0-runtime.js'))html=html.replace('</body>','<script defer src="'+APP60+'"></script></body>');
   if(!html.includes('app-6.0-backend-compat.js'))html=html.replace('</body>','<script defer src="'+BACKEND_COMPAT+'"></script></body>');
   if(!html.includes('app-6.0-ui.js'))html=html.replace('</body>','<script defer src="'+UI60+'"></script></body>');
   if(!html.includes('app-6.0.1-fix.js'))html=html.replace('</body>','<script defer src="'+FIX601+'"></script></body>');
+  if(!html.includes('app-6.0.2-reminders.js'))html=html.replace('</body>','<script defer src="'+REM602+'"></script></body>');
   const headers=new Headers(response.headers);headers.set('content-type','text/html; charset=utf-8');headers.delete('content-length');
   return new Response(html,{status:response.status,statusText:response.statusText,headers});
 }
