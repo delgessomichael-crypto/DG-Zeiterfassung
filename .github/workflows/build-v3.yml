@@ -38,24 +38,7 @@ jobs:
           ]
           old_url = 'https://script.google.com/macros/s/AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc/exec'
           new_url = 'https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec'
-          guard = r'''/* DG 6.0.3 release guard: verhindert Versionsspruenge waehrend Altcode initialisiert. */
-(function(){
-'use strict';
-const V='6.0.3';
-let busy=false;
-function stamp(){
-  if(busy)return;busy=true;
-  try{
-    document.title='DG Zeiterfassung '+V;
-    document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim()))x.textContent='Version '+V;});
-    document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(x.textContent||''))x.textContent='Zeiterfassung - '+V;});
-    try{window.DG_APP_VERSION=V;window.DG_RELEASE=V;if(window.DG3)DG3.version=V;}catch(_e){}
-  }finally{busy=false;}
-}
-function boot(){stamp();const o=new MutationObserver(stamp);o.observe(document.documentElement,{subtree:true,childList:true,characterData:true});window.__DG603_RELEASE_OBSERVER=o;}
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
-})();'''
-          chunks = [guard]
+          chunks = []
           for name in files:
               p = Path(name)
               if not p.exists():
@@ -70,16 +53,16 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
                   text = text.replace("const V='6.0.2';", "const V='6.0.3';", 1)
               chunks.append(f'/* ===== SOURCE: {name} ===== */\n{text.rstrip()}\n;')
           out = '\n\n'.join(chunks) + '\n'
-          checks = {
-              'old Apps Script URL': old_url,
-              'deprecated compatibility layer': 'app-6.0-backend-compat.js',
-              'runtime 6.0 constant': "const V='6.0',VIEW=",
-              'UI 6.0.1 constant': "const V60='6.0.1';",
-              'patch 6.0.2 constant': "const V='6.0.2';",
-          }
-          for label, needle in checks.items():
+          forbidden = [
+              old_url,
+              'app-6.0-backend-compat.js',
+              "const V='6.0',VIEW=",
+              "const V60='6.0.1';",
+              "const V='6.0.2';",
+          ]
+          for needle in forbidden:
               if needle in out:
-                  raise SystemExit(label+' still present in production bundle')
+                  raise SystemExit('Forbidden legacy value in production bundle: '+needle)
           if new_url not in out:
               raise SystemExit('Current Apps Script URL missing from production bundle')
           Path('app-6.0.3.js').write_text(out, encoding='utf-8')
