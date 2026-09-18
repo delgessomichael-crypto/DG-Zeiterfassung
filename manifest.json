@@ -1,7 +1,7 @@
 {
   "id": "/DG-Zeiterfassung/",
-  "name": "DG Zeiterfassung 7.3",
-  "short_name": "DG 7.3",
+  "name": "DG Zeiterfassung 7.3.1",
+  "short_name": "DG 7.3.1",
   "description": "Mobile Zeiterfassung und Büro-App für Del Gesso Gebäudetechnik",
   "start_url": "./",
   "scope": "./",
