@@ -124,7 +124,7 @@ jobs:
           grep -q 'DG Zeiterfassung 7.3' manifest.json
           ! grep -q 'app-6.0-backend-compat.js' app-7.3.js
           ! grep -q 'new MutationObserver(stamp)' app-7.3.js
-      - name: Publish final DG 7.2.1 files
+      - name: Publish final DG 7.3 files
         run: |
           git config user.name 'DG Build'
           git config user.email 'build@users.noreply.github.com'
