@@ -116,9 +116,9 @@ jobs:
           test "$(grep -Eo '<script[^>]+src=["'"'][^"'"']*app-[^"'"']+\.js' index.html | wc -l)" -eq 1
           grep -q 'app-7.1.js' index.html
           grep -q 'DG Zeiterfassung 7.1' manifest.json
-          ! grep -q 'app-6.0-backend-compat.js' app-7.0.js
-          ! grep -q 'new MutationObserver(stamp)' app-7.0.js
-      - name: Publish final DG 7.0 files
+          ! grep -q 'app-6.0-backend-compat.js' app-7.1.js
+          ! grep -q 'new MutationObserver(stamp)' app-7.1.js
+      - name: Publish final DG 7.1 files
         run: |
           git config user.name 'DG Build'
           git config user.email 'build@users.noreply.github.com'
