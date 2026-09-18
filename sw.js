@@ -1,7 +1,13 @@
-const CACHE_NAME='dg-zeiterfassung-7-4-1-20260918-741-r1';
-const APP='./app-7.4.1.js?v=20260918-741-r1';
-const CSS='./app-5.0.css?v=20260918-741-r1';
-const APP_SHELL=['./','./index.html',APP,CSS,'./manifest.json','./dg_icon_192.png','./dg_icon_512.png'];
-self.addEventListener('install',e=>e.waitUntil((async()=>{const c=await caches.open(CACHE_NAME);await c.addAll(APP_SHELL);await self.skipWaiting();})()));
-self.addEventListener('activate',e=>e.waitUntil((async()=>{await Promise.all((await caches.keys()).filter(k=>k.startsWith('dg-zeiterfassung-')&&k!==CACHE_NAME).map(k=>caches.delete(k)));await self.clients.claim();})()));
-self.addEventListener('fetch',e=>{const u=new URL(e.request.url),base=new URL('./',self.location.href);if(e.request.method!=='GET'||u.origin!==base.origin||!u.pathname.startsWith(base.pathname))return;if(e.request.mode==='navigate'){e.respondWith((async()=>{try{const r=await fetch(e.request,{cache:'no-store'});if(r.ok){const c=await caches.open(CACHE_NAME);await c.put(new URL('./index.html',base).href,r.clone());}return r;}catch(_e){const c=await caches.open(CACHE_NAME);return await c.match(new URL('./index.html',base).href)||await c.match(new URL('./',base).href)||Response.error();}})());return;}if(!APP_SHELL.some(p=>new URL(p,base).href===u.href))return;e.respondWith((async()=>{const c=await caches.open(CACHE_NAME),hit=await c.match(e.request);if(hit)return hit;const r=await fetch(e.request,{cache:'no-store'});if(r.ok)await c.put(e.request,r.clone());return r;})());});
+/* DG Zeiterfassung CLEAN 7.4.2 - retirement service worker.
+   Entfernt alte DG-Caches und registriert sich danach selbst ab.
+   Die aktuelle App laedt nur die versionierte Clean Runtime direkt. */
+self.addEventListener('install',event=>{event.waitUntil(self.skipWaiting());});
+self.addEventListener('activate',event=>{
+  event.waitUntil((async()=>{
+    try{
+      const keys=await caches.keys();
+      await Promise.all(keys.filter(k=>k.startsWith('dg-zeiterfassung-')).map(k=>caches.delete(k)));
+    }catch(_e){}
+    try{await self.registration.unregister();}catch(_e){}
+  })());
+});
