@@ -20,12 +20,7 @@ function stamp(){
   }finally{stamping=false;}
 }
 
-function watchVersion(){
-  if(window.__dg602VersionWatch)return;
-  window.__dg602VersionWatch=true;
-  const obs=new MutationObserver(()=>stamp());
-  obs.observe(document.documentElement,{subtree:true,childList:true,characterData:true});
-}
+function watchVersion(){ /* CLEAN: kein globaler DOM-MutationObserver mehr */ }
 
 function css(){
   if(q('dg601Css'))return;
