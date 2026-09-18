@@ -119,19 +119,21 @@ jobs:
           Path('manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 
           # Service Worker bleibt bewusst im Retirement-Modus; keine Alt-Caches mehr.
-          Path('sw.js').write_text("""/* DG Zeiterfassung CLEAN - retirement service worker.
-   Alte DG-Caches werden entfernt; die aktuelle App laedt immer direkt die versionierte JS-Datei. */
-self.addEventListener('install',event=>{event.waitUntil(self.skipWaiting());});
-self.addEventListener('activate',event=>{
-  event.waitUntil((async()=>{
-    try{
-      const keys=await caches.keys();
-      await Promise.all(keys.filter(k=>k.startsWith('dg-zeiterfassung-')).map(k=>caches.delete(k)));
-    }catch(_e){}
-    try{await self.registration.unregister();}catch(_e){}
-  })());
-});
-""",encoding='utf-8')
+          retirement = (
+              "/* DG Zeiterfassung CLEAN - retirement service worker.\\n"
+              "   Alte DG-Caches werden entfernt; die aktuelle App laedt immer direkt die versionierte JS-Datei. */\\n"
+              "self.addEventListener('install',event=>{event.waitUntil(self.skipWaiting());});\\n"
+              "self.addEventListener('activate',event=>{\\n"
+              "  event.waitUntil((async()=>{\\n"
+              "    try{\\n"
+              "      const keys=await caches.keys();\\n"
+              "      await Promise.all(keys.filter(k=>k.startsWith('dg-zeiterfassung-')).map(k=>caches.delete(k)));\\n"
+              "    }catch(_e){}\\n"
+              "    try{await self.registration.unregister();}catch(_e){}\\n"
+              "  })());\\n"
+              "});\\n"
+          )
+          Path('sw.js').write_text(retirement,encoding='utf-8')
 
 
           PY
