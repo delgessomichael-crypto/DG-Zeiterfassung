@@ -1,7 +1,7 @@
-/* DG 7.3.5 FINAL - einheitlicher sichtbarer Versionsstand */
+/* DG 7.3.6 FINAL - einheitlicher sichtbarer Versionsstand */
 (function(){
 'use strict';
-const V='7.3.5';
+const V='7.3.6';
 function stamp(){
   if(document.title!=='DG Zeiterfassung '+V)document.title='DG Zeiterfassung '+V;
   document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim())&&x.textContent!=='Version '+V)x.textContent='Version '+V;});
@@ -3442,10 +3442,10 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 ;
 
 /* ===== CONSOLIDATED SOURCE: app-6.0-runtime.js ===== */
-/* DG Zeiterfassung 7.3.5 - konsolidierter Runtime-Layer */
+/* DG Zeiterfassung 7.3.6 - konsolidierter Runtime-Layer */
 (function(){
 'use strict';
-const V='7.3.5',VIEW='dg60_view',STATE='dg60_office_state',BACK='dg60_backend',BACK_TTL=1800000,OFFER_TTL=30000;
+const V='7.3.6',VIEW='dg60_view',STATE='dg60_office_state',BACK='dg60_backend',BACK_TTL=1800000,OFFER_TTL=30000;
 const q=id=>document.getElementById(id),esc60=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let offerAt=0,offerPromise=null;
 const parts=v=>String(v||'').split('.').map(x=>Number(x)||0);
@@ -3456,10 +3456,10 @@ function stamp(){document.title='DG Zeiterfassung '+V;document.querySelectorAll(
 function css(){if(q('dg60Css'))return;const s=document.createElement('style');s.id='dg60Css';s.textContent='.dg60-count{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;padding:0 7px;margin-left:7px;border-radius:999px;background:#e2e8f0;color:#334155;font-size:12px;font-weight:900}.dg60-rem-ok{margin-top:8px;padding:8px 10px;border-radius:10px;background:#f0fdf4;color:#166534;font-size:12px;font-weight:800}.dg60-rem-warn{margin-top:8px;padding:8px 10px;border-radius:10px;background:#fff7ed;color:#9a3412;font-size:12px;font-weight:800}#dg60OfficeToolbar{display:flex;justify-content:flex-end;margin:0 0 14px;padding:10px 12px;border:1px solid #d7dee8;border-radius:14px;background:#f8fafc}#dg60OpenWindow{border:0;border-radius:11px;padding:11px 16px;background:#1f5f36;color:#fff;font-weight:800;cursor:pointer}@media(max-width:700px){#dg60OpenWindow{width:100%}}';document.head.appendChild(s);}
 
 /* Ein Backend-Ping hoechstens alle 30 Minuten. 5.2.0.8 bleibt waehrend der Umstellung kompatibel. */
-window.d3CheckBackend=d3CheckBackend=async function(force){if(!force){try{const c=JSON.parse(sessionStorage.getItem(BACK)||'null');if(c&&backendOk(c.version)&&Date.now()-Number(c.ts||0)<BACK_TTL){DG3.backend=String(c.version);if(backend60(c.version))q('d3Notice')?.remove();else if(typeof d3Notice==='function')d3Notice('App 7.3.5: Google-GS 7.3.5 bitte noch bereitstellen. Aktuell '+c.version+'.','warn');return true;}}catch(_e){}}try{const r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'ping',clientVersion:V})});if(!r.ok)throw new Error('HTTP '+r.status);const raw=JSON.parse(await r.text());if(!raw.ok)throw new Error(raw.error||'Serverfehler.');const data=raw.data!==undefined?raw.data:raw,found=String(data&&data.version||'');DG3.backend=backendOk(found)?found:'';if(!DG3.backend){d3Notice('App 7.3.5 benötigt Google-GS 7.3.5. Gefunden: '+(found||'unbekannt')+'.','warn');return false;}sessionStorage.setItem(BACK,JSON.stringify({ts:Date.now(),version:found}));if(backend60(found))q('d3Notice')?.remove();else d3Notice('App 7.3.5: Google-GS 7.3.5 bitte noch bereitstellen. Aktuell '+found+'.','warn');return true;}catch(e){DG3.backend='';if(typeof d3Notice==='function')d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}};
+window.d3CheckBackend=d3CheckBackend=async function(force){if(!force){try{const c=JSON.parse(sessionStorage.getItem(BACK)||'null');if(c&&backendOk(c.version)&&Date.now()-Number(c.ts||0)<BACK_TTL){DG3.backend=String(c.version);if(backend60(c.version))q('d3Notice')?.remove();else if(typeof d3Notice==='function')d3Notice('App 7.3.6: Google-GS 7.3.6 bitte noch bereitstellen. Aktuell '+c.version+'.','warn');return true;}}catch(_e){}}try{const r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'ping',clientVersion:V})});if(!r.ok)throw new Error('HTTP '+r.status);const raw=JSON.parse(await r.text());if(!raw.ok)throw new Error(raw.error||'Serverfehler.');const data=raw.data!==undefined?raw.data:raw,found=String(data&&data.version||'');DG3.backend=backendOk(found)?found:'';if(!DG3.backend){d3Notice('App 7.3.6 benötigt Google-GS 7.3.6. Gefunden: '+(found||'unbekannt')+'.','warn');return false;}sessionStorage.setItem(BACK,JSON.stringify({ts:Date.now(),version:found}));if(backend60(found))q('d3Notice')?.remove();else d3Notice('App 7.3.6: Google-GS 7.3.6 bitte noch bereitstellen. Aktuell '+found+'.','warn');return true;}catch(e){DG3.backend='';if(typeof d3Notice==='function')d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}};
 
-/* Zentraler Transport 7.3.5: Request-Deduplizierung bleibt erhalten. */
-window.d3Api=d3Api=async function(payload){const action=String(payload&&payload.action||''),read=/^(get|check)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload||{});if(read&&DG3.reads.has(key))return DG3.reads.get(key);const run=(async()=>{if(action!=='ping'&&!backendOk(DG3.backend)){if(!await d3CheckBackend())throw dgError('Google-Backend 7.3.5 noch nicht bereitgestellt.','version');}if(!read)DG3.pending++;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);try{let response;try{response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({},payload,{clientVersion:V})),signal:controller.signal});}catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Anlegen zuerst Daten neu laden.':'Keine Serververbindung.','network');}if(!response.ok)throw dgError('HTTP '+response.status,'network');let data;try{data=JSON.parse(await response.text());}catch(_e){throw dgError('Ungültige Serverantwort.','server');}if(!data.ok)throw dgError(data.error||'Serverfehler.','server');return data.data!==undefined?data.data:data;}finally{clearTimeout(timer);if(!read)DG3.pending--;}})();if(read)DG3.reads.set(key,run);try{return await run;}finally{if(read&&DG3.reads.get(key)===run)DG3.reads.delete(key);}};
+/* Zentraler Transport 7.3.6: Request-Deduplizierung bleibt erhalten. */
+window.d3Api=d3Api=async function(payload){const action=String(payload&&payload.action||''),read=/^(get|check)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload||{});if(read&&DG3.reads.has(key))return DG3.reads.get(key);const run=(async()=>{if(action!=='ping'&&!backendOk(DG3.backend)){if(!await d3CheckBackend())throw dgError('Google-Backend 7.3.6 noch nicht bereitgestellt.','version');}if(!read)DG3.pending++;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);try{let response;try{response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({},payload,{clientVersion:V})),signal:controller.signal});}catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Anlegen zuerst Daten neu laden.':'Keine Serververbindung.','network');}if(!response.ok)throw dgError('HTTP '+response.status,'network');let data;try{data=JSON.parse(await response.text());}catch(_e){throw dgError('Ungültige Serverantwort.','server');}if(!data.ok)throw dgError(data.error||'Serverfehler.','server');return data.data!==undefined?data.data:data;}finally{clearTimeout(timer);if(!read)DG3.pending--;}})();if(read)DG3.reads.set(key,run);try{return await run;}finally{if(read&&DG3.reads.get(key)===run)DG3.reads.delete(key);}};
 
 /* Angebote: kein automatischer Dreifach-Reload beim Start; Zaehler nur bei sichtbarem Bereich/Mutation. */
 function offerBtn(id){return document.querySelector('#d3Offers .d3-menu [data-panel="'+id+'"]');}
@@ -3472,7 +3472,7 @@ window.d3OfferCreated=function(offerId){const r=d3Offer(offerId);d3Form('Angebot
 window.loadOffers=async function(stage='Offen'){const id=stage==='Offen'?'d3OfferOpen':stage==='Zu erstellen'?'d3OfferCreate':'d3OfferArchive';setMessage(id+'Status','Angebote werden geladen ...','info');try{const jobs=[api(chefPayload({action:'getOfferReports',stage}))];if(stage==='Offen')jobs.push(api(chefPayload({action:'getOfferReminders',includeDone:false})));const got=await Promise.all(jobs),rows=got[0]||[],rems=got[1]||[],by={};rems.forEach(x=>{if(x&&x.offerId)by[x.offerId]=x;});DG3.offers=DG3.offers||{};DG3.offers[stage]=rows;q(id+'List').innerHTML=rows.map((r,i)=>{let buttons='';if(stage==='Offen')buttons=d3Button('Angenommen','d3OfferDecision',[r.offerId,true],'success')+d3Button('Abgelehnt','d3OfferDecision',[r.offerId,false],'secondary')+d3Button('Zu „Angebote zu erstellen“','d3MoveOfferBackToCreate',[r.offerId],'danger');if(stage==='Zu erstellen')buttons=d3Button('Angebot erstellt','d3OfferCreated',[r.offerId],'success')+d3Button('Auftrag entfernen','d3DiscardOffer',[r.offerId],'danger');const rem=stage==='Offen'?by[r.offerId]:null,due=rem&&rem.dueDate?(typeof formatDateDE==='function'?formatDateDE(rem.dueDate):rem.dueDate):'',ri=stage!=='Offen'?'':rem?'<div class="dg60-rem-ok">Reminder verknüpft · fällig '+esc60(due)+'</div>':'<div class="dg60-rem-warn">⚠ Kein offener Reminder verknüpft.</div>';return '<div class="report-card'+(i%2?' d3-alt':'')+'"><strong>'+esc(r.customer)+'</strong><div class="report-meta">'+esc(r.status)+' - '+Number(r.reportCount||0)+' Berichte - '+formatHours(r.totalHours)+' Std.</div><div>'+esc(r.description||'')+'</div>'+((r.reports||[]).length?'<details><summary>Einzelberichte anzeigen</summary>'+r.reports.map(d3Single).join('')+'</details>':'<div class="muted small">Angebot ohne bereits erfasste Arbeitszeit.</div>')+ri+'<div class="report-actions">'+buttons+'</div></div>';}).join('')||'Keine Angebote vorhanden.';setMessage(id+'Status',rows.length+' Angebot(e) geladen.','ok');offerAt=Date.now();if(stage==='Offen')offerCount('d3OfferOpen','Offene Angebote',rows.length);if(stage==='Zu erstellen'){offerCount('d3OfferCreate','Angebote zu erstellen',rows.length);if(typeof d3Count==='function')d3Count('offers',rows.length);relabelOffers();}if(stage==='Archiv')offerCount('d3OfferArchive','Angebotsarchiv',rows.length);}catch(e){setMessage(id+'Status',e.message,'error');}};
 ['d3OfferDecision','d3DiscardOffer','d3ReminderDecision'].forEach(name=>{const old=window[name];if(typeof old!=='function')return;window[name]=async function(){const r=await old.apply(this,arguments);offerAt=0;await refreshOffers(true);return r;};});
 
-/* Regie: keine N+1-getObjectReports-Nachladung mehr. GS 7.3.5 liefert die Historie komplett. */
+/* Regie: keine N+1-getObjectReports-Nachladung mehr. GS 7.3.6 liefert die Historie komplett. */
 const oldSingle=window.d3Single;if(typeof oldSingle==='function')window.d3Single=d3Single=function(r){let html=oldSingle(r);if(String(r&&r.status||'')!=='Abgerechnet'||/Bereits abgerechnet/.test(html))return html;return html.replace('</div>','<div class="muted small" style="margin-top:4px;font-weight:800">✓ Bereits abgerechnet'+(r&&r.billedAt?' · '+esc(r.billedAt):'')+'</div></div>');};
 function regieRoot(view){return q(view==='Laufend'?'d3RunningList':'regieResult');}
 window.requestMergeSelectedRegieReports=async function(view){const v=view||((DG3&&DG3.active)||'Abgeschlossen'),root=regieRoot(v);if(!root)return false;const boxes=[...root.querySelectorAll('.regie-merge-select:checked')],ids=[...new Set(boxes.flatMap(x=>String(x.dataset.objectIds||'').split(',').map(s=>s.trim()).filter(Boolean)))];if(ids.length<2){alert('Bitte mindestens zwei Kundenkarten im aktuell geöffneten Bereich markieren.');return false;}if(!confirm('Die '+boxes.length+' markierten Kundenkarten wirklich zusammenführen?'))return false;try{d3Notice('Regieberichte werden zusammengeführt ...','info');await api(chefPayload({action:'mergeRegieObjects',objectIds:ids}));boxes.forEach(x=>x.checked=false);await loadRegieReports(v);if(typeof d3Dashboard==='function')await d3Dashboard(true);d3Notice('✓ Regieberichte wurden zusammengeführt.','ok');}catch(e){d3Notice(e.message,'error');}return false;};
@@ -3494,10 +3494,10 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 ;
 
 /* ===== CONSOLIDATED SOURCE: app-6.0.3-backend.js ===== */
-/* DG Zeiterfassung 7.3.5 - strikte, einheitliche Backend-Anbindung */
+/* DG Zeiterfassung 7.3.6 - strikte, einheitliche Backend-Anbindung */
 (function(){
 'use strict';
-const V='7.3.5',PREVIOUS=['7.3.5','7.3.4','7.3.3','7.3.2','7.3.1','7.3','7.2.1','7.2','7.1','7.0'],KEY='dg70_backend',TTL=5*60*1000;
+const V='7.3.6',PREVIOUS=['7.3.5','7.3.4','7.3.3','7.3.2','7.3.1','7.3','7.2.1','7.2','7.1','7.0'],KEY='dg70_backend',TTL=5*60*1000;
 const BACKEND_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
 function byId(id){return document.getElementById(id);}
 function exact(v){return String(v||'').trim()===V;}
@@ -3542,11 +3542,11 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 ;
 
 /* ===== CONSOLIDATED SOURCE: app-6.0-ui.js ===== */
-/* DG Zeiterfassung 7.3.5 - Monteur-Eingabe: Ja/Nein-Tasten und Sprache-zu-Text */
+/* DG Zeiterfassung 7.3.6 - Monteur-Eingabe: Ja/Nein-Tasten und Sprache-zu-Text */
 (function(){
 'use strict';
 
-const V60='7.3.5';
+const V60='7.3.6';
 let activeRecognition60=null;
 let activeSpeechTarget60='';
 let activeSpeechButton60=null;
@@ -3771,10 +3771,10 @@ setTimeout(install60,500);
 ;
 
 /* ===== CONSOLIDATED SOURCE: app-6.0.1-fix.js ===== */
-/* DG Zeiterfassung 7.3.5 - UI-Farben, Kalender-Refresh und zentraler Versionsstempel */
+/* DG Zeiterfassung 7.3.6 - UI-Farben, Kalender-Refresh und zentraler Versionsstempel */
 (function(){
 'use strict';
-const V='7.3.5';
+const V='7.3.6';
 const q=id=>document.getElementById(id);
 let stamping=false;
 
@@ -3839,10 +3839,10 @@ setTimeout(stamp,750);
 ;
 
 /* ===== CONSOLIDATED SOURCE: app-6.0.2-reminders.js ===== */
-/* DG Zeiterfassung 7.3.5 - Eigene Reminder mit Sprache, Bildern und Dateien */
+/* DG Zeiterfassung 7.3.6 - Eigene Reminder mit Sprache, Bildern und Dateien */
 (function(){
 'use strict';
-const V='7.3.5';
+const V='7.3.6';
 const $2=id=>document.getElementById(id);
 let ownSpeech=null;
 
@@ -3953,10 +3953,10 @@ setTimeout(install,100);setTimeout(install,600);setTimeout(install,1600);
 ;
 
 /* ===== CONSOLIDATED SOURCE: app-6.0.3-final.js ===== */
-/* DG Zeiterfassung 7.3.5 - finaler Produktions-Hardening-Layer */
+/* DG Zeiterfassung 7.3.6 - finaler Produktions-Hardening-Layer */
 (function(){
 'use strict';
-const V='7.3.5';
+const V='7.3.6';
 const BACKEND_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
 const TOKEN_KEY='dg_device_session';
 function $(id){return document.getElementById(id);}
@@ -4017,7 +4017,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 ;
 
 /* ===== CONSOLIDATED SOURCE: app-6.0.3-reminder-notes.js ===== */
-/* DG Zeiterfassung 7.3.5 - Interne Notizen fuer eigene Reminder */
+/* DG Zeiterfassung 7.3.6 - Interne Notizen fuer eigene Reminder */
 (function(){
 'use strict';
 if(window.__dg603ReminderNotes)return;
@@ -5554,5 +5554,107 @@ function install735(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install735,0),{once:true});else setTimeout(install735,0);
 setTimeout(install735,700);
+})();
+;
+
+/* ===== CONSOLIDATED SOURCE: app-7.3.6-force-payroll.js ===== */
+/* DG Zeiterfassung 7.3.6 - Monatsabschluss manuell trotz gepruefter Auffaelligkeiten */
+(function(){
+'use strict';
+const V736='7.3.6';
+const byId736=id=>document.getElementById(id);
+
+function selected736(){
+  return {
+    year:Number(byId736('dg520Year')?.value||0),
+    month:Number(byId736('dg520Month')?.value||0)
+  };
+}
+function issueText736(a){
+  const e=Number(a?.summary?.errors||0),w=Number(a?.summary?.warnings||0);
+  return e+' Fehler / '+w+' ungeprüfte Hinweise';
+}
+function decorate736(a){
+  const out=byId736('dg520Result');if(!out||!a)return;
+  const completed=a?.state?.status==='Uebergeben'&&!a?.state?.changedSinceApproval;
+  let box=byId736('dg736ForceBox');
+  if(completed||a.canRelease){
+    if(box)box.remove();
+    return;
+  }
+  if(!box){
+    box=document.createElement('div');
+    box.id='dg736ForceBox';
+    box.className='status warn';
+    box.style.marginTop='14px';
+    out.appendChild(box);
+  }
+  box.innerHTML=
+    '<strong>Bewusste manuelle Freigabe möglich</strong><br>'+
+    'Wenn alle roten Einträge geprüft wurden und der Monatsabschluss trotzdem erfolgen soll, kann das Büro ihn bewusst freigeben. '+
+    'Die Freigabe wird mit Benutzer, Zeitpunkt, Grund und Anzahl der verbleibenden Auffälligkeiten protokolliert.'+
+    '<div class="button-row" style="margin-top:10px">'+
+      '<button class="btn danger" type="button" onclick="return dg736ForceRelease()">Alles überprüft – trotzdem freigeben</button>'+
+    '</div>';
+}
+const renderBase736=window.renderAudit520;
+if(typeof renderBase736==='function')window.renderAudit520=renderAudit520=function(a){
+  const r=renderBase736.apply(this,arguments);
+  try{decorate736(a);}catch(_e){}
+  return r;
+};
+
+window.dg736ForceRelease=dg736ForceRelease=function(){
+  const q=selected736(),a=window.currentAudit520||currentAudit520;
+  if(!(q.year>0&&q.month>=1&&q.month<=12)){setMessage('dg520Status','Bitte Jahr und Monat prüfen.','error');return false;}
+  if(!a){setMessage('dg520Status','Bitte zuerst „Monat jetzt prüfen“ ausführen.','error');return false;}
+  if(typeof d3Form!=='function')return false;
+  const count=issueText736(a);
+  d3Form('Alles geprüft – trotzdem freigeben',[
+    {name:'reason',label:'Grund / interner Prüfvermerk',type:'textarea',required:true}
+  ],{reason:'Alle angezeigten Auffälligkeiten wurden geprüft. Monatsabschluss wird bewusst trotz '+count+' freigegeben.'},async v=>{
+    const ok=confirm(
+      'Monatsabschluss wirklich trotz verbleibender Auffälligkeiten freigeben?\n\n'+
+      count+'\n\n'+
+      'Diese Entscheidung wird protokolliert.'
+    );
+    if(!ok)throw new Error('Freigabe abgebrochen.');
+    setMessage('dg520Status','Manuelle Freigabe wird gespeichert ...','info');
+    const r=await api(chefPayload({
+      action:'forceCompletePayrollCycle',
+      year:q.year,
+      month:q.month,
+      reason:String(v.reason||'').trim()
+    }));
+    currentAudit520=r.audit||a;
+    try{renderAudit520(currentAudit520);}catch(_e){}
+    setMessage(
+      'dg520Status',
+      '✓ Monatsabschluss wurde bewusst trotz Auffälligkeiten freigegeben und protokolliert.',
+      'ok'
+    );
+    try{if(typeof d3Dashboard==='function')await d3Dashboard(true);}catch(_e){}
+  });
+  return false;
+};
+
+function stamp736(){
+  try{
+    document.title='DG Zeiterfassung '+V736;
+    document.querySelectorAll('.login-card .muted.small').forEach(x=>{
+      if(/^Version\s+/i.test((x.textContent||'').trim()))x.textContent='Version '+V736;
+    });
+    document.querySelectorAll('.hero strong').forEach(x=>{
+      if(/Zeiterfassung/i.test(x.textContent||''))x.textContent='Zeiterfassung - '+V736;
+    });
+    window.DG_APP_VERSION=V736;window.DG_RELEASE=V736;if(window.DG3)DG3.version=V736;
+  }catch(_e){}
+}
+function install736(){
+  stamp736();
+  try{if(typeof currentAudit520!=='undefined'&&currentAudit520)decorate736(currentAudit520);}catch(_e){}
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install736,0),{once:true});else setTimeout(install736,0);
+setTimeout(install736,650);
 })();
 ;
