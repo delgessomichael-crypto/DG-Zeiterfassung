@@ -18,6 +18,7 @@ jobs:
           node --check app-7.4.2.js
           node --check sw.js
           grep -q 'retirement service worker' sw.js
+          grep -q 'retirement service worker' sw.js
           grep -q '20260918-742-clean2' sw.js
           grep -q 'app-7.4.2.js?v=20260918-742-clean2' index.html
           ! grep -q 'new MutationObserver(stamp)' app-7.4.2.js
