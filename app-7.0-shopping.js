@@ -1,8 +1,8 @@
-/* DG Zeiterfassung 7.0 - Einkaufsliste + Angebotskachel-Navigation */
+/* DG Zeiterfassung 7.1 - Einkaufsliste + Angebotskachel-Navigation */
 (function(){
 'use strict';
 
-const STORE='dg70_shopping_lists_v1';
+const STORE='dg71_shopping_lists_v1';
 const q=id=>document.getElementById(id);
 const esc70=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let shopRecognition=null;
@@ -137,18 +137,18 @@ window.dg70ShopSpeech=function(){
   if(shopRecognition){stopSpeech70();setSpeechState70(false,'Aufnahme beendet.');return;}
   if(!C){setSpeechState70(false,'Spracheingabe wird von diesem Browser nicht unterstützt. Bitte Chrome oder Edge verwenden.');return;}
   normalizeTextarea70(ta);
-  const rec=new C();shopRecognition=rec;rec.lang='de-DE';rec.continuous=true;rec.interimResults=true;rec.maxAlternatives=1;
+  const rec=new C();shopRecognition=rec;rec.lang='de-DE';rec.continuous=true;rec.interimResults=false;rec.maxAlternatives=1;
+  const processed=new Set();let lastFinal='',lastFinalAt=0;
   rec.onstart=()=>setSpeechState70(true,'Aufnahme läuft – für jeden Materialposten kurz eine Sprechpause machen.');
   rec.onresult=e=>{
-    const finals=[];
     for(let i=e.resultIndex;i<e.results.length;i++){
-      if(!e.results[i].isFinal)continue;
-      const t=cleanLine70(e.results[i][0]&&e.results[i][0].transcript);
-      if(t)finals.push(t);
-    }
-    if(finals.length){
-      const existing=lines70(ta.value);
-      ta.value=existing.concat(finals).map(x=>'- '+x).join('\n');
+      const result=e.results[i];if(!result||!result.isFinal)continue;
+      const t=cleanLine70(result[0]&&result[0].transcript),n=String(t||'').toLowerCase().replace(/\\s+/g,' ').trim(),key=String(i)+'|'+n;
+      if(!n||processed.has(key))continue;processed.add(key);
+      const now=Date.now();if(n===lastFinal&&now-lastFinalAt<3500)continue;lastFinal=n;lastFinalAt=now;
+      const existing=lines70(ta.value),last=String(existing[existing.length-1]||'').toLowerCase().replace(/\\s+/g,' ').trim();
+      if(last===n)continue;
+      ta.value=existing.concat([t]).map(x=>'- '+x).join('\n');
       ta.scrollTop=ta.scrollHeight;
       ta.dispatchEvent(new Event('input',{bubbles:true}));
     }
