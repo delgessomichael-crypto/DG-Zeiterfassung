@@ -219,6 +219,18 @@ function wrap(){
     window.__DG80_BOSS_WRAP=true;const base=window.loadBossMonth;
     window.loadBossMonth=async function(){const r=await base.apply(this,arguments);await refreshBossMonthState();return r;};
   }
+  if(!window.__DG80_SHOW_BOSS_WRAP&&typeof window.showBoss==='function'){
+    window.__DG80_SHOW_BOSS_WRAP=true;const base=window.showBoss;
+    window.showBoss=function(){const r=base.apply(this,arguments);setTimeout(()=>{install();refreshTopTile();refreshBossMonthState();refreshPayrollSection();},80);return r;};
+  }
+  if(!window.__DG80_DASH_WRAP&&typeof window.d3Dashboard==='function'){
+    window.__DG80_DASH_WRAP=true;const base=window.d3Dashboard;
+    window.d3Dashboard=async function(){const r=await base.apply(this,arguments);await refreshTopTile();return r;};
+  }
+  if(!window.__DG80_OFFICE_WRAP&&typeof window.d3InstallOffice==='function'){
+    window.__DG80_OFFICE_WRAP=true;const base=window.d3InstallOffice;
+    window.d3InstallOffice=function(){const r=base.apply(this,arguments);setTimeout(()=>{install();refreshTopTile();refreshBossMonthState();refreshPayrollSection();},50);return r;};
+  }
 }
 function observe(){
   const out=$('dg520Result');if(!out||resultObserver)return;
