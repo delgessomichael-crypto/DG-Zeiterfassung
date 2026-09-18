@@ -3,20 +3,102 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DG Zeiterfassung 7.0 Reparatur</title>
-<style>body{font-family:Arial,Helvetica,sans-serif;background:#f3f4f6;color:#111827;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}.card{width:min(620px,100%);background:#fff;border-radius:18px;padding:26px;box-shadow:0 12px 40px rgba(0,0,0,.15)}h1{margin:0 0 12px;color:#31589e}.ok{color:#166534;font-weight:800}.err{color:#991b1b;font-weight:800}.muted{color:#64748b}.btn{display:inline-block;margin-top:16px;padding:12px 16px;border-radius:10px;background:#31589e;color:#fff;text-decoration:none;font-weight:800}</style>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>DG Zeiterfassung 7.4.2 Reparatur-Anmeldung</title>
+<style>
+*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;background:#f3f4f6;color:#111827;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}.card{width:min(620px,100%);background:#fff;border-radius:18px;padding:26px;box-shadow:0 12px 40px rgba(0,0,0,.15)}h1{margin:0 0 8px;color:#31589e;font-size:28px}.muted{color:#64748b}.status{margin:14px 0;padding:11px 13px;border-radius:10px;font-weight:700}.info{background:#e0f2fe;color:#075985}.ok{background:#dcfce7;color:#166534}.err{background:#fee2e2;color:#991b1b}label{display:block;font-weight:800;margin:14px 0 6px}select,input{width:100%;padding:13px;border:1px solid #cbd5e1;border-radius:10px;font-size:17px}.btn{width:100%;margin-top:16px;padding:13px 16px;border:0;border-radius:10px;background:#31589e;color:#fff;font-weight:800;font-size:17px;cursor:pointer}.btn:disabled{opacity:.55;cursor:not-allowed}.small{font-size:13px}
+</style>
 </head>
-<body><div class="card"><h1>DG Zeiterfassung 7.0 wird neu gestartet</h1><div id="status">Alter App-Cache und Service Worker werden entfernt …</div><div class="muted" style="margin-top:10px">Arbeitszeit-, Auftrags- und Kundendaten werden nicht gelöscht.</div><a id="manual" class="btn" style="display:none" href="./?build=20260917-final3">App öffnen</a></div>
+<body>
+<div class="card">
+<h1>DG Zeiterfassung 7.4.2</h1>
+<div class="muted">Reparatur-Anmeldung ohne App-Script</div>
+<div id="cleanup" class="status info">Alte Service Worker und Caches werden entfernt …</div>
+<div id="backend" class="status info">Google-Backend wird geprüft …</div>
+<label for="employee">Mitarbeiter</label>
+<select id="employee" disabled><option value="">Mitarbeiter werden geladen …</option></select>
+<label for="pin">PIN</label>
+<input id="pin" type="password" inputmode="numeric" maxlength="10" autocomplete="current-password">
+<button id="login" class="btn" disabled>Anmelden und App öffnen</button>
+<div id="loginStatus"></div>
+<div class="muted small" style="margin-top:14px">Diese Seite löscht keine Arbeitszeiten, Aufträge oder Kundendaten. Sie entfernt nur Browser-Cache/Service-Worker und setzt die Anmeldung neu.</div>
+</div>
 <script>
-(async function(){
- const status=document.getElementById('status'),manual=document.getElementById('manual');
+(function(){
+'use strict';
+const URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
+const $=id=>document.getElementById(id);
+function status(id,text,kind){const e=$(id);e.className='status '+kind;e.textContent=text;}
+function esc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
+async function call(payload,timeout=25000){
+ const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),timeout);
  try{
-   if('serviceWorker' in navigator){const regs=await navigator.serviceWorker.getRegistrations();await Promise.all(regs.map(r=>r.unregister()));}
-   if('caches' in window){const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith('dg-zeiterfassung-')).map(k=>caches.delete(k)));}
-   try{['dg60_backend','dg602_backend','dg603_backend','dg70_backend','dg51_backend'].forEach(k=>sessionStorage.removeItem(k));sessionStorage.removeItem('dg_employee_pin');}catch(_e){}
-   try{localStorage.removeItem('dg_employee');localStorage.removeItem('dg_chef_access');localStorage.removeItem('dg_device_session');localStorage.removeItem('dg_employee_pin');}catch(_e){}
-   status.className='ok';status.textContent='Bereinigung abgeschlossen. DG Zeiterfassung 7.0 wird jetzt frisch geladen …';manual.style.display='inline-block';
-   setTimeout(()=>location.replace('./?build=20260917-final3&ts='+Date.now()),700);
- }catch(e){status.className='err';status.textContent='Bereinigung nicht vollständig: '+(e&&e.message?e.message:e);manual.style.display='inline-block';}
+   const r=await fetch(URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({},payload,{clientVersion:'7.4.2-repair'})),signal:ctl.signal,cache:'no-store'});
+   if(!r.ok)throw new Error('HTTP '+r.status);
+   const txt=await r.text();let j;try{j=JSON.parse(txt);}catch(_e){throw new Error('Backend antwortet nicht mit JSON.');}
+   if(!j.ok)throw new Error(j.error||'Serverfehler');
+   return j.data!==undefined?j.data:j;
+ }catch(e){if(e&&e.name==='AbortError')throw new Error('Zeitüberschreitung beim Google-Backend.');throw e;}
+ finally{clearTimeout(timer);}
+}
+async function clean(){
+ let regCount=0,cacheCount=0;
+ try{
+   if('serviceWorker' in navigator){
+     const regs=await navigator.serviceWorker.getRegistrations();regCount=regs.length;
+     await Promise.all(regs.map(r=>r.unregister()));
+   }
+   if('caches' in window){
+     const keys=await caches.keys();cacheCount=keys.length;
+     await Promise.all(keys.map(k=>caches.delete(k)));
+   }
+   try{['dg60_backend','dg602_backend','dg603_backend','dg70_backend','dg51_backend'].forEach(k=>sessionStorage.removeItem(k));}catch(_e){}
+   status('cleanup','✓ Browser bereinigt · '+regCount+' Service Worker · '+cacheCount+' Cache(s) entfernt','ok');
+ }catch(e){status('cleanup','Bereinigung teilweise fehlgeschlagen: '+(e.message||e),'err');}
+}
+async function employees(){
+ try{
+   const ping=await call({action:'ping'});
+   const version=String((ping&&ping.version)||'unbekannt');
+   const rows=await call({action:'getEmployees'});
+   if(!Array.isArray(rows)||!rows.length)throw new Error('Backend liefert keine aktiven Mitarbeiter.');
+   $('employee').innerHTML='<option value="">Bitte auswählen</option>'+rows.map(n=>'<option value="'+esc(n)+'">'+esc(n)+'</option>').join('');
+   $('employee').disabled=false;$('login').disabled=false;
+   status('backend','✓ Google-Backend erreichbar · Version '+version+' · '+rows.length+' Mitarbeiter geladen','ok');
+ }catch(e){
+   $('employee').innerHTML='<option value="">Mitarbeiter konnten nicht geladen werden</option>';
+   status('backend','Backend-Fehler: '+(e.message||e),'err');
+ }
+}
+async function login(){
+ const employee=$('employee').value,pin=$('pin').value;
+ if(!employee){status('loginStatus','Bitte Mitarbeiter auswählen.','err');return;}
+ if(!pin){status('loginStatus','Bitte PIN eingeben.','err');return;}
+ $('login').disabled=true;status('loginStatus','Anmeldung wird direkt beim Backend geprüft …','info');
+ try{
+   const res=await call({action:'employeeLogin',employee,pin,createDeviceSession:true});
+   localStorage.setItem('dg_employee',res.employee||employee);
+   localStorage.setItem('dg_chef_access',res.chefAccess?'1':'0');
+   if(res.deviceSessionToken){
+     localStorage.setItem('dg_device_session',res.deviceSessionToken);
+     sessionStorage.removeItem('dg_employee_pin');
+   }else{
+     localStorage.removeItem('dg_device_session');
+     sessionStorage.setItem('dg_employee_pin',pin);
+   }
+   $('pin').value='';
+   status('loginStatus','✓ Anmeldung erfolgreich. App wird frisch geöffnet …','ok');
+   setTimeout(()=>location.replace('./?repair=742-'+Date.now()),500);
+ }catch(e){
+   status('loginStatus','Anmeldung fehlgeschlagen: '+(e.message||e),'err');$('login').disabled=false;
+ }
+}
+$('login').addEventListener('click',login);
+$('pin').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();login();}});
+(async()=>{await clean();await employees();})();
 })();
-</script></body></html>
+</script>
+</body>
+</html>
