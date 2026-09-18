@@ -3684,10 +3684,10 @@ function startSpeech60(targetId,button){
   let hadFinal=false;
   const processed=new Set();
   let lastFinal='',lastFinalAt=0;
-  const normSpeech60=v=>String(v||'').toLowerCase().replace(/[^a-z0-9äöüß]+/gi,' ').trim().replace(/\\s+/g,' ');
+  const normSpeech60=v=>String(v||'').toLowerCase().replace(/[^a-z0-9äöüß]+/gi,' ').trim().replace(/\s+/g,' ');
   const appendUniqueSpeech60=(base,piece)=>{
     const cur=String(base||'').trimEnd(),p=String(piece||'').trim();if(!p)return cur;
-    const a=cur.split(/\\s+/),b=p.split(/\\s+/);let overlap=0,limit=Math.min(12,a.length,b.length);
+    const a=cur.split(/\s+/),b=p.split(/\s+/);let overlap=0,limit=Math.min(12,a.length,b.length);
     for(let n=1;n<=limit;n++){if(normSpeech60(a.slice(-n).join(' '))===normSpeech60(b.slice(0,n).join(' ')))overlap=n;}
     const rest=b.slice(overlap).join(' ');return rest?cur+(cur?' ':'')+rest:cur;
   };
@@ -4252,10 +4252,10 @@ window.dg70ShopSpeech=function(){
   rec.onresult=e=>{
     for(let i=e.resultIndex;i<e.results.length;i++){
       const result=e.results[i];if(!result||!result.isFinal)continue;
-      const t=cleanLine70(result[0]&&result[0].transcript),n=String(t||'').toLowerCase().replace(/\\s+/g,' ').trim(),key=String(i)+'|'+n;
+      const t=cleanLine70(result[0]&&result[0].transcript),n=String(t||'').toLowerCase().replace(/\s+/g,' ').trim(),key=String(i)+'|'+n;
       if(!n||processed.has(key))continue;processed.add(key);
       const now=Date.now();if(n===lastFinal&&now-lastFinalAt<3500)continue;lastFinal=n;lastFinalAt=now;
-      const existing=lines70(ta.value),last=String(existing[existing.length-1]||'').toLowerCase().replace(/\\s+/g,' ').trim();
+      const existing=lines70(ta.value),last=String(existing[existing.length-1]||'').toLowerCase().replace(/\s+/g,' ').trim();
       if(last===n)continue;
       ta.value=existing.concat([t]).map(x=>'- '+x).join('\n');
       ta.scrollTop=ta.scrollHeight;
