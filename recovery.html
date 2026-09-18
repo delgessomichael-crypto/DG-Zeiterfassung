@@ -83,11 +83,12 @@ async function login(){
    localStorage.setItem('dg_chef_access',res.chefAccess?'1':'0');
    if(res.deviceSessionToken){
      localStorage.setItem('dg_device_session',res.deviceSessionToken);
-     sessionStorage.removeItem('dg_employee_pin');
    }else{
      localStorage.removeItem('dg_device_session');
-     sessionStorage.setItem('dg_employee_pin',pin);
    }
+   // Für den Übergang in den alten Kern zusätzlich in dieser Browser-Sitzung behalten.
+   // Neuere Schichten verwenden weiterhin bevorzugt den Geräte-Token.
+   sessionStorage.setItem('dg_employee_pin',pin);
    $('pin').value='';
    status('loginStatus','✓ Anmeldung erfolgreich. App wird frisch geöffnet …','ok');
    setTimeout(()=>location.replace('./?repair=742-'+Date.now()),500);
