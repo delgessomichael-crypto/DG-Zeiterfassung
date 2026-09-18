@@ -1,4 +1,4 @@
-/* DG 7.4.0 CURRENT ONLY - zusammengefuehrter aktueller Stand */
+/* DG 7.4.1 CURRENT ONLY - zusammengefuehrter aktueller Stand */
 
 /* DG Zeiterfassung 7.3.3 - Mitarbeiterkalender: Abwesenheiten sichtbar, Buchung bleibt moeglich */
 (function(){
@@ -63,7 +63,7 @@ async function loadAvailability733(){
     decorate733();
   }catch(e){
     availability733=[];
-    const s=$733('dg62Status');if(s&&/Kalender synchronisiert/i.test(s.textContent||''))s.textContent='✓ Kalender synchronisiert. Abwesenheitsmarkierung benötigt Google-GS 7.4.0.';
+    const s=$733('dg62Status');if(s&&/Kalender synchronisiert/i.test(s.textContent||''))s.textContent='✓ Kalender synchronisiert. Abwesenheitsmarkierung benötigt Google-GS 7.4.1.';
   }
 }
 function statusForWorker733(date,id){
@@ -457,10 +457,10 @@ setTimeout(install735,700);
 })();
 
 
-/* DG Zeiterfassung 7.4.0 - bereinigte aktuelle Laufzeit ohne 7.3.x-Overlaykette */
+/* DG Zeiterfassung 7.4.1 - bereinigte aktuelle Laufzeit ohne 7.3.x-Overlaykette */
 (function(){
 'use strict';
-const V='7.4.0';
+const V='7.4.1';
 const $=id=>document.getElementById(id);
 let audit=null, payrollBusy=false;
 
