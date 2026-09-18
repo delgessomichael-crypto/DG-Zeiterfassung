@@ -1,4 +1,4 @@
-name: Build DG 7.2 Production
+name: Build DG 7.2.1 Production
 on:
   push:
     branches: ['main']
@@ -26,14 +26,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Build one verified DG 7.2 browser bundle
+      - name: Build one verified DG 7.2.1 browser bundle
         run: |
           python - <<'PY'
           from pathlib import Path
           import re, json
 
-          VERSION='7.2'
-          BUILD='20260918-72-r1'
+          VERSION='7.2.1'
+          BUILD='20260918-721-r1'
           OLD_URL='https://script.google.com/macros/s/AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc/exec'
           BACKEND_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec'
           sources=[
@@ -50,10 +50,10 @@ jobs:
           ]
 
           chunks=[]
-          release_guard=r'''/* DG 7.2 FINAL - einheitlicher sichtbarer Versionsstand */
+          release_guard=r'''/* DG 7.2.1 FINAL - einheitlicher sichtbarer Versionsstand */
           (function(){
           'use strict';
-          const V='7.2';
+          const V='7.2.1';
           function stamp(){
             if(document.title!=='DG Zeiterfassung '+V)document.title='DG Zeiterfassung '+V;
             document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim())&&x.textContent!=='Version '+V)x.textContent='Version '+V;});
