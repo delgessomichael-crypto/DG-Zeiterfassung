@@ -1,7 +1,7 @@
-/* DG Zeiterfassung 7.4.0 CLEAN - finale UI-Logik ohne Legacy-Overlays */
+/* DG Zeiterfassung 7.4.1 CLEAN - finale UI-Logik ohne Legacy-Overlays */
 (function(){
 'use strict';
-const V740='7.4.0';
+const V740='7.4.1';
 const $=id=>document.getElementById(id);
 const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
