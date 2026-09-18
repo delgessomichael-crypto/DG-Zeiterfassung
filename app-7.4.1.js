@@ -3240,7 +3240,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 /* DG Zeiterfassung 7.4.1 - strikte, einheitliche Backend-Anbindung */
 (function(){
 'use strict';
-const V='7.4.1',PREVIOUS=['7.4.0','7.3.7','7.3.6','7.3.5','7.3.4','7.3.3','7.3.2','7.3.1','7.3','7.2.1','7.2','7.1','7.0'],KEY='dg70_backend',TTL=5*60*1000;
+const V='7.4.1',PREVIOUS=['7.4.1','7.4.0','7.3.7','7.3.6','7.3.5','7.3.4','7.3.3','7.3.2','7.3.1','7.3','7.2.1','7.2','7.1','7.0'],KEY='dg70_backend',TTL=5*60*1000;
 const BACKEND_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
 function byId(id){return document.getElementById(id);}
 function exact(v){return String(v||'').trim()===V;}
@@ -4131,7 +4131,6 @@ if(typeof oldDash70==='function'&&!window.__dg70ShopDashWrapped){
 }
 window.addEventListener('storage',e=>{if(e.key===STORE){updateTile70();if(q('dg70ShopOverlay')&&q('dg70ShopOverlay').style.display!=='none')renderOverview70();}});
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install70,0),{once:true});else setTimeout(install70,0);
-setTimeout(install70,500);
 })();
 ;
 
@@ -4357,7 +4356,7 @@ window.d3ReminderDecision=async function(id,yes){
 ;
 
 /* ===== CONSOLIDATED SOURCE: app-7.4-current.js ===== */
-/* DG 7.4.1 CURRENT ONLY - zusammengefuehrter aktueller Stand */
+/* DG 7.4.2 CURRENT ONLY - zusammengefuehrter aktueller Stand */
 
 /* DG Zeiterfassung 7.3.3 - Mitarbeiterkalender: Abwesenheiten sichtbar, Buchung bleibt moeglich */
 (function(){
@@ -4422,7 +4421,7 @@ async function loadAvailability733(){
     decorate733();
   }catch(e){
     availability733=[];
-    const s=$733('dg62Status');if(s&&/Kalender synchronisiert/i.test(s.textContent||''))s.textContent='✓ Kalender synchronisiert. Abwesenheitsmarkierung benötigt Google-GS 7.4.1.';
+    const s=$733('dg62Status');if(s&&/Kalender synchronisiert/i.test(s.textContent||''))s.textContent='✓ Kalender synchronisiert. Abwesenheitsmarkierung benötigt Google-GS 7.4.2.';
   }
 }
 function statusForWorker733(date,id){
@@ -4477,7 +4476,7 @@ function addTrainingOption733(){
   const sel=$733('absenceType');if(!sel||[...sel.options].some(o=>o.value==='Schulung'))return;
   const o=document.createElement('option');o.value='Schulung';o.textContent='Schulung';sel.appendChild(o);
 }
-function stamp733(){ /* CLEAN 7.4.1: Versionsanzeige nur im aktuellen Runtime-Block */ }
+function stamp733(){ /* CLEAN 7.4.2: Versionsanzeige nur im aktuellen Runtime-Block */ }
 function install733(){css733();addTrainingOption733();ensureLegend733();decorate733();}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install733,0),{once:true});else setTimeout(install733,0);
 })();
@@ -4683,7 +4682,7 @@ window.saveAbsenceUi=saveAbsenceUi=async function(){
 const adminBase734=window.loadChefAdministration;
 if(typeof adminBase734==='function')window.loadChefAdministration=async function(){const r=await adminBase734.apply(this,arguments);setTimeout(()=>{ensureAbsenceUi734();refreshAbsence734(false);},0);return r;};
 
-function stamp734(){ /* CLEAN 7.4.1: Versionsanzeige nur im aktuellen Runtime-Block */ }
+function stamp734(){ /* CLEAN 7.4.2: Versionsanzeige nur im aktuellen Runtime-Block */ }
 function install734(){
   css734();ensureAbsenceUi734();
   const mode=byId734('dg734SicknessMode');if(mode&&!mode.dataset.manualListener734){mode.dataset.manualListener734='1';mode.addEventListener('change',()=>{mode.dataset.manual734='1';});}
@@ -4783,7 +4782,7 @@ function patchText735(){
   const h=byId735('dg734SickHint');
   if(h)h.textContent='Krankheit endet automatisch am eingetragenen Bis-Datum. Bei früherer Rückkehr „Gesund melden“ verwenden; ab dem Rückkehrdatum werden Arbeitsstunden wieder normal gezählt. Es wird keine Diagnose gespeichert.';
 }
-function stamp735(){ /* CLEAN 7.4.1: Versionsanzeige nur im aktuellen Runtime-Block */ }
+function stamp735(){ /* CLEAN 7.4.2: Versionsanzeige nur im aktuellen Runtime-Block */ }
 function install735(){
   patchText735();
   try{if(window.DG3&&DG3.active)patchRegieNotes735(DG3.active);}catch(_e){}
@@ -4792,10 +4791,10 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 
 
-/* DG Zeiterfassung 7.4.1 - bereinigte aktuelle Laufzeit ohne 7.3.x-Overlaykette */
+/* DG Zeiterfassung 7.4.2 - bereinigte aktuelle Laufzeit ohne 7.3.x-Overlaykette */
 (function(){
 'use strict';
-const V='7.4.1';
+const V='7.4.2';
 const $=id=>document.getElementById(id);
 let audit=null, payrollBusy=false;
 
@@ -4941,7 +4940,7 @@ async function completePayroll(force){
 const baseAudit=window.renderAudit520;
 if(typeof baseAudit==='function')window.renderAudit520=function(a){const r=baseAudit.apply(this,arguments);audit=a;decorateAudit(a);return r;};
 
-function observePayroll(){ /* CLEAN 7.4.1: kein dauerhafter DOM-Observer mehr */ }
+function observePayroll(){ /* CLEAN 7.4.2: kein dauerhafter DOM-Observer mehr */ }
 
 async function refreshCounters(){
   const a=typeof auth==='function'?auth():{},week=$('dg54WeekHours'),month=$('employeeTimeBank');
