@@ -5169,13 +5169,13 @@ function decorateAudit(a){
   paintDue();
   const out=$('dg520Result');if(!out)return;
   let row=[...out.children].filter(x=>x.classList?.contains('button-row')).pop();
-  if(row&&!row.dataset.dg74){
+  if(row){
     row.dataset.dg74='1';
     const completed=a?.state?.status==='Uebergeben'&&!a?.state?.changedSinceApproval;
     if(completed){
       row.innerHTML='<button class="btn success" type="button" disabled>✓ Monatsabschluss erfolgt</button><button class="btn secondary" type="button" onclick="return dg520SetState(\'Wieder geoeffnet\')">Monat wieder öffnen</button>';
     }else{
-      row.innerHTML='<button class="btn success" type="button" '+(a?.canRelease&&!a?.state?.changedSinceApproval?'':'disabled')+' id="dg74NormalClose">Monatsabschluss erfolgt</button><button class="btn danger" type="button" id="dg74ForceClose">Alles überprüft – trotzdem an Steuerberater übergeben</button>';
+      row.innerHTML='<button class="btn success" type="button" '+(a?.canRelease&&!a?.state?.changedSinceApproval?'':'disabled')+' id="dg74NormalClose">Monatsabschluss freigeben</button><button class="btn danger" type="button" id="dg74ForceClose">Trotz Meldungen abschließen</button><button class="btn primary" type="button" '+((a?.state?.status==='Freigegeben'&&!a?.state?.changedSinceApproval)?'':'disabled')+' onclick="return dg520SetState(\'Uebergeben\')">An Steuerberater übergeben</button>';
       $('dg74NormalClose')?.addEventListener('click',()=>completePayroll(false));
       $('dg74ForceClose')?.addEventListener('click',()=>completePayroll(true));
     }
@@ -5208,8 +5208,8 @@ async function completePayroll(force){
   };
   if(force){
     if(typeof d3Form!=='function')return false;
-    d3Form('Alles geprüft – trotzdem übergeben',[{name:'reason',label:'Prüfvermerk / Grund',type:'textarea',required:true}],{reason:'Alle angezeigten Auffälligkeiten wurden geprüft. Monatsabschluss wird bewusst trotzdem durchgeführt.'},async v=>{
-      if(!confirm('Monat wirklich trotz verbleibender Auffälligkeiten abschließen und an den Steuerberater übergeben?'))throw new Error('Freigabe abgebrochen.');
+    d3Form('Trotz Meldungen abschließen',[{name:'reason',label:'Prüfvermerk / Grund',type:'textarea',required:true}],{reason:'Alle angezeigten Auffälligkeiten wurden geprüft. Monatsabschluss wird bewusst trotz verbleibender Meldungen durchgeführt.'},async v=>{
+      if(!confirm('Monat wirklich trotz verbleibender Auffälligkeiten abschließen? Der Vorgang wird mit Begründung protokolliert.'))throw new Error('Freigabe abgebrochen.');
       await run(String(v.reason||'').trim());
     });
   }else{
@@ -5219,10 +5219,31 @@ async function completePayroll(force){
   return false;
 }
 
-const baseAudit=window.renderAudit520;
-if(typeof baseAudit==='function')window.renderAudit520=function(a){const r=baseAudit.apply(this,arguments);audit=a;decorateAudit(a);return r;};
+const baseRunAudit742=window.dg520RunAudit;
+if(typeof baseRunAudit742==='function'&&!window.__DG742_PAYROLL_AUDIT_WRAP){
+  window.__DG742_PAYROLL_AUDIT_WRAP=true;
+  window.dg520RunAudit=async function(){
+    const r=await baseRunAudit742.apply(this,arguments);
+    try{
+      const q=selectedPayroll();
+      audit=await api(chefPayload({action:'getMonthPayrollAudit',year:q.year,month:q.month}));
+      decorateAudit(audit);
+      paintDue();
+    }catch(e){
+      console.warn('DG 7.4.2 Payroll-Nachlauf',e);
+    }
+    return r;
+  };
+}
 
 function observePayroll(){ /* CLEAN 7.4.2: kein dauerhafter DOM-Observer mehr */ }
+function dg742PayrollRefreshNow(){
+  try{paintDue();}catch(_e){}
+  try{if(audit)decorateAudit(audit);}catch(_e){}
+}
+window.dg742PayrollRefreshNow=dg742PayrollRefreshNow;
+setTimeout(dg742PayrollRefreshNow,120);
+setTimeout(dg742PayrollRefreshNow,700);
 
 async function refreshCounters(){
   const a=typeof auth==='function'?auth():{},week=$('dg54WeekHours'),month=$('employeeTimeBank');
