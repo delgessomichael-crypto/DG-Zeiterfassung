@@ -13,6 +13,7 @@ on:
       - 'app-6.0.3-reminder-notes.js'
       - 'app-7.0-shopping.js'
       - 'app-7.2-fixes.js'
+      - 'app-7.2.1-offer-flow.js'
       - '.github/workflows/build-v3.yml'
 permissions:
   contents: write
@@ -47,6 +48,7 @@ jobs:
               'app-6.0.3-reminder-notes.js',
               'app-7.0-shopping.js',
               'app-7.2-fixes.js',
+              'app-7.2.1-offer-flow.js',
           ]
 
           chunks=[]
