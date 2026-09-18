@@ -66,5 +66,5 @@ window.d3ReminderDecision=async function(id,yes){
   return false;
 };
 
-try{window.DG_APP_VERSION=V;if(window.DG3)DG3.version=V;}catch(_e){}
+/* CLEAN: Versionsanzeige wird nur vom aktuellen Runtime-Block gesetzt. */
 })();
