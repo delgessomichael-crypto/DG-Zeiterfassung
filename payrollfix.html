@@ -47,7 +47,7 @@
 </div>
 <div class="hero">
 <img alt="Del Gesso Gebäudetechnik" class="logo" src="dg_icon_512.png"/>
-<div class="head-row"><div><strong>Zeiterfassung - 7.4.2</strong><br/><span id="employeeLabel"></span></div><button class="btn danger" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
+<div class="head-row"><div><strong>Zeiterfassung - 8.0</strong><br/><span id="employeeLabel"></span></div><button class="btn danger" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
 </div>
 <div class="tabs"><button class="tab active" id="employeeTab" onclick="showEmployee()">Mitarbeiter</button><button class="tab boss-tab" id="bossTab" onclick="showBoss()">Büro</button></div>
 <section id="employeeView">
@@ -246,8 +246,8 @@
 })();
 </script>
 
-<script defer src="./app-8.0.js?v=20260918-800-final1"></script>
-<script defer src="./payroll-hotfix-8.0.js?v=20260918-800-final1"></script>
+<script defer src="./app-8.0.js?v=20260918-800-final2"></script>
+<script defer src="./payroll-hotfix-8.0.js?v=20260918-800-final2"></script>
 <script>
 (function(){
 'use strict';
@@ -265,7 +265,7 @@ function esc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'
 async function direct(payload){
   var ctl=new AbortController(),timer=setTimeout(function(){ctl.abort();},25000);
   try{
-    var r=await fetch(BACKEND,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({},payload,{clientVersion:'7.4.2-index'})),signal:ctl.signal,cache:'no-store'});
+    var r=await fetch(BACKEND,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({},payload,{clientVersion:'8.0-index'})),signal:ctl.signal,cache:'no-store'});
     if(!r.ok)throw new Error('HTTP '+r.status);
     var txt=await r.text(),j;
     try{j=JSON.parse(txt);}catch(_e){throw new Error('Ungültige Backend-Antwort.');}
