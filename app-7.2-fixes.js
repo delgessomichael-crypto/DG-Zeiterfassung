@@ -53,7 +53,7 @@ window.applyDayStatus=function(status){
 const renderDay72Base=window.renderDay;
 if(typeof renderDay72Base==='function')window.renderDay=function(){
   const r=renderDay72Base.apply(this,arguments);
-  const rep=window.lastDayData&&lastDayData.statusReport;
+  const rep=(typeof lastDayData!=='undefined'&&lastDayData)?lastDayData.statusReport:null;
   if(rep&&q72('entries')){
     const h=Number(rep.hours||0);
     q72('entries').innerHTML='<div class="entry dg72-status-entry"><strong>'+esc72(rep.status||'Abwesenheit')+
@@ -74,7 +74,8 @@ window.dg72InspectionVisit=function(){
   const customer=String(q72('customer')?.value||'').trim();
   if(!customer){setMessage('entryStatus','Bitte mindestens Kunde / Baustelle auswählen oder eintragen.','error');return;}
   const rows=window.__dgCalendarEvents||[];
-  const event=rows.find(e=>String(e.id||'')===String(window.selectedCalendarEventId||''))||null;
+  const selectedId=(typeof selectedCalendarEventId!=='undefined'?selectedCalendarEventId:'')||'';
+  const event=rows.find(e=>String(e.id||'')===String(selectedId))||null;
   const currentText=String(q72('activity')?.value||'').trim();
   const prefill=currentText||String(event&&event.description||'').trim()||'Besichtigungstermin';
   const options=[0.5,1,1.5,2,2.5,3].map(v=>({value:String(v),label:String(v).replace('.',',')+' Std.'}));
@@ -97,7 +98,7 @@ window.dg72InspectionVisit=function(){
         start:String(q72('start')?.value||''),
         end:String(q72('end')?.value||''),
         vehicleUsed:true,
-        sourceCalendarEventId:window.selectedCalendarEventId||'',
+        sourceCalendarEventId:selectedId,
         event:event?{
           id:event.id||'',title:event.title||'',location:event.location||'',description:event.description||'',
           startDate:event.startDate||'',startTime:event.startTime||'',endDate:event.endDate||'',endTime:event.endTime||'',
@@ -107,7 +108,6 @@ window.dg72InspectionVisit=function(){
     };
     const res=await api(payload);
     if(typeof resetEntry==='function')resetEntry();
-    try{if(window.PERF)PERF.forceDay=true;}catch(_e){}
     if(typeof loadDay==='function')await loadDay(true);
     if(typeof loadCalendarEvents==='function')await loadCalendarEvents(true);
     setMessage('entryStatus','✓ Besichtigung übertragen. '+(typeof formatHours==='function'?formatHours(hours):hours)+' Std. wurden als Arbeitszeit gebucht; die Tätigkeitsnotiz wurde übernommen.','ok');
@@ -148,7 +148,7 @@ if(typeof bossRender72Base==='function')window.renderBossDayClosuresV48=function
 
 function install72(){
   css72();stamp72();wireInspection72();
-  if(window.lastDayData&&typeof window.applyDayStatus==='function')window.applyDayStatus(lastDayData.status||'Arbeiten');
+  if(typeof lastDayData!=='undefined'&&lastDayData&&typeof window.applyDayStatus==='function')window.applyDayStatus(lastDayData.status||'Arbeiten');
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install72,0),{once:true});else setTimeout(install72,0);
 setTimeout(install72,300);
