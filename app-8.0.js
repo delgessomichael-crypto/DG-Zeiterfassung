@@ -1695,7 +1695,7 @@ function d3Startup(){
     document.querySelectorAll('[onclick]').forEach(e=>{const x=e.getAttribute('onclick');if(x&&!x.startsWith('return ')&&/^[\w.$]+\([\s\S]*\)$/.test(x.trim()))e.setAttribute('onclick','return '+x);});
     init();
     DG3.ready=true;
-    setInterval(d3Sync,60000);
+    setInterval(d3Sync,300000);
     document.addEventListener('visibilitychange',()=>{if(!document.hidden)d3Sync();});
   }catch(e){
     console.error('DG Kernstart',e);
@@ -3314,8 +3314,8 @@ function installOpenDayPatch521(){
 
 function applyFixes521(){addCss521();ensureDeleteModal521();ensurePayrollTile521();fixMaintenanceAndAdmin521();installDayRenderer521();installOpenDayPatch521();}
 const oldInstallOffice521=window.d3InstallOffice;if(typeof oldInstallOffice521==='function')window.d3InstallOffice=function(){const r=oldInstallOffice521.apply(this,arguments);setTimeout(applyFixes521,0);return r};
-const observer521=new MutationObserver(()=>{ensurePayrollTile521();fixMaintenanceAndAdmin521();});
-function boot521(){applyFixes521();const root=q521('bossView');if(root)observer521.observe(root,{childList:true,subtree:true});setTimeout(applyFixes521,250);setTimeout(applyFixes521,1200);setInterval(ensurePayrollTile521,60000);document.title='DG Zeiterfassung '+V521;document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version '+V521});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - '+V521});try{if(window.DG3)DG3.version=V521;window.DG_APP_VERSION=V521}catch(_e){}}
+let observer521Timer=0;const observer521=new MutationObserver(()=>{clearTimeout(observer521Timer);observer521Timer=setTimeout(()=>{ensurePayrollTile521();fixMaintenanceAndAdmin521();},120);});
+function boot521(){applyFixes521();const root=q521('bossView');if(root)observer521.observe(root,{childList:true,subtree:true});setTimeout(applyFixes521,250);setTimeout(applyFixes521,1200);setInterval(ensurePayrollTile521,300000);document.title='DG Zeiterfassung '+V521;document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version '+V521});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - '+V521});try{if(window.DG3)DG3.version=V521;window.DG_APP_VERSION=V521}catch(_e){}}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot521);else boot521();
 })();
 
