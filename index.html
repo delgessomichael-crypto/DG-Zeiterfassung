@@ -245,5 +245,116 @@
   }catch(_e){}
 })();
 </script>
-<script defer src="./app-7.4.2.js?v=20260918-742-loginfix2"></script></body>
+
+<script defer src="./app-7.4.2.js?v=20260918-742-loginfix3"></script>
+<script>
+(function(){
+'use strict';
+var BACKEND='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
+window.__DG_INDEX_ERRORS=[];
+window.addEventListener('error',function(e){
+  try{window.__DG_INDEX_ERRORS.push(String((e&&e.message)||'Unbekannter JavaScript-Fehler'));}catch(_e){}
+});
+function el(id){return document.getElementById(id);}
+function msg(text,type){
+  var s=el('loginStatus');if(!s)return;
+  s.className='status '+(type||'info');s.textContent=text||'';
+}
+function esc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
+async function direct(payload){
+  var ctl=new AbortController(),timer=setTimeout(function(){ctl.abort();},25000);
+  try{
+    var r=await fetch(BACKEND,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({},payload,{clientVersion:'7.4.2-index'})),signal:ctl.signal,cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    var txt=await r.text(),j;
+    try{j=JSON.parse(txt);}catch(_e){throw new Error('Ungültige Backend-Antwort.');}
+    if(!j.ok)throw new Error(j.error||'Serverfehler.');
+    return j.data!==undefined?j.data:j;
+  }catch(e){
+    if(e&&e.name==='AbortError')throw new Error('Zeitüberschreitung beim Google-Backend.');
+    throw e;
+  }finally{clearTimeout(timer);}
+}
+async function loadEmployeesDirect(){
+  var sel=el('loginEmployee');if(!sel)return [];
+  try{
+    var rows=await direct({action:'getEmployees'});
+    if(!Array.isArray(rows)||!rows.length)throw new Error('Keine aktiven Mitarbeiter erhalten.');
+    sel.innerHTML='<option value="">Bitte auswählen</option>'+rows.map(function(n){return '<option value="'+esc(n)+'">'+esc(n)+'</option>';}).join('');
+    var current=localStorage.getItem('dg_employee')||'';
+    if(current&&rows.indexOf(current)!==-1)sel.value=current;
+    try{window.employeeDirectory=rows.slice();}catch(_e){}
+    return rows;
+  }catch(e){
+    sel.innerHTML='<option value="">Mitarbeiter konnten nicht geladen werden</option>';
+    msg('Mitarbeiter konnten nicht geladen werden: '+(e.message||e),'error');
+    return [];
+  }
+}
+function makeCoreReady(){
+  try{
+    if(typeof window.init==='function'&&!(window.DG3&&DG3.ready)){
+      window.init();
+      if(window.DG3)DG3.ready=true;
+    }
+  }catch(e){
+    console.warn('DG init fallback',e);
+  }
+}
+function enterMain(){
+  makeCoreReady();
+  try{
+    if(typeof window.openMain!=='function')throw new Error('Hauptansicht wurde nicht geladen.');
+    window.openMain();
+    var main=el('mainScreen'),login=el('loginScreen');
+    if(main)main.classList.remove('hidden');
+    if(login)login.classList.add('hidden');
+    return true;
+  }catch(e){
+    msg('App-Start nach Anmeldung fehlgeschlagen: '+(e.message||e)+(window.__DG_INDEX_ERRORS.length?' · JS: '+window.__DG_INDEX_ERRORS.slice(-1)[0]:''),'error');
+    return false;
+  }
+}
+async function directLogin(){
+  var sel=el('loginEmployee'),pinEl=el('loginPin');
+  var employee=sel?sel.value:'',pin=pinEl?pinEl.value:'';
+  if(!employee){msg('Bitte Mitarbeiter auswählen.','error');return false;}
+  if(!pin){msg('Bitte PIN eingeben.','error');return false;}
+  msg('Anmeldung wird geprüft ...','info');
+  try{
+    var res=await direct({action:'employeeLogin',employee:employee,pin:pin,createDeviceSession:true});
+    localStorage.setItem('dg_employee',res.employee||employee);
+    localStorage.setItem('dg_chef_access',res.chefAccess?'1':'0');
+    if(res.deviceSessionToken)localStorage.setItem('dg_device_session',res.deviceSessionToken);
+    // Wichtig: alter Kern liest beim Start noch diese Sitzungs-PIN.
+    sessionStorage.setItem('dg_employee_pin',pin);
+    if(pinEl)pinEl.value='';
+    if(!enterMain())return false;
+    msg('','');
+    return false;
+  }catch(e){
+    msg('Anmeldung fehlgeschlagen: '+(e.message||e),'error');
+    return false;
+  }
+}
+function install(){
+  loadEmployeesDirect();
+  var btn=[].slice.call(document.querySelectorAll('#loginScreen button')).find(function(b){return /Anmelden/i.test(b.textContent||'');});
+  if(btn&&!btn.dataset.dgIndexLogin){
+    btn.dataset.dgIndexLogin='1';
+    btn.addEventListener('click',function(e){e.preventDefault();e.stopImmediatePropagation();directLogin();},true);
+  }
+  var pin=el('loginPin');
+  if(pin&&!pin.dataset.dgIndexLogin){
+    pin.dataset.dgIndexLogin='1';
+    pin.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();e.stopImmediatePropagation();directLogin();}},true);
+  }
+  // Erfolgreiche Reparatur-Anmeldung direkt übernehmen.
+  var employee=localStorage.getItem('dg_employee')||'';
+  var sessionPin=sessionStorage.getItem('dg_employee_pin')||'';
+  if(employee&&sessionPin)setTimeout(enterMain,80);
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else setTimeout(install,0);
+})();
+</script></body>
 </html>
