@@ -99,7 +99,7 @@ jobs:
           forbidden=[OLD_URL,'app-6.0-backend-compat.js',"const V='6.0'", "const V='6.0.1'", "const V='6.0.2'", "const V='6.0.3'"]
           for needle in forbidden:
               if needle in bundle: raise SystemExit('Legacy production value still present: '+needle)
-          required=[BACKEND_URL,'saveOwnReminderInternalNote','d3OwnReminderNote','dg70ShoppingOpen','dg72InspectionVisit','d3OfferDecision','dg731CompletePayroll','renderPayrollCycle732','loadAvailability733','refreshAbsence734','refreshDue734','dg735Healthy','patchRegieNotes735','dg736ForceRelease','paintCorrectDue737','ensureForce737',"const V='7.3.7'"]
+          required=[BACKEND_URL,'saveOwnReminderInternalNote','d3OwnReminderNote','dg70ShoppingOpen','dg72InspectionVisit','d3OfferDecision','dg731CompletePayroll','renderPayrollCycle732','loadAvailability733','refreshAbsence734','refreshDue734','dg735Healthy','patchRegieNotes735','dg736ForceRelease','paintCorrectDue737','ensureForce737','dg738ForceRelease','ensurePayrollDisplay738',"const V='7.3.8'"]
           for needle in required:
               if needle not in bundle: raise SystemExit('Required DG 7.3.8 feature missing: '+needle)
           if 'new MutationObserver(stamp)' in bundle:
