@@ -86,7 +86,7 @@ jobs:
               if needle not in bundle: raise SystemExit('Required DG 7.2.1 feature missing: '+needle)
           if 'new MutationObserver(stamp)' in bundle:
               raise SystemExit('Unsafe recursive release observer detected')
-          Path('app-7.2.js').write_text(bundle,encoding='utf-8')
+          Path('app-7.2.1.js').write_text(bundle,encoding='utf-8')
 
           # index.html: nur EIN produktives App-Script laden.
           ip=Path('index.html');html=ip.read_text(encoding='utf-8')
@@ -96,14 +96,14 @@ jobs:
           html=re.sub(r'<script\b[^>]*\bsrc=["\'][^"\']*app-[^"\']+\.js[^"\']*["\'][^>]*>\s*</script>','',html,flags=re.I)
           html=re.sub(r'app-5\.0\.css\?v=[^"\']+','app-5.0.css?v='+BUILD,html)
           html=re.sub(r'sw\.js\?v=[^"\']+','sw.js?v='+BUILD,html)
-          html=html.replace('</body>','<script defer src="./app-7.2.js?v='+BUILD+'"></script></body>')
+          html=html.replace('</body>','<script defer src="./app-7.2.1.js?v='+BUILD+'"></script></body>')
           if len(re.findall(r'<script\b[^>]*\bsrc=["\'][^"\']*app-[^"\']+\.js',html,re.I))!=1:
               raise SystemExit('index.html must load exactly one external app JS')
-          if 'app-7.2.js?v='+BUILD not in html: raise SystemExit('DG 7.2 script missing in index')
+          if 'app-7.2.1.js?v='+BUILD not in html: raise SystemExit('DG 7.2.1 script missing in index')
           ip.write_text(html,encoding='utf-8')
 
           manifest={
-            'id':'/DG-Zeiterfassung/','name':'DG Zeiterfassung 7.2','short_name':'DG 7.2',
+            'id':'/DG-Zeiterfassung/','name':'DG Zeiterfassung 7.2.1','short_name':'DG 7.2.1',
             'description':'Mobile Zeiterfassung und Büro-App für Del Gesso Gebäudetechnik',
             'start_url':'./','scope':'./','display':'standalone','display_override':['standalone','minimal-ui'],
             'background_color':'#f3f4f6','theme_color':'#111827','prefer_related_applications':False,
@@ -112,7 +112,7 @@ jobs:
           }
           Path('manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 
-          sw=f'''const CACHE_NAME='dg-zeiterfassung-7-2-{BUILD}';\nconst APP='./app-7.2.js?v={BUILD}';\nconst CSS='./app-5.0.css?v={BUILD}';\nconst APP_SHELL=['./','./index.html',APP,CSS,'./manifest.json','./dg_icon_192.png','./dg_icon_512.png'];\nself.addEventListener('install',e=>e.waitUntil((async()=>{{const c=await caches.open(CACHE_NAME);await c.addAll(APP_SHELL);await self.skipWaiting();}})()));\nself.addEventListener('activate',e=>e.waitUntil((async()=>{{await Promise.all((await caches.keys()).filter(k=>k.startsWith('dg-zeiterfassung-')&&k!==CACHE_NAME).map(k=>caches.delete(k)));await self.clients.claim();}})()));\nself.addEventListener('fetch',e=>{{const u=new URL(e.request.url),base=new URL('./',self.location.href);if(e.request.method!=='GET'||u.origin!==base.origin||!u.pathname.startsWith(base.pathname))return;if(e.request.mode==='navigate'){{e.respondWith((async()=>{{try{{const r=await fetch(e.request,{{cache:'no-store'}});if(r.ok){{const c=await caches.open(CACHE_NAME);await c.put(new URL('./index.html',base).href,r.clone());}}return r;}}catch(_e){{const c=await caches.open(CACHE_NAME);return await c.match(new URL('./index.html',base).href)||await c.match(new URL('./',base).href)||Response.error();}}}})());return;}}if(!APP_SHELL.some(p=>new URL(p,base).href===u.href))return;e.respondWith((async()=>{{const c=await caches.open(CACHE_NAME),hit=await c.match(e.request);if(hit)return hit;const r=await fetch(e.request,{{cache:'no-store'}});if(r.ok)await c.put(e.request,r.clone());return r;}})());}});\n'''
+          sw=f'''const CACHE_NAME='dg-zeiterfassung-7-2-1-{BUILD}';\nconst APP='./app-7.2.1.js?v={BUILD}';\nconst CSS='./app-5.0.css?v={BUILD}';\nconst APP_SHELL=['./','./index.html',APP,CSS,'./manifest.json','./dg_icon_192.png','./dg_icon_512.png'];\nself.addEventListener('install',e=>e.waitUntil((async()=>{{const c=await caches.open(CACHE_NAME);await c.addAll(APP_SHELL);await self.skipWaiting();}})()));\nself.addEventListener('activate',e=>e.waitUntil((async()=>{{await Promise.all((await caches.keys()).filter(k=>k.startsWith('dg-zeiterfassung-')&&k!==CACHE_NAME).map(k=>caches.delete(k)));await self.clients.claim();}})()));\nself.addEventListener('fetch',e=>{{const u=new URL(e.request.url),base=new URL('./',self.location.href);if(e.request.method!=='GET'||u.origin!==base.origin||!u.pathname.startsWith(base.pathname))return;if(e.request.mode==='navigate'){{e.respondWith((async()=>{{try{{const r=await fetch(e.request,{{cache:'no-store'}});if(r.ok){{const c=await caches.open(CACHE_NAME);await c.put(new URL('./index.html',base).href,r.clone());}}return r;}}catch(_e){{const c=await caches.open(CACHE_NAME);return await c.match(new URL('./index.html',base).href)||await c.match(new URL('./',base).href)||Response.error();}}}})());return;}}if(!APP_SHELL.some(p=>new URL(p,base).href===u.href))return;e.respondWith((async()=>{{const c=await caches.open(CACHE_NAME),hit=await c.match(e.request);if(hit)return hit;const r=await fetch(e.request,{{cache:'no-store'}});if(r.ok)await c.put(e.request,r.clone());return r;}})());}});\n'''
           Path('sw.js').write_text(sw,encoding='utf-8')
           PY
           node --check app-7.2.js
