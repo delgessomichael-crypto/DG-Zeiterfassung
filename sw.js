@@ -1,5 +1,5 @@
-const CACHE_NAME='dg-zeiterfassung-7-2-1-20260918-73-r1';
-const APP='./app-7.2.1.js?v=20260918-73-r1';
+const CACHE_NAME='dg-zeiterfassung-7-3-20260918-73-r1';
+const APP='./app-7.3.js?v=20260918-73-r1';
 const CSS='./app-5.0.css?v=20260918-73-r1';
 const APP_SHELL=['./','./index.html',APP,CSS,'./manifest.json','./dg_icon_192.png','./dg_icon_512.png'];
 self.addEventListener('install',e=>e.waitUntil((async()=>{const c=await caches.open(CACHE_NAME);await c.addAll(APP_SHELL);await self.skipWaiting();})()));
