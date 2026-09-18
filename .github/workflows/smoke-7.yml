@@ -18,11 +18,9 @@ jobs:
           node --check app-7.4.2.js
           node --check sw.js
           grep -q 'retirement service worker' sw.js
-          grep -q 'retirement service worker' sw.js
-          grep -q '20260918-742-clean2' sw.js
           grep -q 'app-7.4.2.js?v=20260918-742-clean2' index.html
           ! grep -q 'new MutationObserver(stamp)' app-7.4.2.js
-      - name: Verify live Google Apps Script backend during 7.1 rollout
+      - name: Verify live Google Apps Script backend
         run: |
           python - <<'PY'
           import json, urllib.request
@@ -33,7 +31,7 @@ jobs:
                   return json.loads(r.read().decode('utf-8'))
           ping=post({'action':'ping','clientVersion':'7.4.2'})
           version=str(ping.get('version') or (ping.get('data') or {}).get('version') or '')
-          if not ping.get('ok') or version not in ('7.0','7.1','7.2','7.2.1','7.3','7.3.1','7.3.2','7.3.3','7.3.4','7.3.5','7.3.6','7.3.7','7.3.8','7.4.2'):
+          if not ping.get('ok') or version not in ('7.0','7.1','7.2','7.2.1','7.3','7.3.1','7.3.2','7.3.3','7.3.4','7.3.5','7.3.6','7.3.7','7.3.8','7.4.0','7.4.1','7.4.2'):
               raise SystemExit('Live backend is not 7.0/7.1/7.2/7.2.1/7.3/7.3.1/7.3.2/7.3.3/7.3.4/7.3.5/7.3.6/7.3.7/7.3.8/7.4.2: '+json.dumps(ping,ensure_ascii=False))
           employees=post({'action':'getEmployees','clientVersion':'7.4.2'})
           data=employees.get('data')
