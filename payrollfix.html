@@ -11,11 +11,15 @@
 <meta http-equiv="Expires" content="0"/>
 <meta content="DG Zeiterfassung" name="application-name"/>
 <meta content="yes" name="mobile-web-app-capable"/>
-<link href="manifest.json" rel="manifest"/>
+<link rel="preconnect" href="https://script.google.com"/>
+<link rel="dns-prefetch" href="//script.google.com"/>
+<link rel="preload" href="./app-5.0.css?v=20260918-800-prod1" as="style"/>
+<link rel="preload" href="./app-8.0.js?v=20260918-800-prod1" as="script"/>
+<link rel="manifest" href="manifest.json"/>
 <link href="dg_icon_192.png" rel="icon"/>
 <link href="dg_icon_192.png" rel="apple-touch-icon"/>
 <title>DG Zeiterfassung 8.0 Payroll Fix</title>
-<link href="./app-5.0.css?v=20260918-742-clean2" rel="stylesheet"/></head>
+<link href="./app-5.0.css?v=20260918-800-prod1" rel="stylesheet"/></head>
 <body>
 <div class="screen" id="loginScreen">
 <div class="login-wrap">
@@ -231,24 +235,18 @@
 </div>
 <script>
 (function(){
-  try{
-    if('serviceWorker' in navigator){
-      navigator.serviceWorker.getRegistrations().then(function(rs){
-        return Promise.all(rs.filter(function(r){return r.scope.indexOf('/DG-Zeiterfassung/')!==-1;}).map(function(r){return r.unregister();}));
-      }).catch(function(){});
-    }
-    if('caches' in window){
-      caches.keys().then(function(keys){
-        return Promise.all(keys.filter(function(k){return k.indexOf('dg-zeiterfassung-')===0;}).map(function(k){return caches.delete(k);}));
-      }).catch(function(){});
-    }
-  }catch(_e){}
+  if(!('serviceWorker' in navigator))return;
+  window.addEventListener('load',function(){
+    navigator.serviceWorker.register('./sw-8.0-prod.js?v=20260918-800-prod1',{updateViaCache:'none'})
+      .then(function(r){return r.update();})
+      .catch(function(e){console.warn('DG Offline-Cache nicht bereit',e);});
+  },{once:true});
 })();
 </script>
 
-<script defer src="./app-8.0.js?v=20260918-800-final2"></script>
-<script defer src="./payroll-hotfix-8.0.js?v=20260918-800-authfix1"></script>
-<script defer src="./ui-hotfix-8.0.js?v=20260918-800-ui1"></script>
+<script defer src="./app-8.0.js?v=20260918-800-prod1"></script>
+<script defer src="./payroll-hotfix-8.0.js?v=20260918-800-prod1"></script>
+<script defer src="./ui-hotfix-8.0.js?v=20260918-800-prod1"></script>
 <script>
 (function(){
 'use strict';
@@ -279,15 +277,27 @@ async function direct(payload){
 }
 async function loadEmployeesDirect(){
   var sel=el('loginEmployee');if(!sel)return [];
+  var cachedRows=[];
+  try{
+    var cached=JSON.parse(localStorage.getItem('dg80_employee_cache')||'null');
+    if(cached&&Array.isArray(cached.rows)&&cached.rows.length&&Date.now()-Number(cached.ts||0)<86400000){
+      cachedRows=cached.rows.slice();
+      sel.innerHTML='<option value="">Bitte auswählen</option>'+cachedRows.map(function(n){return '<option value="'+esc(n)+'">'+esc(n)+'</option>';}).join('');
+      var current0=localStorage.getItem('dg_employee')||'';
+      if(current0&&cachedRows.indexOf(current0)!==-1)sel.value=current0;
+    }
+  }catch(_e){}
   try{
     var rows=await direct({action:'getEmployees'});
     if(!Array.isArray(rows)||!rows.length)throw new Error('Keine aktiven Mitarbeiter erhalten.');
     sel.innerHTML='<option value="">Bitte auswählen</option>'+rows.map(function(n){return '<option value="'+esc(n)+'">'+esc(n)+'</option>';}).join('');
     var current=localStorage.getItem('dg_employee')||'';
     if(current&&rows.indexOf(current)!==-1)sel.value=current;
+    try{localStorage.setItem('dg80_employee_cache',JSON.stringify({ts:Date.now(),rows:rows}));}catch(_e){}
     try{window.employeeDirectory=rows.slice();}catch(_e){}
     return rows;
   }catch(e){
+    if(cachedRows.length)return cachedRows;
     sel.innerHTML='<option value="">Mitarbeiter konnten nicht geladen werden</option>';
     msg('Mitarbeiter konnten nicht geladen werden: '+(e.message||e),'error');
     return [];
@@ -358,7 +368,8 @@ function install(){
   // Erfolgreiche Reparatur-Anmeldung direkt übernehmen.
   var employee=localStorage.getItem('dg_employee')||'';
   var sessionPin=sessionStorage.getItem('dg_employee_pin')||'';
-  if(employee&&sessionPin)setTimeout(enterMain,80);
+  var deviceToken=localStorage.getItem('dg_device_session')||'';
+  if(employee&&(sessionPin||deviceToken))setTimeout(enterMain,0);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else setTimeout(install,0);
 })();
