@@ -5047,7 +5047,7 @@ setTimeout(install,180);
 (function(){
 'use strict';
 function boot742(){
-  if(window.__DG_SINGLE_START_742 || (window.DG3 && DG3.ready)) return;
+  if(window.__DG_SINGLE_START_742 || window.__DG_CORE_STARTED) return;
   window.__DG_SINGLE_START_742=true;
   try{
     const fn=typeof window.d3Startup==='function'
@@ -5152,4 +5152,53 @@ function install742(){
 }
 window.dg742EnsureEmployees=ensureEmployees742;
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install742,{once:true});else setTimeout(install742,0);
+})();
+
+
+/* DG 7.4.2 OFFICE SHELL RECOVERY */
+(function(){
+'use strict';
+function officeReady742(){
+  return !!(
+    document.querySelector('#bossView .d3-dashboard') &&
+    document.getElementById('d3Running') &&
+    document.getElementById('d3Offers') &&
+    document.getElementById('d3Admin')
+  );
+}
+function installOffice742(){
+  if(officeReady742())return true;
+  try{
+    const fn=typeof window.d3InstallOffice==='function'
+      ? window.d3InstallOffice
+      : (typeof d3InstallOffice==='function'?d3InstallOffice:null);
+    if(!fn)throw new Error('Büro-Aufbau d3InstallOffice fehlt.');
+    fn();
+    return officeReady742();
+  }catch(e){
+    console.error('DG Büroaufbau 7.4.2 fehlgeschlagen',e);
+    const root=document.getElementById('bossView');
+    if(root&&!document.getElementById('dg742OfficeError')){
+      const x=document.createElement('div');
+      x.id='dg742OfficeError';
+      x.className='status error';
+      x.textContent='Büroansicht konnte nicht vollständig aufgebaut werden: '+(e&&e.message?e.message:e);
+      root.prepend(x);
+    }
+    return false;
+  }
+}
+const oldShowBoss742=window.showBoss;
+if(typeof oldShowBoss742==='function'&&!window.__DG742_OFFICE_WRAP){
+  window.__DG742_OFFICE_WRAP=true;
+  window.showBoss=function(){
+    if(typeof canAccessBoss!=='function'||canAccessBoss()){
+      if(!officeReady742())installOffice742();
+    }
+    const r=oldShowBoss742.apply(this,arguments);
+    if(!officeReady742())setTimeout(installOffice742,0);
+    return r;
+  };
+}
+window.dg742EnsureOffice=installOffice742;
 })();
