@@ -88,7 +88,7 @@ jobs:
               if needle not in bundle: raise SystemExit('Required DG 7.3 feature missing: '+needle)
           if 'new MutationObserver(stamp)' in bundle:
               raise SystemExit('Unsafe recursive release observer detected')
-          Path('app-7.2.1.js').write_text(bundle,encoding='utf-8')
+          Path('app-7.3.js').write_text(bundle,encoding='utf-8')
 
           # index.html: nur EIN produktives App-Script laden.
           ip=Path('index.html');html=ip.read_text(encoding='utf-8')
@@ -98,10 +98,10 @@ jobs:
           html=re.sub(r'<script\b[^>]*\bsrc=["\'][^"\']*app-[^"\']+\.js[^"\']*["\'][^>]*>\s*</script>','',html,flags=re.I)
           html=re.sub(r'app-5\.0\.css\?v=[^"\']+','app-5.0.css?v='+BUILD,html)
           html=re.sub(r'sw\.js\?v=[^"\']+','sw.js?v='+BUILD,html)
-          html=html.replace('</body>','<script defer src="./app-7.2.1.js?v='+BUILD+'"></script></body>')
+          html=html.replace('</body>','<script defer src="./app-7.3.js?v='+BUILD+'"></script></body>')
           if len(re.findall(r'<script\b[^>]*\bsrc=["\'][^"\']*app-[^"\']+\.js',html,re.I))!=1:
               raise SystemExit('index.html must load exactly one external app JS')
-          if 'app-7.2.1.js?v='+BUILD not in html: raise SystemExit('DG 7.2.1 script missing in index')
+          if 'app-7.3.js?v='+BUILD not in html: raise SystemExit('DG 7.3 script missing in index')
           ip.write_text(html,encoding='utf-8')
 
           manifest={
