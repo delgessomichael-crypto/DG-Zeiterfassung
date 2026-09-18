@@ -1680,7 +1680,7 @@ function d35InstallInspectionButton(){const save=[...document.querySelectorAll('
 function d35SelectedCalendarEvent(){const rows=window.__dgCalendarEvents||[];return rows.find(e=>String(e.id||'')===String(selectedCalendarEventId||''))||null;}
 function d35InspectionVisit(){if(!canAccessBoss()){setMessage('entryStatus','Besichtigungstermine können nur mit Chefzugang übertragen werden.','error');return;}const customer=String($('customer')?.value||'').trim();if(!customer){setMessage('entryStatus','Bitte mindestens Kunde / Baustelle auswählen oder eintragen.','error');return;}const options=[0.5,1,1.5,2,2.5,3].map(v=>({value:String(v),label:String(v).replace('.',',')+' Std.'}));d3Form('Besichtigungstermin',[{name:'hours',label:'Zeitaufwand',type:'select',options}],{hours:'1'},async v=>{const event=d35SelectedCalendarEvent(),payload={action:'createInspectionOffer',employee:auth().employee,employeePin:auth().pin,item:{customer,date:$('date')?.value||localDate(),hours:Number(v.hours),vehicleUsed:true,sourceCalendarEventId:selectedCalendarEventId||'',event:event?{title:event.title||'',location:event.location||'',description:event.description||'',startDate:event.startDate||'',startTime:event.startTime||'',endDate:event.endDate||'',endTime:event.endTime||'',phone:event.phone||'',email:event.email||''}:null}};const r=await api(payload);resetEntry();await loadCalendarEvents();setMessage('entryStatus','✓ Besichtigung als offenes Angebot übertragen. Zeitaufwand '+formatHours(v.hours)+' Std. · Fahrzeugeinsatz Ja.','ok');return r;});}
 
-function d3Startup(){try{const pin=localStorage.getItem('dg_employee_pin');if(pin&&!sessionStorage.getItem('dg_employee_pin'))sessionStorage.setItem('dg_employee_pin',pin);localStorage.removeItem('dg_employee_pin');d3InstallOffice();d3TransferInstall();document.querySelectorAll('[onclick]').forEach(e=>{const s=e.getAttribute('onclick');if(s&&!s.startsWith('return ')&&/^[\w.$]+\([\s\S]*\)$/.test(s.trim()))e.setAttribute('onclick','return '+s);});init();DG3.ready=true;setInterval(d3Sync,60000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)d3Sync();});if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(e=>d3Notice('Offline-Funktion noch nicht bereit: '+e.message,'warn'));}catch(e){console.error(e);const msg=d3Element('div','status error');msg.textContent='App 5.0 konnte nicht starten: '+e.message;document.body.prepend(msg);}}
+function d3Startup(){try{const pin=localStorage.getItem('dg_employee_pin');if(pin&&!sessionStorage.getItem('dg_employee_pin'))sessionStorage.setItem('dg_employee_pin',pin);localStorage.removeItem('dg_employee_pin');d3InstallOffice();d3TransferInstall();document.querySelectorAll('[onclick]').forEach(e=>{const s=e.getAttribute('onclick');if(s&&!s.startsWith('return ')&&/^[\w.$]+\([\s\S]*\)$/.test(s.trim()))e.setAttribute('onclick','return '+s);});init();DG3.ready=true;setInterval(d3Sync,60000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)d3Sync();});if('serviceWorker'in navigator)navigator.serviceWorker.getRegistrations().then(rs=>Promise.all(rs.filter(r=>r.scope.includes('/DG-Zeiterfassung/')).map(r=>r.unregister()))).catch(()=>{});if('caches'in window)caches.keys().then(ks=>Promise.all(ks.filter(k=>k.startsWith('dg-zeiterfassung-')).map(k=>caches.delete(k)))).catch(()=>{});}catch(e){console.error(e);const msg=d3Element('div','status error');msg.textContent='App 5.0 konnte nicht starten: '+e.message;document.body.prepend(msg);}}
 /* DG 3.6: Wartungsvertraege, Wartungskalender und Pflichtfeld naechste Wartung. */
 (function(){
 'use strict';
@@ -3536,12 +3536,7 @@ function stamp(){
   }finally{stamping=false;}
 }
 
-function watchVersion(){
-  if(window.__dg602VersionWatch)return;
-  window.__dg602VersionWatch=true;
-  const obs=new MutationObserver(()=>stamp());
-  obs.observe(document.documentElement,{subtree:true,childList:true,characterData:true});
-}
+function watchVersion(){stamp();}
 
 function css(){
   if(q('dg601Css'))return;
