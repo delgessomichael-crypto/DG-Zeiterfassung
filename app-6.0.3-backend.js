@@ -1,11 +1,11 @@
 /* DG Zeiterfassung 6.0.3 - strikte, einheitliche Backend-Anbindung */
 (function(){
 'use strict';
-const V='6.0.3',PREVIOUS='7.0',KEY='dg603_backend',TTL=5*60*1000;
+const V='6.0.3',PREVIOUS=['7.1','7.0'],KEY='dg603_backend',TTL=5*60*1000;
 const BACKEND_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
 function byId(id){return document.getElementById(id);}
 function exact(v){return String(v||'').trim()===V;}
-function compatible(v){const s=String(v||'').trim();return exact(s)||s===PREVIOUS;}
+function compatible(v){const s=String(v||'').trim();return exact(s)||PREVIOUS.includes(s);}
 function foundVersion(){return String(window.__DG_FOUND_BACKEND||'unbekannt');}
 function clearVersionNotices(){const n=byId('d3Notice');if(n&&/Google-GS|Google-Backend|Backend.*bereitgestellt|Bereitstellungs-Link|Versionsstand/i.test(n.textContent||''))n.remove();}
 function showMismatch(found){window.__DG_FOUND_BACKEND=String(found||'unbekannt');if(compatible(found)){clearVersionNotices();return true;}if(window.DG3)DG3.backend='';const msg='Versionsstand stimmt nicht: App '+V+' benötigt Google-GS '+V+'. Aktiv ist Google-GS '+foundVersion()+'.';if(typeof window.d3Notice==='function')window.d3Notice(msg,'warn');return false;}
