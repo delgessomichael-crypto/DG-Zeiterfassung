@@ -140,10 +140,10 @@ function startSpeech60(targetId,button){
   let hadFinal=false;
   const processed=new Set();
   let lastFinal='',lastFinalAt=0;
-  const normSpeech60=v=>String(v||'').toLowerCase().replace(/[^a-z0-9äöüß]+/gi,' ').trim().replace(/\\s+/g,' ');
+  const normSpeech60=v=>String(v||'').toLowerCase().replace(/[^a-z0-9äöüß]+/gi,' ').trim().replace(/\s+/g,' ');
   const appendUniqueSpeech60=(base,piece)=>{
     const cur=String(base||'').trimEnd(),p=String(piece||'').trim();if(!p)return cur;
-    const a=cur.split(/\\s+/),b=p.split(/\\s+/);let overlap=0,limit=Math.min(12,a.length,b.length);
+    const a=cur.split(/\s+/),b=p.split(/\s+/);let overlap=0,limit=Math.min(12,a.length,b.length);
     for(let n=1;n<=limit;n++){if(normSpeech60(a.slice(-n).join(' '))===normSpeech60(b.slice(0,n).join(' ')))overlap=n;}
     const rest=b.slice(overlap).join(' ');return rest?cur+(cur?' ':'')+rest:cur;
   };
