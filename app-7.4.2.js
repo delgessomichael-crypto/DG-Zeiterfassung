@@ -53,7 +53,7 @@ async function loginEmployee(){const employee=$('loginEmployee').value,pin=$('lo
 
 function logout(){localStorage.removeItem('dg_employee');sessionStorage.removeItem('dg_employee_pin');localStorage.removeItem('dg_chef_access');$('mainScreen').classList.add('hidden');$('loginScreen').classList.remove('hidden');$('loginPin').value=''}
 
-function openMain(){const a=auth();$('loginScreen').classList.add('hidden');$('mainScreen').classList.remove('hidden');$('employeeLabel').textContent='Angemeldet: '+a.employee;$('date').value=localDate();const bossAllowed=canAccessBoss();$('bossTab').classList.toggle('hidden',!bossAllowed);showEmployee();DG3.reports={};DG3.inquiries=[];DG3.orders=[];$('regieResult').replaceChildren();$('d3RunningList').replaceChildren();d3CheckBackend();loadEmployeeDirectory();requestAnimationFrame(()=>{if(customerPad)customerPad.resize();if(employeePad)employeePad.resize()});updateConnection();loadDay();loadCalendarEvents();setTimeout(d35InstallInspectionButton,0);}
+function openMain(){const a=auth();$('loginScreen')?.classList.add('hidden');$('mainScreen')?.classList.remove('hidden');if($('employeeLabel'))$('employeeLabel').textContent='Angemeldet: '+a.employee;if($('date'))$('date').value=localDate();const bossAllowed=canAccessBoss();$('bossTab')?.classList.toggle('hidden',!bossAllowed);showEmployee();DG3.reports={};DG3.inquiries=[];DG3.orders=[];$('regieResult')?.replaceChildren();$('d3RunningList')?.replaceChildren();d3CheckBackend();loadEmployeeDirectory();requestAnimationFrame(()=>{if(customerPad)customerPad.resize();if(employeePad)employeePad.resize()});updateConnection();loadDay();loadCalendarEvents();setTimeout(d35InstallInspectionButton,0);}
 
 function showEmployee(){$('employeeView').classList.remove('hidden');$('bossView').classList.add('hidden');$('employeeTab').classList.add('active');$('bossTab').classList.remove('active');setTimeout(d35InstallInspectionButton,0);}
 
@@ -1680,7 +1680,26 @@ function d35InstallInspectionButton(){const save=[...document.querySelectorAll('
 function d35SelectedCalendarEvent(){const rows=window.__dgCalendarEvents||[];return rows.find(e=>String(e.id||'')===String(selectedCalendarEventId||''))||null;}
 function d35InspectionVisit(){if(!canAccessBoss()){setMessage('entryStatus','Besichtigungstermine können nur mit Chefzugang übertragen werden.','error');return;}const customer=String($('customer')?.value||'').trim();if(!customer){setMessage('entryStatus','Bitte mindestens Kunde / Baustelle auswählen oder eintragen.','error');return;}const options=[0.5,1,1.5,2,2.5,3].map(v=>({value:String(v),label:String(v).replace('.',',')+' Std.'}));d3Form('Besichtigungstermin',[{name:'hours',label:'Zeitaufwand',type:'select',options}],{hours:'1'},async v=>{const event=d35SelectedCalendarEvent(),payload={action:'createInspectionOffer',employee:auth().employee,employeePin:auth().pin,item:{customer,date:$('date')?.value||localDate(),hours:Number(v.hours),vehicleUsed:true,sourceCalendarEventId:selectedCalendarEventId||'',event:event?{title:event.title||'',location:event.location||'',description:event.description||'',startDate:event.startDate||'',startTime:event.startTime||'',endDate:event.endDate||'',endTime:event.endTime||'',phone:event.phone||'',email:event.email||''}:null}};const r=await api(payload);resetEntry();await loadCalendarEvents();setMessage('entryStatus','✓ Besichtigung als offenes Angebot übertragen. Zeitaufwand '+formatHours(v.hours)+' Std. · Fahrzeugeinsatz Ja.','ok');return r;});}
 
-function d3Startup(){try{const pin=localStorage.getItem('dg_employee_pin');if(pin&&!sessionStorage.getItem('dg_employee_pin'))sessionStorage.setItem('dg_employee_pin',pin);localStorage.removeItem('dg_employee_pin');d3InstallOffice();d3TransferInstall();document.querySelectorAll('[onclick]').forEach(e=>{const s=e.getAttribute('onclick');if(s&&!s.startsWith('return ')&&/^[\w.$]+\([\s\S]*\)$/.test(s.trim()))e.setAttribute('onclick','return '+s);});init();DG3.ready=true;setInterval(d3Sync,60000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)d3Sync();});/* CLEAN: Service Worker absichtlich nicht registrieren; verhindert Alt-Cache-Overlays. */}catch(e){console.error(e);const msg=d3Element('div','status error');msg.textContent='App 5.0 konnte nicht starten: '+e.message;document.body.prepend(msg);}}
+function d3Startup(){
+  if(window.__DG_CORE_STARTED)return;
+  window.__DG_CORE_STARTED=true;
+  try{
+    const pin=localStorage.getItem('dg_employee_pin');
+    if(pin&&!sessionStorage.getItem('dg_employee_pin'))sessionStorage.setItem('dg_employee_pin',pin);
+    localStorage.removeItem('dg_employee_pin');
+    document.querySelectorAll('[onclick]').forEach(e=>{const x=e.getAttribute('onclick');if(x&&!x.startsWith('return ')&&/^[\w.$]+\([\s\S]*\)$/.test(x.trim()))e.setAttribute('onclick','return '+x);});
+    init();
+    DG3.ready=true;
+    setInterval(d3Sync,60000);
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden)d3Sync();});
+  }catch(e){
+    console.error('DG Kernstart',e);
+    window.__DG_CORE_STARTED=false;
+    const st=$('loginStatus');if(st){st.className='status error';st.textContent='Anmeldung konnte nicht initialisiert werden: '+(e&&e.message?e.message:e);}
+  }
+  try{d3InstallOffice();}catch(e){console.warn('DG Büroaufbau übersprungen',e);}
+  try{d3TransferInstall();}catch(e){console.warn('DG Kalender-Erweiterung übersprungen',e);}
+}
 /* DG 3.6: Wartungsvertraege, Wartungskalender und Pflichtfeld naechste Wartung. */
 (function(){
 'use strict';
@@ -5053,4 +5072,84 @@ if(document.readyState==='loading'){
 }else{
   setTimeout(boot742,0);
 }
+})();
+
+
+/* DG 7.4.2 LOGIN RECOVERY - unabhängig vom Bürostart */
+(function(){
+'use strict';
+const URL742='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
+async function raw742(payload){
+  const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),20000);
+  try{
+    const r=await fetch(URL742,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({},payload,{clientVersion:'7.4.2'})),signal:ctl.signal});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const j=JSON.parse(await r.text());
+    if(!j.ok)throw new Error(j.error||'Serverfehler');
+    return j.data!==undefined?j.data:j;
+  }finally{clearTimeout(timer);}
+}
+function render742(rows){
+  const sel=document.getElementById('loginEmployee');
+  if(!sel||!Array.isArray(rows)||!rows.length)return false;
+  const current=(localStorage.getItem('dg_employee')||'');
+  sel.innerHTML='<option value="">Bitte auswählen</option>'+rows.map(function(x){const v=String(x||'');return '<option value="'+v.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;')+'">'+v.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</option>';}).join('');
+  if(current&&rows.includes(current))sel.value=current;
+  try{employeeDirectory=rows.slice();if(typeof fillAbsenceEmployees==='function')fillAbsenceEmployees();}catch(_e){}
+  return true;
+}
+async function ensureEmployees742(){
+  const sel=document.getElementById('loginEmployee');
+  if(!sel)return;
+  if(sel.options&&sel.options.length>1&&!/werden geladen/i.test(sel.options[0]?.textContent||''))return;
+  try{
+    const rows=await raw742({action:'getEmployees'});
+    if(!render742(rows))throw new Error('Keine aktiven Mitarbeiter erhalten.');
+    const st=document.getElementById('loginStatus');if(st&&/nicht initialisiert|Start fehlgeschlagen/i.test(st.textContent||'')){st.className='';st.textContent='';}
+  }catch(e){
+    sel.innerHTML='<option value="">Mitarbeiter konnten nicht geladen werden</option>';
+    const st=document.getElementById('loginStatus');
+    if(st){st.className='status error';st.textContent='Backend-Verbindung fehlgeschlagen: '+(e&&e.message?e.message:e);}
+  }
+}
+async function login742(){
+  const sel=document.getElementById('loginEmployee'),pinEl=document.getElementById('loginPin'),st=document.getElementById('loginStatus');
+  const employee=sel?sel.value:'',pin=pinEl?pinEl.value:'';
+  if(!employee){if(st){st.className='status error';st.textContent='Bitte Mitarbeiter auswählen.';}return false;}
+  if(!pin){if(st){st.className='status error';st.textContent='Bitte PIN eingeben.';}return false;}
+  try{
+    if(st){st.className='status info';st.textContent='Anmeldung wird geprüft ...';}
+    const res=await raw742({action:'employeeLogin',employee:employee,pin:pin,createDeviceSession:true});
+    localStorage.setItem('dg_employee',res.employee||employee);
+    if(res.deviceSessionToken)localStorage.setItem('dg_device_session',res.deviceSessionToken);
+    else sessionStorage.setItem('dg_employee_pin',pin);
+    localStorage.setItem('dg_chef_access',res.chefAccess?'1':'0');
+    if(pinEl)pinEl.value='';
+    try{if(!window.__DG_CORE_STARTED&&typeof d3Startup==='function')d3Startup();}catch(_e){}
+    if(typeof openMain!=='function')throw new Error('App-Hauptansicht fehlt.');
+    openMain();
+    return false;
+  }catch(e){
+    if(st){st.className='status error';st.textContent=e&&e.message?e.message:String(e);}
+    return false;
+  }
+}
+function install742(){
+  ensureEmployees742();
+  setTimeout(ensureEmployees742,800);
+  setTimeout(ensureEmployees742,2500);
+  const btn=[...document.querySelectorAll('#loginScreen button')].find(function(b){return /Anmelden/i.test(b.textContent||'');});
+  if(btn&&!btn.dataset.dg742Recovery){
+    btn.dataset.dg742Recovery='1';
+    btn.removeAttribute('onclick');
+    btn.addEventListener('click',function(e){e.preventDefault();login742();});
+  }
+  const pin=document.getElementById('loginPin');
+  if(pin&&!pin.dataset.dg742Recovery){
+    pin.dataset.dg742Recovery='1';
+    pin.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();login742();}});
+  }
+}
+window.dg742EnsureEmployees=ensureEmployees742;
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install742,{once:true});else setTimeout(install742,0);
 })();
