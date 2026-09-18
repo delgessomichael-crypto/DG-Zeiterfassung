@@ -284,5 +284,4 @@ if(typeof oldDash70==='function'&&!window.__dg70ShopDashWrapped){
 }
 window.addEventListener('storage',e=>{if(e.key===STORE){updateTile70();if(q('dg70ShopOverlay')&&q('dg70ShopOverlay').style.display!=='none')renderOverview70();}});
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install70,0),{once:true});else setTimeout(install70,0);
-setTimeout(install70,500);
 })();
