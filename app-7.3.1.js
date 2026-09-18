@@ -4818,7 +4818,6 @@ function css731(){
   if(el731('dg731Css'))return;
   const s=document.createElement('style');s.id='dg731Css';
   s.textContent=`
-    #employeeTimeBank{display:none!important}
     .dg731-cycle{margin:12px 0;padding:13px 16px;border-radius:13px;background:#e8f0ff;border:1px solid #9db7f5;color:#163b88;font-weight:900}
     .dg731-cycle small{display:block;margin-top:3px;font-weight:700;color:#395b95}
     .dg731-help{margin:8px 0 0;font-size:13px;color:#5b6472}
