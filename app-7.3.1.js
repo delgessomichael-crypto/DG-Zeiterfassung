@@ -4837,7 +4837,6 @@ function employeeCycle731(){
   box.innerHTML='Abrechnungszeitraum: '+esc731(de731(c.start))+' – '+esc731(de731(c.end))+'<small>Die Lohn- und Monatsstunden werden immer vom 21. bis zum 20. gezählt.</small>';
 }
 function cleanTimeBankText731(){
-  const tb=el731('employeeTimeBank');if(tb)tb.style.display='none';
   const root=el731('monthResult');
   if(root){
     [...root.querySelectorAll('.status,.entry,.total')].forEach(x=>{
@@ -4847,6 +4846,21 @@ function cleanTimeBankText731(){
     });
   }
   employeeCycle731();
+}
+
+async function refreshEmployeeCounters731(){
+  const a=typeof auth==='function'?auth():{},week=el731('dg54WeekHours'),month=el731('employeeTimeBank');
+  if(!a.employee||!a.pin||!navigator.onLine)return;
+  try{
+    const now=new Date(),ref=iso731(now),d=await api({action:'getWeekData',employee:a.employee,pin:a.pin,referenceDate:ref});
+    if(week)week.innerHTML='Geleistete Wochenstunden: '+formatHours(d.total||0)+' Std.<small>Woche '+de731(d.start)+' bis '+de731(d.end)+' · tatsächliche Einsätze werden mitgerechnet</small>';
+    if(month){
+      month.style.display='';
+      month.classList.add('dg51-month-hours');
+      month.textContent='Geleistete Monatsstunden: '+formatHours(d.monthTotal!=null?d.monthTotal:0)+' Std.';
+      month.title=d.monthStart?'Abrechnungszeitraum ab '+de731(d.monthStart):'';
+    }
+  }catch(_e){}
 }
 
 function due731(audit){
@@ -4980,9 +4994,14 @@ if(loadMonthBase731)window.loadMonth=loadMonth=async function(){
   const r=await loadMonthBase731.apply(this,arguments);cleanTimeBankText731();return r;
 };
 
+const renderDayBase731=typeof window.renderDay==='function'?window.renderDay:null;
+if(renderDayBase731)window.renderDay=renderDay=function(){
+  const r=renderDayBase731.apply(this,arguments);setTimeout(refreshEmployeeCounters731,120);return r;
+};
+
 function install731(){
   css731();
-  const tb=el731('employeeTimeBank');if(tb)tb.remove();
+  const tb=el731('employeeTimeBank');if(tb){tb.style.display='';tb.textContent='Geleistete Monatsstunden: werden geladen …';}
   employeeCycle731();
   ['empYear','empMonth'].forEach(id=>{const x=el731(id);if(x&&!x.dataset.dg731){x.dataset.dg731='1';x.addEventListener('change',employeeCycle731);}});
   try{makePayrollSection520();}catch(_e){}
@@ -4997,5 +5016,6 @@ function install731(){
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install731,0),{once:true});else setTimeout(install731,0);
 setTimeout(install731,500);
 setTimeout(cleanTimeBankText731,900);
+setTimeout(refreshEmployeeCounters731,1100);
 })();
 ;
