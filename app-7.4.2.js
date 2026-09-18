@@ -5022,3 +5022,35 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 setTimeout(install,180);
 })();
 ;
+
+
+/* DG 7.4.2 FINAL SINGLE STARTUP */
+(function(){
+'use strict';
+function boot742(){
+  if(window.__DG_SINGLE_START_742 || (window.DG3 && DG3.ready)) return;
+  window.__DG_SINGLE_START_742=true;
+  try{
+    const fn=typeof window.d3Startup==='function'
+      ? window.d3Startup
+      : (typeof d3Startup==='function' ? d3Startup : null);
+    if(!fn) throw new Error('Startfunktion d3Startup fehlt.');
+    fn();
+  }catch(e){
+    window.__DG_SINGLE_START_742=false;
+    console.error('DG 7.4.2 Startfehler',e);
+    const sel=document.getElementById('loginEmployee');
+    if(sel) sel.innerHTML='<option value="">Mitarbeiter konnten nicht geladen werden</option>';
+    const st=document.getElementById('loginStatus');
+    if(st){
+      st.className='status error';
+      st.textContent='App-Start fehlgeschlagen: '+(e&&e.message?e.message:e);
+    }
+  }
+}
+if(document.readyState==='loading'){
+  document.addEventListener('DOMContentLoaded',boot742,{once:true});
+}else{
+  setTimeout(boot742,0);
+}
+})();
