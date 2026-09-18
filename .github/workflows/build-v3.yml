@@ -1,4 +1,4 @@
-name: Build DG 7.3 Production
+name: Build DG 7.3.1 Production
 on:
   push:
     branches: ['main']
@@ -15,6 +15,7 @@ on:
       - 'app-7.2-fixes.js'
       - 'app-7.2.1-offer-flow.js'
       - 'app-7.3-payroll.js'
+      - 'app-7.3.1-fixes.js'
       - '.github/workflows/build-v3.yml'
 permissions:
   contents: write
@@ -28,14 +29,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Build one verified DG 7.3 browser bundle
+      - name: Build one verified DG 7.3.1 browser bundle
         run: |
           python - <<'PY'
           from pathlib import Path
           import re, json
 
-          VERSION='7.3'
-          BUILD='20260918-73-r1'
+          VERSION='7.3.1'
+          BUILD='20260918-731-r1'
           OLD_URL='https://script.google.com/macros/s/AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc/exec'
           BACKEND_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec'
           sources=[
@@ -51,13 +52,14 @@ jobs:
               'app-7.2-fixes.js',
               'app-7.2.1-offer-flow.js',
               'app-7.3-payroll.js',
+              'app-7.3.1-fixes.js',
           ]
 
           chunks=[]
-          release_guard=r'''/* DG 7.3 FINAL - einheitlicher sichtbarer Versionsstand */
+          release_guard=r'''/* DG 7.3.1 FINAL - einheitlicher sichtbarer Versionsstand */
           (function(){
           'use strict';
-          const V='7.3';
+          const V='7.3.1';
           function stamp(){
             if(document.title!=='DG Zeiterfassung '+V)document.title='DG Zeiterfassung '+V;
             document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim())&&x.textContent!=='Version '+V)x.textContent='Version '+V;});
