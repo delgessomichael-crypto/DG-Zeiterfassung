@@ -133,13 +133,20 @@ function startSpeech60(targetId,button){
   activeRecognition60=recognition;activeSpeechTarget60=targetId;activeSpeechButton60=button;
   recognition.lang='de-DE';
   recognition.continuous=true;
-  recognition.interimResults=true;
+  recognition.interimResults=false;
   recognition.maxAlternatives=1;
 
   const original=String(target.value||'').trimEnd();
-  const prefix=original?(original+'\n'):'';
-  let finalText='';
   let hadFinal=false;
+  const processed=new Set();
+  let lastFinal='',lastFinalAt=0;
+  const normSpeech60=v=>String(v||'').toLowerCase().replace(/[^a-z0-9äöüß]+/gi,' ').trim().replace(/\\s+/g,' ');
+  const appendUniqueSpeech60=(base,piece)=>{
+    const cur=String(base||'').trimEnd(),p=String(piece||'').trim();if(!p)return cur;
+    const a=cur.split(/\\s+/),b=p.split(/\\s+/);let overlap=0,limit=Math.min(12,a.length,b.length);
+    for(let n=1;n<=limit;n++){if(normSpeech60(a.slice(-n).join(' '))===normSpeech60(b.slice(0,n).join(' ')))overlap=n;}
+    const rest=b.slice(overlap).join(' ');return rest?cur+(cur?' ':'')+rest:cur;
+  };
 
   function cleanup(message,type){
     if(activeSpeechButton60){activeSpeechButton60.classList.remove('listening');activeSpeechButton60.textContent='🎤 Sprache zu Text';}
@@ -153,17 +160,15 @@ function startSpeech60(targetId,button){
   };
 
   recognition.onresult=function(event){
-    let interim='';
     for(let i=event.resultIndex;i<event.results.length;i++){
-      const piece=String(event.results[i][0]?.transcript||'').trim();
-      if(!piece)continue;
-      if(event.results[i].isFinal){finalText+=(finalText?' ':'')+piece;hadFinal=true;}
-      else interim+=(interim?' ':'')+piece;
+      const result=event.results[i];if(!result||!result.isFinal)continue;
+      const piece=String(result[0]?.transcript||'').trim(),n=normSpeech60(piece),key=String(i)+'|'+n;
+      if(!n||processed.has(key))continue;processed.add(key);
+      const now=Date.now();if(n===lastFinal&&now-lastFinalAt<3500)continue;lastFinal=n;lastFinalAt=now;
+      target.value=appendUniqueSpeech60(target.value,piece);hadFinal=true;
+      target.dispatchEvent(new Event('input',{bubbles:true}));
+      target.scrollTop=target.scrollHeight;
     }
-    const combined=(finalText+(interim?(finalText?' ':'')+interim:'')).trim();
-    target.value=prefix+combined;
-    target.dispatchEvent(new Event('input',{bubbles:true}));
-    target.scrollTop=target.scrollHeight;
   };
 
   recognition.onerror=function(event){
@@ -171,7 +176,7 @@ function startSpeech60(targetId,button){
   };
 
   recognition.onend=function(){
-    if(target.value.trim()===prefix.trim()&&!hadFinal)target.value=original;
+    if(!hadFinal)target.value=original;
     cleanup(hadFinal?'Sprache übernommen. Du kannst den Text jetzt noch korrigieren.':'Aufnahme beendet.','');
   };
 
