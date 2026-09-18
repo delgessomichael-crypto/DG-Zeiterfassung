@@ -128,5 +128,5 @@ jobs:
           git config user.email 'build@users.noreply.github.com'
           git rm -f --ignore-unmatch app-6.0.3.js app-6.0-backend-compat.js
           git add app-7.2.1.js index.html sw.js manifest.json
-          git commit -m 'v7.2: Urlaub Feiertag und Besichtigungszeiten' || true
+          git commit -m 'v7.2.1: Angebotsentscheidung laufend oder archiviert' || true
           git push origin HEAD:${GITHUB_REF_NAME}
