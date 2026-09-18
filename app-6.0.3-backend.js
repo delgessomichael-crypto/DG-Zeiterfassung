@@ -1,7 +1,7 @@
 /* DG Zeiterfassung 6.0.3 - strikte, einheitliche Backend-Anbindung */
 (function(){
 'use strict';
-const V='6.0.3',PREVIOUS=['7.3.5','7.3.4','7.3.3','7.3.2','7.3.1','7.3','7.2.1','7.2','7.1','7.0'],KEY='dg603_backend',TTL=5*60*1000;
+const V='6.0.3',PREVIOUS=['7.3.6','7.3.5','7.3.4','7.3.3','7.3.2','7.3.1','7.3','7.2.1','7.2','7.1','7.0'],KEY='dg603_backend',TTL=5*60*1000;
 const BACKEND_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
 function byId(id){return document.getElementById(id);}
 function exact(v){return String(v||'').trim()===V;}
