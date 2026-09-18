@@ -4144,16 +4144,7 @@ const V72='7.2';
 const q72=id=>document.getElementById(id);
 const esc72=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-function stamp72(){
-  if(document.title!=='DG Zeiterfassung '+V72)document.title='DG Zeiterfassung '+V72;
-  document.querySelectorAll('.login-card .muted.small,#loginScreen .center.muted.small').forEach(x=>{
-    if(/^Version\s+/i.test((x.textContent||'').trim())&&x.textContent!=='Version '+V72)x.textContent='Version '+V72;
-  });
-  document.querySelectorAll('.hero strong,#mainScreen .hero .head-row strong').forEach(x=>{
-    if(/Zeiterfassung/i.test(x.textContent||'')&&x.textContent!=='Zeiterfassung - '+V72)x.textContent='Zeiterfassung - '+V72;
-  });
-  try{window.DG_APP_VERSION=V72;window.DG_RELEASE=V72;if(window.DG3)DG3.version=V72;}catch(_e){}
-}
+function stamp72(){ /* CLEAN: Versionsanzeige kommt nur aus aktuellem Runtime-Block */ }
 
 function css72(){
   if(q72('dg72Css'))return;
@@ -4289,8 +4280,6 @@ function install72(){
   if(typeof lastDayData!=='undefined'&&lastDayData&&typeof window.applyDayStatus==='function')window.applyDayStatus(lastDayData.status||'Arbeiten');
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install72,0),{once:true});else setTimeout(install72,0);
-setTimeout(install72,300);
-setTimeout(install72,1200);
 })();
 ;
 
