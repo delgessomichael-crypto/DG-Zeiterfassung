@@ -246,7 +246,7 @@
 })();
 </script>
 
-<script defer src="./app-7.4.2.js?v=20260918-742-loginfix3"></script>
+<script defer src="./app-7.4.2.js?v=20260918-742-officefix1"></script>
 <script>
 (function(){
 'use strict';
@@ -293,20 +293,24 @@ async function loadEmployeesDirect(){
 }
 function makeCoreReady(){
   try{
+    if(!window.__DG_CORE_STARTED&&typeof window.d3Startup==='function'){
+      window.d3Startup();
+      return;
+    }
     if(typeof window.init==='function'&&!(window.DG3&&DG3.ready)){
       window.init();
       if(window.DG3)DG3.ready=true;
     }
   }catch(e){
-    console.warn('DG init fallback',e);
+    console.warn('DG Start fallback',e);
   }
 }
 function enterMain(){
   makeCoreReady();
   try{
     if(typeof window.openMain!=='function')throw new Error('Hauptansicht wurde nicht geladen.');
-    window.openMain();
     var main=el('mainScreen'),login=el('loginScreen');
+    if(!main||main.classList.contains('hidden'))window.openMain();
     if(main)main.classList.remove('hidden');
     if(login)login.classList.add('hidden');
     return true;
