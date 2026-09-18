@@ -1683,10 +1683,15 @@ function d35InspectionVisit(){if(!canAccessBoss()){setMessage('entryStatus','Bes
 function d3Startup(){
   if(window.__DG_CORE_STARTED)return;
   window.__DG_CORE_STARTED=true;
+  const pin=localStorage.getItem('dg_employee_pin');
+  if(pin&&!sessionStorage.getItem('dg_employee_pin'))sessionStorage.setItem('dg_employee_pin',pin);
+  localStorage.removeItem('dg_employee_pin');
+
+  // Wichtig: wie im stabilen 7.3.7-Stand zuerst die komplette Bürostruktur aufbauen.
+  try{d3InstallOffice();}catch(e){console.error('DG Büroaufbau beim Start',e);}
+  try{d3TransferInstall();}catch(e){console.warn('DG Kalender-Erweiterung übersprungen',e);}
+
   try{
-    const pin=localStorage.getItem('dg_employee_pin');
-    if(pin&&!sessionStorage.getItem('dg_employee_pin'))sessionStorage.setItem('dg_employee_pin',pin);
-    localStorage.removeItem('dg_employee_pin');
     document.querySelectorAll('[onclick]').forEach(e=>{const x=e.getAttribute('onclick');if(x&&!x.startsWith('return ')&&/^[\w.$]+\([\s\S]*\)$/.test(x.trim()))e.setAttribute('onclick','return '+x);});
     init();
     DG3.ready=true;
@@ -1697,8 +1702,6 @@ function d3Startup(){
     window.__DG_CORE_STARTED=false;
     const st=$('loginStatus');if(st){st.className='status error';st.textContent='Anmeldung konnte nicht initialisiert werden: '+(e&&e.message?e.message:e);}
   }
-  try{d3InstallOffice();}catch(e){console.warn('DG Büroaufbau übersprungen',e);}
-  try{d3TransferInstall();}catch(e){console.warn('DG Kalender-Erweiterung übersprungen',e);}
 }
 /* DG 3.6: Wartungsvertraege, Wartungskalender und Pflichtfeld naechste Wartung. */
 (function(){
@@ -3201,6 +3204,9 @@ window.d3CheckBackend=d3CheckBackend=async function(force){try{if(force)sessionS
 function versionLabels520(){document.title='DG Zeiterfassung 5.2.0';document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent))x.textContent='Zeiterfassung - 5.2.0'});document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test(x.textContent.trim()))x.textContent='Version 5.2.0'});try{DG3.version=V520;window.DG_APP_VERSION=V520}catch(_e){}try{sessionStorage.removeItem('dg51_backend')}catch(_e){}}
 function boot520(){versionLabels520();installPayrollUi520();setTimeout(installPayrollUi520,200);setTimeout(installPayrollUi520,900)}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot520);else boot520();
 })();
+;
+
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',d3Startup,{once:true});else d3Startup();
 ;
 
 /* ===== CLEAN SOURCE: app-6.0-runtime.js ===== */
