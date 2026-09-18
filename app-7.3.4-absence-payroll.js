@@ -214,5 +214,4 @@ function install734(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install734,0),{once:true});else setTimeout(install734,0);
 setTimeout(install734,700);
-setInterval(()=>{try{refreshDue734(false);}catch(_e){}},5000);
 })();
