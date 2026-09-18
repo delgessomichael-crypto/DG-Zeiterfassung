@@ -79,7 +79,7 @@ jobs:
           forbidden=[OLD_URL,'app-6.0-backend-compat.js',"const V='6.0'", "const V='6.0.1'", "const V='6.0.2'", "const V='6.0.3'"]
           for needle in forbidden:
               if needle in bundle: raise SystemExit('Legacy production value still present: '+needle)
-          required=[BACKEND_URL,'saveOwnReminderInternalNote','d3OwnReminderNote','dg70ShoppingOpen',"const V='7.1'"]
+          required=[BACKEND_URL,'saveOwnReminderInternalNote','d3OwnReminderNote','dg70ShoppingOpen','dg72InspectionVisit',"const V='7.2'"]
           for needle in required:
               if needle not in bundle: raise SystemExit('Required DG 7.2 feature missing: '+needle)
           if 'new MutationObserver(stamp)' in bundle:
