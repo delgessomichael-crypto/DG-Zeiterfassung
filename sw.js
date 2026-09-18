@@ -1,6 +1,6 @@
-const CACHE_NAME='dg-zeiterfassung-7-3-7-20260918-737-r1';
-const APP='./app-7.3.7.js?v=20260918-737-r1';
-const CSS='./app-5.0.css?v=20260918-737-r1';
+const CACHE_NAME='dg-zeiterfassung-7-3-8-20260918-738-r1';
+const APP='./app-7.3.8.js?v=20260918-738-r1';
+const CSS='./app-5.0.css?v=20260918-738-r1';
 const APP_SHELL=['./','./index.html',APP,CSS,'./manifest.json','./dg_icon_192.png','./dg_icon_512.png'];
 self.addEventListener('install',e=>e.waitUntil((async()=>{const c=await caches.open(CACHE_NAME);await c.addAll(APP_SHELL);await self.skipWaiting();})()));
 self.addEventListener('activate',e=>e.waitUntil((async()=>{await Promise.all((await caches.keys()).filter(k=>k.startsWith('dg-zeiterfassung-')&&k!==CACHE_NAME).map(k=>caches.delete(k)));await self.clients.claim();})()));
