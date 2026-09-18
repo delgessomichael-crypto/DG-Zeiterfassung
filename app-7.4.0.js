@@ -4837,7 +4837,7 @@ setTimeout(install735,700);
 'use strict';
 const V='7.4.0';
 const $=id=>document.getElementById(id);
-let audit=null, payrollObserver=null, payrollBusy=false;
+let audit=null, payrollBusy=false;
 
 function pad(n){return String(n).padStart(2,'0');}
 function iso(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
@@ -4979,13 +4979,9 @@ async function completePayroll(force){
 }
 
 const baseAudit=window.renderAudit520;
-if(typeof baseAudit==='function')window.renderAudit520=function(a){const r=baseAudit.apply(this,arguments);audit=a;setTimeout(()=>decorateAudit(a),0);return r;};
+if(typeof baseAudit==='function')window.renderAudit520=function(a){const r=baseAudit.apply(this,arguments);audit=a;decorateAudit(a);return r;};
 
-function observePayroll(){
-  const out=$('dg520Result');if(!out||payrollObserver)return;
-  payrollObserver=new MutationObserver(()=>{if(audit)requestAnimationFrame(()=>decorateAudit(audit));});
-  payrollObserver.observe(out,{childList:true});
-}
+function observePayroll(){ /* CLEAN 7.4.1: kein dauerhafter DOM-Observer mehr */ }
 
 async function refreshCounters(){
   const a=typeof auth==='function'?auth():{},week=$('dg54WeekHours'),month=$('employeeTimeBank');
@@ -5049,7 +5045,7 @@ function captureDayOpen(e){
 const baseDashboard=window.d3Dashboard;
 if(typeof baseDashboard==='function')window.d3Dashboard=async function(){const r=await baseDashboard.apply(this,arguments);paintDue();return r;};
 const basePayroll=window.makePayrollSection520;
-if(typeof basePayroll==='function')window.makePayrollSection520=function(){const r=basePayroll.apply(this,arguments);setTimeout(()=>{paintDue();observePayroll();},0);return r;};
+if(typeof basePayroll==='function')window.makePayrollSection520=function(){const r=basePayroll.apply(this,arguments);paintDue();return r;};
 
 function stamp(){
   document.title='DG Zeiterfassung '+V;
