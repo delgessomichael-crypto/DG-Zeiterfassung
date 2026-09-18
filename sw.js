@@ -1,4 +1,4 @@
-const CACHE_NAME='dg-zeiterfassung-7-3-8-20260918-740-r1';
+const CACHE_NAME='dg-zeiterfassung-7-4-0-20260918-740-r1';
 const APP='./app-7.4.0.js?v=20260918-740-r1';
 const CSS='./app-5.0.css?v=20260918-740-r1';
 const APP_SHELL=['./','./index.html',APP,CSS,'./manifest.json','./dg_icon_192.png','./dg_icon_512.png'];
