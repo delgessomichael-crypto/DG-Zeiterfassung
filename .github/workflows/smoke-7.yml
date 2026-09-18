@@ -13,7 +13,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Verify final frontend bundle 7.3.8
+      - name: Verify deployed frontend bundle 7.3.8
         run: |
           node --check app-7.3.8.js
           node --check sw.js
