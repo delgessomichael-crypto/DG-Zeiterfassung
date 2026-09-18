@@ -28,6 +28,8 @@ function css734(){
     .dg734-case{padding:9px 11px;margin:7px 0;border-radius:10px;background:#fff;border:1px solid #e5e7eb}
     .dg734-legal{font-size:12px;line-height:1.45;color:#64748b;margin-top:10px}
     .dg734-payroll-hot{background:#fee2e2!important;color:#991b1b!important}
+    .dg734-sick-tile{background:#fef3c7!important;color:#92400e!important}.dg734-sick-tile.hot{background:#fee2e2!important;color:#991b1b!important}
+    .dg734-sick-alert-list{margin-top:10px}.dg734-sick-alert-row{padding:9px 11px;border-radius:10px;margin:6px 0;background:#fff;border:1px solid #e5e7eb}
     @media(max-width:760px){.dg734-summary{grid-template-columns:1fr}}
   `;
   document.head.appendChild(s);
@@ -66,9 +68,31 @@ async function refreshDue734(force){
   if(byId734('dg520Due'))paintDue734(selected.dueDate,selected.state);
 }
 const dashBase734=window.d3Dashboard;
-if(typeof dashBase734==='function')window.d3Dashboard=async function(){const r=await dashBase734.apply(this,arguments);setTimeout(()=>refreshDue734(false),0);return r;};
+if(typeof dashBase734==='function')window.d3Dashboard=async function(){const r=await dashBase734.apply(this,arguments);setTimeout(()=>{refreshDue734(false);refreshSicknessTile734();},0);return r;};
 const payrollBase734=window.makePayrollSection520;
-if(typeof payrollBase734==='function')window.makePayrollSection520=function(){const r=payrollBase734.apply(this,arguments);setTimeout(()=>refreshDue734(false),0);return r;};
+if(typeof payrollBase734==='function')window.makePayrollSection520=function(){const r=payrollBase734.apply(this,arguments);setTimeout(()=>{patchPayrollSubtitle734();refreshDue734(false);},0);return r;};
+
+function patchPayrollSubtitle734(){
+  const sec=byId734('dg520PayrollClose');if(!sec)return;
+  const muted=sec.querySelector(':scope > .muted.small');if(muted)muted.textContent='Automatische Plausibilitätsprüfung aller Mitarbeiter. Lohnübergabe regulär zum 20.; fällt dieser auf Wochenende/Feiertag, am vorherigen Arbeitstag.';
+}
+async function refreshSicknessTile734(){
+  const dash=document.querySelector('#bossView .d3-dashboard');if(!dash||!navigator.onLine)return;
+  let tile=dash.querySelector('.d3-tile.sickness734');
+  if(!tile){
+    tile=document.createElement('button');tile.type='button';tile.className='d3-tile sickness734 dg734-sick-tile';
+    tile.innerHTML='<span>Krank-Fristen</span><strong id="d3Count-sickness734">…</strong>';
+    const payroll=dash.querySelector('.d3-tile.payroll');if(payroll)payroll.insertAdjacentElement('afterend',tile);else dash.appendChild(tile);
+    tile.addEventListener('click',()=>{try{if(typeof d3Open==='function')d3Open('d3Admin');}catch(_e){}setTimeout(()=>{ensureAbsenceUi734();const c=absenceCard734();if(c)c.scrollIntoView({behavior:'smooth',block:'start'});},100);});
+  }
+  try{
+    const x=await api(chefPayload({action:'getSicknessAlerts'})),rows=x?.alerts||[],n=Number(x?.count||0),strong=byId734('d3Count-sickness734');
+    if(strong)strong.textContent=String(n);tile.classList.toggle('hot',rows.some(r=>r.level==='error'));tile.title=n?rows.map(r=>r.employee+': '+r.title).join('\n'):'Keine kritischen Krank-Fristen.';
+    let list=byId734('dg734SicknessAlertList');const card=absenceCard734();
+    if(card&&!list){list=document.createElement('div');list.id='dg734SicknessAlertList';list.className='dg734-sick-alert-list';const summary=byId734('dg734AbsenceSummary');(summary||card.querySelector('h2'))?.insertAdjacentElement('afterend',list);}
+    if(list)list.innerHTML=rows.map(r=>'<div class="dg734-sick-alert-row"><strong>'+esc734(r.employee)+' · '+esc734(r.title)+'</strong><br><span class="muted">'+esc734(r.detail)+'</span></div>').join('');
+  }catch(_e){}
+}
 
 /* ---------- Abwesenheiten ---------- */
 function absenceCard734(){return byId734('absenceEmployee')?.closest('.card')||null;}
@@ -79,7 +103,7 @@ function recentCaseNeedsCheck734(overview){
   const start=String(byId734('absenceStart')?.value||'');const c=(overview?.sicknessCases||[])[0];return !!(start&&c&&c.end&&start<=sixMonthsAfter734(c.end));
 }
 function ensureAbsenceUi734(){
-  const card=absenceCard734();if(!card)return;
+  const card=absenceCard734();if(!card)return;card.id=card.id||'dg734AbsenceCard';
   const h=card.querySelector('h2');if(h)h.textContent='Abwesenheit eintragen';
   const sel=byId734('absenceType');
   if(sel){
@@ -132,7 +156,7 @@ function renderAbsenceSummary734(){
 async function refreshAbsence734(force){
   ensureAbsenceUi734();const emp=String(byId734('absenceEmployee')?.value||'');if(!emp){absenceOverview734=null;renderAbsenceSummary734();return;}
   try{
-    const y=year734();absenceOverview734=await api(chefPayload({action:'getAbsenceOverview',targetEmployee:emp,year:y,force:!!force}));
+    const y=year734();if(byId734('vacationEmployee'))byId734('vacationEmployee').value=emp;if(byId734('vacationYear'))byId734('vacationYear').value=String(y);absenceOverview734=await api(chefPayload({action:'getAbsenceOverview',targetEmployee:emp,year:y,force:!!force}));
     if(type734()==='Krank'){
       const mode=byId734('dg734SicknessMode');
       if(mode&&!mode.dataset.manual734){
@@ -185,7 +209,7 @@ function stamp734(){
 function install734(){
   css734();ensureAbsenceUi734();stamp734();
   const mode=byId734('dg734SicknessMode');if(mode&&!mode.dataset.manualListener734){mode.dataset.manualListener734='1';mode.addEventListener('change',()=>{mode.dataset.manual734='1';});}
-  refreshDue734(false);refreshAbsence734(false);
+  patchPayrollSubtitle734();refreshDue734(false);refreshAbsence734(false);refreshSicknessTile734();
   ['dg520Year','dg520Month'].forEach(id=>{const x=byId734(id);if(x&&!x.dataset.dg734){x.dataset.dg734='1';x.addEventListener('change',()=>refreshDue734(true));}});
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install734,0),{once:true});else setTimeout(install734,0);
