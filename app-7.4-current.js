@@ -118,17 +118,9 @@ function addTrainingOption733(){
   const sel=$733('absenceType');if(!sel||[...sel.options].some(o=>o.value==='Schulung'))return;
   const o=document.createElement('option');o.value='Schulung';o.textContent='Schulung';sel.appendChild(o);
 }
-function stamp733(){
-  try{
-    document.title='DG Zeiterfassung '+V733;
-    document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim()))x.textContent='Version '+V733;});
-    document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(x.textContent||''))x.textContent='Zeiterfassung - '+V733;});
-    window.DG_APP_VERSION=V733;window.DG_RELEASE=V733;if(window.DG3)DG3.version=V733;
-  }catch(_e){}
-}
+function stamp733(){ /* CLEAN 7.4.1: Versionsanzeige nur im aktuellen Runtime-Block */ }
 function install733(){css733();addTrainingOption733();ensureLegend733();decorate733();}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install733,0),{once:true});else setTimeout(install733,0);
-setTimeout(install733,600);
 })();
 
 
@@ -332,21 +324,13 @@ window.saveAbsenceUi=saveAbsenceUi=async function(){
 const adminBase734=window.loadChefAdministration;
 if(typeof adminBase734==='function')window.loadChefAdministration=async function(){const r=await adminBase734.apply(this,arguments);setTimeout(()=>{ensureAbsenceUi734();refreshAbsence734(false);},0);return r;};
 
-function stamp734(){
-  try{
-    document.title='DG Zeiterfassung '+V734;
-    document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim()))x.textContent='Version '+V734;});
-    document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(x.textContent||''))x.textContent='Zeiterfassung - '+V734;});
-    window.DG_APP_VERSION=V734;window.DG_RELEASE=V734;if(window.DG3)DG3.version=V734;
-  }catch(_e){}
-}
+function stamp734(){ /* CLEAN 7.4.1: Versionsanzeige nur im aktuellen Runtime-Block */ }
 function install734(){
   css734();ensureAbsenceUi734();
   const mode=byId734('dg734SicknessMode');if(mode&&!mode.dataset.manualListener734){mode.dataset.manualListener734='1';mode.addEventListener('change',()=>{mode.dataset.manual734='1';});}
   patchPayrollSubtitle734();refreshAbsence734(false);refreshSicknessTile734();
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install734,0),{once:true});else setTimeout(install734,0);
-setTimeout(install734,700);
 })();
 
 /* DG Zeiterfassung 7.3.5 - Gesundmeldung + einheitliche interne Notizen */
@@ -440,20 +424,12 @@ function patchText735(){
   const h=byId735('dg734SickHint');
   if(h)h.textContent='Krankheit endet automatisch am eingetragenen Bis-Datum. Bei früherer Rückkehr „Gesund melden“ verwenden; ab dem Rückkehrdatum werden Arbeitsstunden wieder normal gezählt. Es wird keine Diagnose gespeichert.';
 }
-function stamp735(){
-  try{
-    document.title='DG Zeiterfassung '+V735;
-    document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim()))x.textContent='Version '+V735;});
-    document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(x.textContent||''))x.textContent='Zeiterfassung - '+V735;});
-    window.DG_APP_VERSION=V735;window.DG_RELEASE=V735;if(window.DG3)DG3.version=V735;
-  }catch(_e){}
-}
+function stamp735(){ /* CLEAN 7.4.1: Versionsanzeige nur im aktuellen Runtime-Block */ }
 function install735(){
   patchText735();
   try{if(window.DG3&&DG3.active)patchRegieNotes735(DG3.active);}catch(_e){}
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install735,0),{once:true});else setTimeout(install735,0);
-setTimeout(install735,700);
 })();
 
 
@@ -685,6 +661,6 @@ function install(){
   ['dg520Year','dg520Month','empYear','empMonth'].forEach(id=>{const x=$(id);if(x&&!x.dataset.dg74){x.dataset.dg74='1';x.addEventListener('change',()=>{paintDue();cleanMonth();});}});
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install,0),{once:true});else setTimeout(install,0);
-setTimeout(install,450);
+setTimeout(install,180);
 })();
 
