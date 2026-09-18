@@ -29,9 +29,11 @@ function localDue(y,m){
   return iso(d);
 }
 function chef(extra){
+  const token=localStorage.getItem('dg_device_session')||'';
+  const sessionPin=sessionStorage.getItem('dg_employee_pin')||'';
   return Object.assign({
     employee:localStorage.getItem('dg_employee')||'',
-    employeePin:sessionStorage.getItem('dg_employee_pin')||''
+    employeePin:token||sessionPin
   },extra||{});
 }
 async function direct(payload,timeoutMs){
@@ -187,6 +189,12 @@ function setStatus(text,type){
 }
 async function forceClose(){
   const q=payrollSelection();
+  const token=localStorage.getItem('dg_device_session')||'';
+  const legacyPin=sessionStorage.getItem('dg_employee_pin')||'';
+  if(!token&&!legacyPin){
+    setStatus('Anmeldungssitzung fehlt. Bitte einmal abmelden und neu anmelden.','error');
+    return false;
+  }
   if(!confirm('Monat '+monthName(q.month)+' '+q.year+' ohne vorherige vollständige Prüfung abschließen? Der Vorgang wird dokumentiert.'))return false;
   const reason=prompt('Prüfvermerk / Grund:','Monat wurde bewusst ohne vollständige Prüfung abgeschlossen.');
   if(!reason||!String(reason).trim())return false;
