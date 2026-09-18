@@ -59,15 +59,7 @@ jobs:
               'app-7.0-shopping.js',
               'app-7.2-fixes.js',
               'app-7.2.1-offer-flow.js',
-              'app-7.3-payroll.js',
-              'app-7.3.1-fixes.js',
-              'app-7.3.2-auto-rollover.js',
-              'app-7.3.3-planner-availability.js',
-              'app-7.3.4-absence-payroll.js',
-              'app-7.3.5-health-note.js',
-              'app-7.3.6-force-payroll.js',
-              'app-7.3.7-payroll-final.js',
-              'app-7.4.0-final-fixes.js',
+              'app-7.4-current.js',
           ]
 
           chunks=[]
@@ -100,7 +92,7 @@ jobs:
           forbidden=[OLD_URL,'app-6.0-backend-compat.js',"const V='6.0'", "const V='6.0.1'", "const V='6.0.2'", "const V='6.0.3'"]
           for needle in forbidden:
               if needle in bundle: raise SystemExit('Legacy production value still present: '+needle)
-          required=[BACKEND_URL,'saveOwnReminderInternalNote','d3OwnReminderNote','dg70ShoppingOpen','dg72InspectionVisit','d3OfferDecision','dg731CompletePayroll','renderPayrollCycle732','loadAvailability733','refreshAbsence734','refreshDue734','dg735Healthy','patchRegieNotes735','dg736ForceRelease','paintCorrectDue737','ensureForce737','dg738ForceRelease','ensurePayrollDisplay738',"const V='7.4.0'"]
+          required=[BACKEND_URL,'saveOwnReminderInternalNote','d3OwnReminderNote','dg70ShoppingOpen','dg72InspectionVisit','d3OfferDecision','loadAvailability733','refreshAbsence734','dg735Healthy','paintDue','completePayroll','captureDayOpen',"const V='7.4.0'"]
           for needle in required:
               if needle not in bundle: raise SystemExit('Required DG 7.4.0 feature missing: '+needle)
           if 'new MutationObserver(stamp)' in bundle:
@@ -118,7 +110,7 @@ jobs:
           html=html.replace('</body>','<script defer src="./app-7.4.0.js?v='+BUILD+'"></script></body>')
           if len(re.findall(r'<script\b[^>]*\bsrc=["\'][^"\']*app-[^"\']+\.js',html,re.I))!=1:
               raise SystemExit('index.html must load exactly one external app JS')
-          if 'app-7.4.0.js?v='+BUILD not in html: raise SystemExit('DG 7.3.4 script missing in index')
+          if 'app-7.4.0.js?v='+BUILD not in html: raise SystemExit('DG 7.4.0 script missing in index')
           ip.write_text(html,encoding='utf-8')
 
           manifest={
@@ -147,5 +139,5 @@ jobs:
           git config user.email 'build@users.noreply.github.com'
           git rm -f --ignore-unmatch app-6.0.3.js app-6.0-backend-compat.js
           git add app-7.4.0.js index.html sw.js manifest.json
-          git commit -m 'v7.4.0: Lohnanzeige Zwangsuebergabe und Tagespruefung' || true
+          git commit -m 'v7.4.0: bereinigte aktuelle Laufzeit' || true
           git push origin HEAD:${GITHUB_REF_NAME}
