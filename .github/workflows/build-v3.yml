@@ -1,4 +1,4 @@
-name: Build DG 7.4.1 Production
+name: Build DG 7.4.2 Production
 on:
   push:
     branches: ['main']
@@ -28,14 +28,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Build one verified DG 7.4.1 browser bundle
+      - name: Build one verified DG 7.4.2 browser bundle
         run: |
           python - <<'PY'
           from pathlib import Path
           import re, json
 
-          VERSION='7.4.1'
-          BUILD='20260918-741-r1'
+          VERSION='7.4.2'
+          BUILD='20260918-742-clean1'
           OLD_URL='https://script.google.com/macros/s/AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc/exec'
           BACKEND_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec'
           sources=[
@@ -54,10 +54,10 @@ jobs:
           ]
 
           chunks=[]
-          release_guard=r'''/* DG 7.4.1 FINAL - einheitlicher sichtbarer Versionsstand */
+          release_guard=r'''/* DG 7.4.2 FINAL - einheitlicher sichtbarer Versionsstand */
           (function(){
           'use strict';
-          const V='7.4.1';
+          const V='7.4.2';
           function stamp(){
             if(document.title!=='DG Zeiterfassung '+V)document.title='DG Zeiterfassung '+V;
             document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim())&&x.textContent!=='Version '+V)x.textContent='Version '+V;});
@@ -83,16 +83,16 @@ jobs:
           forbidden=[OLD_URL,'app-6.0-backend-compat.js',"const V='6.0'", "const V='6.0.1'", "const V='6.0.2'", "const V='6.0.3'"]
           for needle in forbidden:
               if needle in bundle: raise SystemExit('Legacy production value still present: '+needle)
-          required=[BACKEND_URL,'saveOwnReminderInternalNote','d3OwnReminderNote','dg70ShoppingOpen','dg72InspectionVisit','d3OfferDecision','loadAvailability733','refreshAbsence734','dg735Healthy','paintDue','completePayroll','captureDayOpen',"const V='7.4.1'"]
+          required=[BACKEND_URL,'saveOwnReminderInternalNote','d3OwnReminderNote','dg70ShoppingOpen','dg72InspectionVisit','d3OfferDecision','loadAvailability733','refreshAbsence734','dg735Healthy','paintDue','completePayroll','captureDayOpen',"const V='7.4.2'"]
           for needle in required:
-              if needle not in bundle: raise SystemExit('Required DG 7.4.1 feature missing: '+needle)
-          if 'new MutationObserver(stamp)' in bundle:
-              raise SystemExit('Unsafe recursive release observer detected')
+              if needle not in bundle: raise SystemExit('Required DG 7.4.2 feature missing: '+needle)
+          if 'new MutationObserver(' in bundle:
+              raise SystemExit('Legacy DOM MutationObserver still present in production bundle')
           if 'DG Zeiterfassung 5.2.1 - Büro UX' in bundle or 'DG Zeiterfassung 5.2.4 - jede Auffaelligkeit' in bundle or 'DG Zeiterfassung 5.2.5 - Performance' in bundle:
               raise SystemExit('Legacy 5.2.x overlay still present in production bundle')
           for oldsrc in ('app-7.3-payroll.js','app-7.3.1-fixes.js','app-7.3.2-auto-rollover.js','app-7.3.6-force-payroll.js','app-7.3.7-payroll-final.js'):
               if ('CONSOLIDATED SOURCE: '+oldsrc) in bundle: raise SystemExit('Legacy 7.3 overlay source still present: '+oldsrc)
-          Path('app-7.4.1.js').write_text(bundle,encoding='utf-8')
+          Path('app-7.4.2.js').write_text(bundle,encoding='utf-8')
 
           # index.html: nur EIN produktives App-Script laden.
           ip=Path('index.html');html=ip.read_text(encoding='utf-8')
@@ -102,14 +102,14 @@ jobs:
           html=re.sub(r'<script\b[^>]*\bsrc=["\'][^"\']*app-[^"\']+\.js[^"\']*["\'][^>]*>\s*</script>','',html,flags=re.I)
           html=re.sub(r'app-5\.0\.css\?v=[^"\']+','app-5.0.css?v='+BUILD,html)
           html=re.sub(r'sw\.js\?v=[^"\']+','sw.js?v='+BUILD,html)
-          html=html.replace('</body>','<script defer src="./app-7.4.1.js?v='+BUILD+'"></script></body>')
+          html=html.replace('</body>','<script defer src="./app-7.4.2.js?v='+BUILD+'"></script></body>')
           if len(re.findall(r'<script\b[^>]*\bsrc=["\'][^"\']*app-[^"\']+\.js',html,re.I))!=1:
               raise SystemExit('index.html must load exactly one external app JS')
-          if 'app-7.4.1.js?v='+BUILD not in html: raise SystemExit('DG 7.4.1 script missing in index')
+          if 'app-7.4.2.js?v='+BUILD not in html: raise SystemExit('DG 7.4.2 script missing in index')
           ip.write_text(html,encoding='utf-8')
 
           manifest={
-            'id':'/DG-Zeiterfassung/','name':'DG Zeiterfassung 7.4.1','short_name':'DG 7.4.1',
+            'id':'/DG-Zeiterfassung/','name':'DG Zeiterfassung 7.4.2','short_name':'DG 7.4.2',
             'description':'Mobile Zeiterfassung und Büro-App für Del Gesso Gebäudetechnik',
             'start_url':'./','scope':'./','display':'standalone','display_override':['standalone','minimal-ui'],
             'background_color':'#f3f4f6','theme_color':'#111827','prefer_related_applications':False,
@@ -119,20 +119,35 @@ jobs:
           Path('manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 
           # Service Worker bleibt bewusst im Retirement-Modus; keine Alt-Caches mehr.
+          Path('sw.js').write_text("""/* DG Zeiterfassung CLEAN - retirement service worker.
+   Alte DG-Caches werden entfernt; die aktuelle App laedt immer direkt die versionierte JS-Datei. */
+self.addEventListener('install',event=>{event.waitUntil(self.skipWaiting());});
+self.addEventListener('activate',event=>{
+  event.waitUntil((async()=>{
+    try{
+      const keys=await caches.keys();
+      await Promise.all(keys.filter(k=>k.startsWith('dg-zeiterfassung-')).map(k=>caches.delete(k)));
+    }catch(_e){}
+    try{await self.registration.unregister();}catch(_e){}
+  })());
+});
+""",encoding='utf-8')
+
 
           PY
-          node --check app-7.4.1.js
+          node --check app-7.4.2.js
           node --check sw.js
           test "$(grep -Eo '<script[^>]+src=["'"'][^"'"']*app-[^"'"']+\.js' index.html | wc -l)" -eq 1
-          grep -q 'app-7.4.1.js' index.html
-          grep -q 'DG Zeiterfassung 7.4.1' manifest.json
-          ! grep -q 'app-6.0-backend-compat.js' app-7.4.1.js
-          ! grep -q 'new MutationObserver(stamp)' app-7.4.1.js
-      - name: Publish final DG 7.4.1 files
+          grep -q 'app-7.4.2.js' index.html
+          grep -q 'DG Zeiterfassung 7.4.2' manifest.json
+          ! grep -q 'app-6.0-backend-compat.js' app-7.4.2.js
+          ! grep -q 'new MutationObserver(' app-7.4.2.js
+          grep -q 'retirement service worker' sw.js
+      - name: Publish final DG 7.4.2 files
         run: |
           git config user.name 'DG Build'
           git config user.email 'build@users.noreply.github.com'
           git rm -f --ignore-unmatch app-6.0.3.js app-6.0-backend-compat.js
-          git add app-7.4.1.js index.html manifest.json
-          git commit -m 'v7.4.1: Clean Runtime ohne Legacy Overlays' || true
+          git add app-7.4.2.js index.html manifest.json sw.js
+          git commit -m 'v7.4.2: einzige aktuelle Runtime ohne Alt-Overlays' || true
           git push origin HEAD:${GITHUB_REF_NAME}
