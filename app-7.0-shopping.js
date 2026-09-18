@@ -143,10 +143,10 @@ window.dg70ShopSpeech=function(){
   rec.onresult=e=>{
     for(let i=e.resultIndex;i<e.results.length;i++){
       const result=e.results[i];if(!result||!result.isFinal)continue;
-      const t=cleanLine70(result[0]&&result[0].transcript),n=String(t||'').toLowerCase().replace(/\\s+/g,' ').trim(),key=String(i)+'|'+n;
+      const t=cleanLine70(result[0]&&result[0].transcript),n=String(t||'').toLowerCase().replace(/\s+/g,' ').trim(),key=String(i)+'|'+n;
       if(!n||processed.has(key))continue;processed.add(key);
       const now=Date.now();if(n===lastFinal&&now-lastFinalAt<3500)continue;lastFinal=n;lastFinalAt=now;
-      const existing=lines70(ta.value),last=String(existing[existing.length-1]||'').toLowerCase().replace(/\\s+/g,' ').trim();
+      const existing=lines70(ta.value),last=String(existing[existing.length-1]||'').toLowerCase().replace(/\s+/g,' ').trim();
       if(last===n)continue;
       ta.value=existing.concat([t]).map(x=>'- '+x).join('\n');
       ta.scrollTop=ta.scrollHeight;
