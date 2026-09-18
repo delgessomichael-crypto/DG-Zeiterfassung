@@ -40,7 +40,7 @@ window.applyDayStatus=function(status){
   if(close)close.classList.toggle('hidden',blocked);
   const old=q72('dg72DayLock');if(old)old.remove();
   if(blocked){
-    const h=Number(window.lastDayData&&lastDayData.creditedHours||0);
+    const h=Number((typeof lastDayData!=='undefined'&&lastDayData)?lastDayData.creditedHours:0)||0;
     const box=document.createElement('div');box.id='dg72DayLock';box.className='dg72-day-lock';
     box.innerHTML='<strong>'+esc72(status)+'</strong>'+
       (h>0?esc72(typeof formatHours==='function'?formatHours(h):h)+' Std. werden automatisch gutgeschrieben. ':'')+
