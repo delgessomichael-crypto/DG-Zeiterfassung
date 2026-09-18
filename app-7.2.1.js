@@ -3524,7 +3524,7 @@ window.d3Api=d3Api=async function(payload){
   const run=(async()=>{
     if(action!=='ping'&&(!window.DG3||!compatible(DG3.backend))){const ok=await d3CheckBackend(true);if(!ok)throw dgError('App '+V+' kann nicht speichern/laden, weil Google-GS '+foundVersion()+' aktiv ist. Benötigt wird Google-GS '+V+'.','version');}
     if(window.DG3&&!read)DG3.pending=(DG3.pending||0)+1;
-    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);
+    const controller=new AbortController(),timeoutMs=['getMonthPayrollAudit','createTaxAdvisorPdf','setPayrollMonthStatus','completePayrollCycle'].includes(action)?180000:65000,timer=setTimeout(()=>controller.abort(),timeoutMs);
     try{
       let response;try{response=await fetch(BACKEND_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({},payload,{clientVersion:V})),signal:controller.signal});}catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Speichern zuerst Daten neu laden.':'Keine Serververbindung.','network');}
       if(!response.ok)throw dgError('HTTP '+response.status,'network');
