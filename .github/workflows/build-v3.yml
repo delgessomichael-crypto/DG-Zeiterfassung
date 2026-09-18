@@ -122,11 +122,11 @@ jobs:
           grep -q 'DG Zeiterfassung 7.2.1' manifest.json
           ! grep -q 'app-6.0-backend-compat.js' app-7.2.1.js
           ! grep -q 'new MutationObserver(stamp)' app-7.2.1.js
-      - name: Publish final DG 7.2 files
+      - name: Publish final DG 7.2.1 files
         run: |
           git config user.name 'DG Build'
           git config user.email 'build@users.noreply.github.com'
           git rm -f --ignore-unmatch app-6.0.3.js app-6.0-backend-compat.js
-          git add app-7.2.js index.html sw.js manifest.json
+          git add app-7.2.1.js index.html sw.js manifest.json
           git commit -m 'v7.2: Urlaub Feiertag und Besichtigungszeiten' || true
           git push origin HEAD:${GITHUB_REF_NAME}
