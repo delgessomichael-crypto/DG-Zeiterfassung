@@ -26,7 +26,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Build one verified DG 7.0 browser bundle
+      - name: Build one verified DG 7.2 browser bundle
         run: |
           python - <<'PY'
           from pathlib import Path
