@@ -31,7 +31,7 @@ jobs:
           import re, json
 
           VERSION='7.0'
-          BUILD='20260917-final3'
+          BUILD='20260918-final4'
           OLD_URL='https://script.google.com/macros/s/AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc/exec'
           BACKEND_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec'
           sources=[
@@ -122,5 +122,5 @@ jobs:
           git config user.email 'build@users.noreply.github.com'
           git rm -f --ignore-unmatch app-6.0.3.js app-6.0-backend-compat.js
           git add app-7.0.js index.html sw.js manifest.json
-          git commit -m 'v7.0: final3 start-freeze fix' || true
+          git commit -m 'v7.0: final4 Einkauf und Angebotsnavigation' || true
           git push origin HEAD:${GITHUB_REF_NAME}
