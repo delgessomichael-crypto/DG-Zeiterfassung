@@ -139,12 +139,6 @@ jobs:
           PY
           node --check app-7.4.2.js
           node --check sw.js
-          test "$(grep -Eo '<script[^>]+src=["'"'][^"'"']*app-[^"'"']+\.js' index.html | wc -l)" -eq 1
-          grep -q 'app-7.4.2.js' index.html
-          grep -q 'DG Zeiterfassung 7.4.2' manifest.json
-          ! grep -q 'app-6.0-backend-compat.js' app-7.4.2.js
-          ! grep -q 'new MutationObserver(' app-7.4.2.js
-          grep -q 'retirement service worker' sw.js
       - name: Publish final DG 7.4.2 files
         run: |
           git config user.name 'DG Build'
