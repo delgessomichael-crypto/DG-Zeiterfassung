@@ -1,149 +1,60 @@
-name: Build DG 7.4.2 Production
+name: Validate DG 7.4.2 Clean Production
 on:
   push:
     branches: ['main']
     paths:
-      - 'app-5.0.js'
-      - 'app-6.0-runtime.js'
-      - 'app-6.0-ui.js'
-      - 'app-6.0.1-fix.js'
-      - 'app-6.0.2-reminders.js'
-      - 'app-6.0.3-backend.js'
-      - 'app-6.0.3-final.js'
-      - 'app-6.0.3-reminder-notes.js'
-      - 'app-7.0-shopping.js'
-      - 'app-7.2-fixes.js'
-      - 'app-7.2.1-offer-flow.js'
-      - 'app-7.4-current.js'
+      - 'app-7.4.2.js'
+      - 'index.html'
+      - 'manifest.json'
+      - 'sw.js'
       - '.github/workflows/build-v3.yml'
+  workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 jobs:
-  build:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Build one verified DG 7.4.2 browser bundle
+      - name: Validate single clean runtime
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          import re, json
-
-          VERSION='7.4.2'
-          BUILD='20260918-742-clean1'
-          OLD_URL='https://script.google.com/macros/s/AKfycbyFHSno-zZJetrAsH00fybiuxYw8xfYVo0kkWxhYLHNxDK4fqn5yijJfokrMvG6C4oc/exec'
-          BACKEND_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec'
-          sources=[
-              'app-5.0.js',
-              'app-6.0-runtime.js',
-              'app-6.0.3-backend.js',
-              'app-6.0-ui.js',
-              'app-6.0.1-fix.js',
-              'app-6.0.2-reminders.js',
-              'app-6.0.3-final.js',
-              'app-6.0.3-reminder-notes.js',
-              'app-7.0-shopping.js',
-              'app-7.2-fixes.js',
-              'app-7.2.1-offer-flow.js',
-              'app-7.4-current.js',
-          ]
-
-          chunks=[]
-          release_guard=r'''/* DG 7.4.2 FINAL - einheitlicher sichtbarer Versionsstand */
-          (function(){
-          'use strict';
-          const V='7.4.2';
-          function stamp(){
-            if(document.title!=='DG Zeiterfassung '+V)document.title='DG Zeiterfassung '+V;
-            document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim())&&x.textContent!=='Version '+V)x.textContent='Version '+V;});
-            document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(x.textContent||'')&&x.textContent!=='Zeiterfassung - '+V)x.textContent='Zeiterfassung - '+V;});
-            try{window.DG_APP_VERSION=V;window.DG_RELEASE=V;if(window.DG3)DG3.version=V;}catch(_e){}
-          }
-          if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',stamp,{once:true});else stamp();
-          })();'''
-          chunks.append(release_guard)
-
-          for name in sources:
-              p=Path(name)
-              if not p.exists(): raise SystemExit('Missing source: '+name)
-              text=p.read_text(encoding='utf-8')
-              text=text.replace(OLD_URL,BACKEND_URL)
-              # Nur der Produktionsbundle bekommt den neuen Stand. Historische Quelldateien bleiben als Bauquellen erhalten.
-              for old in ('6.0.3','6.0.2','6.0.1','6.0'):
-                  text=text.replace(old,VERSION)
-              text=text.replace("KEY='dg603_backend'","KEY='dg70_backend'")
-              chunks.append('/* ===== CONSOLIDATED SOURCE: '+name+' ===== */\n'+text.rstrip()+'\n;')
-
-          bundle='\n\n'.join(chunks)+'\n'
-          forbidden=[OLD_URL,'app-6.0-backend-compat.js',"const V='6.0'", "const V='6.0.1'", "const V='6.0.2'", "const V='6.0.3'"]
-          for needle in forbidden:
-              if needle in bundle: raise SystemExit('Legacy production value still present: '+needle)
-          required=[BACKEND_URL,'saveOwnReminderInternalNote','d3OwnReminderNote','dg70ShoppingOpen','dg72InspectionVisit','d3OfferDecision','loadAvailability733','refreshAbsence734','dg735Healthy','paintDue','completePayroll','captureDayOpen',"const V='7.4.2'"]
-          for needle in required:
-              if needle not in bundle: raise SystemExit('Required DG 7.4.2 feature missing: '+needle)
-          if 'new MutationObserver(' in bundle:
-              raise SystemExit('Legacy DOM MutationObserver still present in production bundle')
-          if 'DG Zeiterfassung 5.2.1 - Büro UX' in bundle or 'DG Zeiterfassung 5.2.4 - jede Auffaelligkeit' in bundle or 'DG Zeiterfassung 5.2.5 - Performance' in bundle:
-              raise SystemExit('Legacy 5.2.x overlay still present in production bundle')
-          for oldsrc in ('app-7.3-payroll.js','app-7.3.1-fixes.js','app-7.3.2-auto-rollover.js','app-7.3.6-force-payroll.js','app-7.3.7-payroll-final.js'):
-              if ('CONSOLIDATED SOURCE: '+oldsrc) in bundle: raise SystemExit('Legacy 7.3 overlay source still present: '+oldsrc)
-          Path('app-7.4.2.js').write_text(bundle,encoding='utf-8')
-
-          # index.html: nur EIN produktives App-Script laden.
-          ip=Path('index.html');html=ip.read_text(encoding='utf-8')
-          html=re.sub(r'DG Zeiterfassung\s+\d+(?:\.\d+)*','DG Zeiterfassung '+VERSION,html)
-          html=re.sub(r'Version\s+\d+(?:\.\d+)*','Version '+VERSION,html)
-          html=re.sub(r'Zeiterfassung\s*-\s*\d+(?:\.\d+)*','Zeiterfassung - '+VERSION,html)
-          html=re.sub(r'<script\b[^>]*\bsrc=["\'][^"\']*app-[^"\']+\.js[^"\']*["\'][^>]*>\s*</script>','',html,flags=re.I)
-          html=re.sub(r'app-5\.0\.css\?v=[^"\']+','app-5.0.css?v='+BUILD,html)
-          html=re.sub(r'sw\.js\?v=[^"\']+','sw.js?v='+BUILD,html)
-          html=html.replace('</body>','<script defer src="./app-7.4.2.js?v='+BUILD+'"></script></body>')
-          if len(re.findall(r'<script\b[^>]*\bsrc=["\'][^"\']*app-[^"\']+\.js',html,re.I))!=1:
-              raise SystemExit('index.html must load exactly one external app JS')
-          if 'app-7.4.2.js?v='+BUILD not in html: raise SystemExit('DG 7.4.2 script missing in index')
-          ip.write_text(html,encoding='utf-8')
-
-          manifest={
-            'id':'/DG-Zeiterfassung/','name':'DG Zeiterfassung 7.4.2','short_name':'DG 7.4.2',
-            'description':'Mobile Zeiterfassung und Büro-App für Del Gesso Gebäudetechnik',
-            'start_url':'./','scope':'./','display':'standalone','display_override':['standalone','minimal-ui'],
-            'background_color':'#f3f4f6','theme_color':'#111827','prefer_related_applications':False,
-            'icons':[{'src':'./dg_icon_192.png','sizes':'192x192','type':'image/png','purpose':'any'},
-                     {'src':'./dg_icon_512.png','sizes':'512x512','type':'image/png','purpose':'any'}]
-          }
-          Path('manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
-
-          # Service Worker bleibt bewusst im Retirement-Modus; keine Alt-Caches mehr.
-          retirement = (
-              "/* DG Zeiterfassung CLEAN - retirement service worker.\\n"
-              "   Alte DG-Caches werden entfernt; die aktuelle App laedt immer direkt die versionierte JS-Datei. */\\n"
-              "self.addEventListener('install',event=>{event.waitUntil(self.skipWaiting());});\\n"
-              "self.addEventListener('activate',event=>{\\n"
-              "  event.waitUntil((async()=>{\\n"
-              "    try{\\n"
-              "      const keys=await caches.keys();\\n"
-              "      await Promise.all(keys.filter(k=>k.startsWith('dg-zeiterfassung-')).map(k=>caches.delete(k)));\\n"
-              "    }catch(_e){}\\n"
-              "    try{await self.registration.unregister();}catch(_e){}\\n"
-              "  })());\\n"
-              "});\\n"
-          )
-          Path('sw.js').write_text(retirement,encoding='utf-8')
-
-
-          PY
           node --check app-7.4.2.js
           node --check sw.js
-      - name: Publish final DG 7.4.2 files
-        run: |
-          git config user.name 'DG Build'
-          git config user.email 'build@users.noreply.github.com'
-          git rm -f --ignore-unmatch app-6.0.3.js app-6.0-backend-compat.js
-          git add app-7.4.2.js index.html manifest.json sw.js
-          git commit -m 'v7.4.2: einzige aktuelle Runtime ohne Alt-Overlays' || true
-          git push origin HEAD:${GITHUB_REF_NAME}
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          html=Path('index.html').read_text(encoding='utf-8')
+          app=Path('app-7.4.2.js').read_text(encoding='utf-8')
+          refs=re.findall(r'<script\b[^>]*\bsrc=["\']([^"\']*app-[^"\']+\.js[^"\']*)["\']',html,re.I)
+          if refs != ['./app-7.4.2.js?v=20260918-742-clean2']:
+              raise SystemExit('index.html must load only current 7.4.2 runtime: '+repr(refs))
+          forbidden=[
+              'DG Zeiterfassung 5.2.1 - Büro UX',
+              'DG Zeiterfassung 5.2.4 - jede Auffaelligkeit',
+              'DG Zeiterfassung 5.2.5 - Performance',
+              'new MutationObserver(',
+              'serviceWorker.register(',
+              'CONSOLIDATED SOURCE: app-7.3-payroll.js',
+              'CONSOLIDATED SOURCE: app-7.3.6-force-payroll.js',
+              'CONSOLIDATED SOURCE: app-7.3.7-payroll-final.js'
+          ]
+          bad=[x for x in forbidden if x in app]
+          if bad: raise SystemExit('legacy runtime content found: '+repr(bad))
+          required=[
+              'dg70ShoppingOpen','dg72InspectionVisit','d3OfferDecision',
+              'loadAvailability733','refreshAbsence734','dg735Healthy',
+              'paintDue','completePayroll','captureDayOpen',
+              'Alles überprüft – trotzdem an Steuerberater übergeben'
+          ]
+          missing=[x for x in required if x not in app]
+          if missing: raise SystemExit('required current features missing: '+repr(missing))
+          if 'DG Zeiterfassung 7.4.2' not in html:
+              raise SystemExit('index version is not 7.4.2')
+          sw=Path('sw.js').read_text(encoding='utf-8')
+          if 'retirement service worker' not in sw or 'caches.delete' not in sw:
+              raise SystemExit('retirement service worker missing')
+          print('DG 7.4.2 clean runtime validated')
+          PY
