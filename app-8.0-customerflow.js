@@ -25,34 +25,33 @@ function gapDays81(a,b){
 function customerName81(v){
   var s=String(v||'').trim();
   if(!s)return'';
-  s=s.split(/s*,?s+-s+/)[0];
-  var zip=s.search(/\bd{5}\b/);if(zip>0)s=s.slice(0,zip);
-  s=s.replace(/([^)]*)/g,' ');
+  s=s.split(/\s*,?\s+-\s+/)[0];
+  var zip=s.search(/\b\d{5}\b/);if(zip>0)s=s.slice(0,zip);
+  s=s.replace(/\([^)]*\)/g,' ');
   s=norm81(s)
-    .replace(/^(?:frau|herr|familie|fam|eheleute|firma|fa|dr|prof)\b.?s*/g,'')
+    .replace(/^(?:frau|herr|familie|fam|eheleute|firma|fa|dr|prof)\b\.?\s*/g,'')
     .replace(/\b(?:nk|bk|mh|wa|bes|wp|klima|aqon)\b/g,' ')
-    .replace(/\bans*d+[a-z]?\b/g,' ')
+    .replace(/\ban\s*\d+[a-z]?\b/g,' ')
     .replace(/\s+/g,' ').trim();
   return s;
 }
 function stripUnit81(v){
   var s=String(v||'').trim();
-  s=s.replace(/\b(?:wohnung|whg.?|wohneinheit|we)s*[-:#]?s*[w.-]+.*$/i,'');
-  s=s.replace(/(?:[,;s]+)(?:eg|dg|ug|kg|d+s*.?s*og)\b.*$/i,'');
-  return s.replace(/[s,;-]+$/g,'').trim();
+  s=s.replace(/\b(?:wohnung|whg\.?|wohneinheit|we)\s*[-:#]?\s*[\w.-]+.*$/i,'');
+  s=s.replace(/(?:[,;\s]+)(?:eg|dg|ug|kg|\d+\s*\.?\s*og)\b.*$/i,'');
+  return s.replace(/[\s,;-]+$/g,'').trim();
 }
 function addressDisplay81(v){
   if(!v)return'';
-  var s=String(v).trim(),m=s.match(/s*,?s+-s+(.+)$/);
+  var s=String(v).trim(),m=s.match(/\s*,?\s+-\s+(.+)$/);
   if(m)s=m[1].trim();
-  if(!/d/.test(s)&&!/stra(?:ss|ß)e|str.|weg|platz|allee|gasse|ring/i.test(s))return'';
+  if(!/\d/.test(s)&&!/stra(?:ss|\u00df)e|str\.|weg|platz|allee|gasse|ring/i.test(s))return'';
   return stripUnit81(s);
 }
 function reportAddresses81(r){
   var raw=(r&&(r.executionAddress||r.address||r.location||r.siteAddress))||'';
   var a=[];
-  if(raw)String(raw).split(/[
-;|]+/).forEach(function(x){x=stripUnit81(x);if(x)a.push(x);});
+  if(raw)String(raw).split(/[\n;|]+/).forEach(function(x){x=stripUnit81(x);if(x)a.push(x);});
   var fromCustomer=addressDisplay81(r&&r.customer);if(fromCustomer)a.push(fromCustomer);
   return unique81(a);
 }
@@ -62,15 +61,15 @@ function addressKey81(v){
 }
 function tokens81(text){
   var s=String(text||''),out=[],m;
-  var rx=/\b(?:AN|ANG|AUF|BES|KT)s*[-:#]?s*[A-Z0-9-]{2,}\b/gi;
+  var rx=/\b(?:AN|ANG|AUF|BES|KT)\s*[-:#]?\s*[A-Z0-9-]{2,}\b/gi;
   while((m=rx.exec(s)))out.push(norm81(m[0]).replace(/\s+/g,''));
   return unique81(out);
 }
 function contacts81(text){
-  var s=String(text||''),out=[],mail=s.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+.[A-Z]{2,}/gi)||[];
+  var s=String(text||''),out=[],mail=s.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)||[];
   mail.forEach(function(x){out.push('m:'+norm81(x));});
-  var ph=s.match(/(?:+?49|0)[\ds()/-]{6,}/g)||[];
-  ph.forEach(function(x){var d=x.replace(/D/g,'');if(d.length>=7)out.push('p:'+d.replace(/^49/,'0'));});
+  var ph=s.match(/(?:\+?49|0)[\d\s()\/-]{6,}/g)||[];
+  ph.forEach(function(x){var d=x.replace(/\D/g,'');if(d.length>=7)out.push('p:'+d.replace(/^49/,'0'));});
   return unique81(out);
 }
 function meta81(g){
@@ -85,8 +84,8 @@ function meta81(g){
   });
   var displays=[];all.forEach(function(r){reportAddresses81(r).forEach(function(x){displays.push(x);});});
   var maintenance=all.some(function(r){return bool81(r.isMaintenance)||bool81(r.maintenance);})||/\bwartung(?:sauftrag|svertrag)?\b/i.test(joined);
-  var detailed=displays.length>0||texts.some(function(x){return /\bd{5}\b/.test(String(x||''));});
-  var bare=all.some(function(r){var c=String(r.customer||'').trim();return !!customerName81(c)&&!addressDisplay81(c)&&!/(?:d{5}|stra(?:ss|ß)e|str.|weg|platz|allee|gasse|ring)/i.test(c);});
+  var detailed=displays.length>0||texts.some(function(x){return /\b\d{5}\b/.test(String(x||''));});
+  var bare=all.some(function(r){var c=String(r.customer||'').trim();return !!customerName81(c)&&!addressDisplay81(c)&&!/(?:\d{5}|stra(?:ss|\u00df)e|str\.|weg|platz|allee|gasse|ring)/i.test(c);});
   return {group:g,names:names,addresses:unique81(addresses),displayAddresses:unique81(displays),sourceIds:unique81(sourceIds),maintCustomers:unique81(maintCustomers),maintObjects:unique81(maintObjects),orderTokens:tokens81(joined),contacts:contacts81(joined),maintenance:maintenance,detailed:detailed,bare:bare,firstDate:g.firstDate||(reports[0]&&reports[0].date)||'',lastDate:g.lastDate||(reports[reports.length-1]&&reports[reports.length-1].date)||g.firstDate||''};
 }
 function strongMatch81(a,b){
@@ -119,8 +118,7 @@ async function absorbManualOrder81(order,m){
   }
   try{
     var objectId=ids[0],old=await api(chefPayload({action:'getObjectInternalNote',objectId:objectId})),prefix='Auftragsplanung uebernommen: ',extra=prefix+String(order.description||order.customer||'')+(order.address?' | '+String(order.address):'')+(order.internalNote?' | '+String(order.internalNote):'');
-    if(String(old&&old.note||'').indexOf(prefix)<0)await api(chefPayload({action:'saveObjectInternalNote',objectId:objectId,note:[String(old&&old.note||'').trim(),extra].filter(Boolean).join('
-')}));
+    if(String(old&&old.note||'').indexOf(prefix)<0)await api(chefPayload({action:'saveObjectInternalNote',objectId:objectId,note:[String(old&&old.note||'').trim(),extra].filter(Boolean).join('\n')}));
   }catch(_e){}
   await api(chefPayload({action:'setManualOrderStatus',id:order.id,status:'In Regiebericht uebernommen'}));
   return true;
@@ -183,8 +181,8 @@ window.dg81ReconcileRegie=function(){STATE.lastRun=0;return reconcile81(true);};
 
 function manualStage81(x){var s=String(x&&x.status||'');if(s==='Angebot zu erstellen')return'Zu erstellen';if(s==='Offenes Angebot')return'Offen';if(s==='Angebot Abgelehnt')return'Archiv';return'';}
 function isManualOffer81(x){return String(x&&x.source||'')==='Angebotsanfrage'||/^ANGREQ-/.test(String(x&&x.id||''));}
-function offerNumber81(x){var m=String(x&&x.internalNote||'').match(/[DG-ANGEBOT:([^]]+)]/);return m?m[1].trim():'';}
-function visibleNote81(x){return String(x&&x.internalNote||'').replace(/^[DG-ANGEBOT:[^]]+]s*/,'').trim();}
+function offerNumber81(x){var m=String(x&&x.internalNote||'').match(/\[DG-ANGEBOT:([^\]]+)\]/);return m?m[1].trim():'';}
+function visibleNote81(x){return String(x&&x.internalNote||'').replace(/^\[DG-ANGEBOT:[^\]]+\]\s*/,'').trim();}
 function dueIn81(days){var d=new Date();d.setDate(d.getDate()+Number(days||5));return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 async function manualOrders81(){var rows=await api(chefPayload({action:'getManualOrders',status:'Alle'}))||[];STATE.manualOrders=rows.filter(isManualOffer81);return STATE.manualOrders;}
 function manualById81(id){return STATE.manualOrders.find(function(x){return String(x.id)===String(id);});}
@@ -212,7 +210,7 @@ function updateOfferCounts81(all){
   var mc=all.filter(function(x){return manualStage81(x)==='Zu erstellen';}).length,mo=all.filter(function(x){return manualStage81(x)==='Offen';}).length,ma=all.filter(function(x){return manualStage81(x)==='Archiv';}).length;
   var rc=window.DG3&&DG3.offers&&Array.isArray(DG3.offers['Zu erstellen'])?DG3.offers['Zu erstellen'].length:0,ro=window.DG3&&DG3.offers&&Array.isArray(DG3.offers.Offen)?DG3.offers.Offen.length:0,ra=window.DG3&&DG3.offers&&Array.isArray(DG3.offers.Archiv)?DG3.offers.Archiv.length:0;
   if(window.DG3)DG3.offerCounts={open:ro+mo,create:rc+mc};
-  var buttons=document.querySelectorAll('#d3Offers .d3-menu [\data-panel]');buttons.forEach(function(b){var p=b.getAttribute('data-panel'),n=null,label='';if(p==='d3OfferOpen'){n=ro+mo;label='Offene Angebote';}if(p==='d3OfferCreate'){n=rc+mc;label='Angebote zu erstellen';}if(p==='d3OfferArchive'){n=ra+ma;label='Angebotsarchiv';}if(n!==null)b.innerHTML=esc81(label)+' <span class="dg60-count">'+n+'</span>';});
+  var buttons=document.querySelectorAll('#d3Offers .d3-menu [data-panel]');buttons.forEach(function(b){var p=b.getAttribute('data-panel'),n=null,label='';if(p==='d3OfferOpen'){n=ro+mo;label='Offene Angebote';}if(p==='d3OfferCreate'){n=rc+mc;label='Angebote zu erstellen';}if(p==='d3OfferArchive'){n=ra+ma;label='Angebotsarchiv';}if(n!==null)b.innerHTML=esc81(label)+' <span class="dg60-count">'+n+'</span>';});
   if(typeof d3Count==='function')d3Count('offers',rc+mc);
 }
 async function appendManualOffers81(stage){
@@ -235,8 +233,7 @@ window.dg81NewOfferRequest=function(){
 window.dg81ManualOfferCreated=function(id){
   var x=manualById81(id);if(!x)return false;
   d3Form('Angebot erstellt – Reminder festlegen',[{name:'offerNumber',label:'Angebotsnummer',required:true},{name:'reminderDate',label:'Erinnerung am',type:'date',required:true},{name:'internalNote',label:'Interner Vermerk',type:'textarea'}],{offerNumber:offerNumber81(x),reminderDate:dueIn81(5),internalNote:visibleNote81(x)},async function(v){
-    var note='[DG-ANGEBOT:'+String(v.offerNumber).trim()+']'+(String(v.internalNote||'').trim()?'
-'+String(v.internalNote).trim():'');await api(chefPayload({action:'saveManualOrderNote',id:x.id,note:note}));await api(chefPayload({action:'setManualOrderStatus',id:x.id,status:'Offenes Angebot'}));
+    var note='[DG-ANGEBOT:'+String(v.offerNumber).trim()+']'+(String(v.internalNote||'').trim()?'\n'+String(v.internalNote).trim():'');await api(chefPayload({action:'saveManualOrderNote',id:x.id,note:note}));await api(chefPayload({action:'setManualOrderStatus',id:x.id,status:'Offenes Angebot'}));
     await api(chefPayload({action:'createOwnReminder',item:{text:'Angebot '+String(v.offerNumber).trim()+' · '+String(x.customer||'')+' nachfassen',dueDate:v.reminderDate,files:[]}}));await window.loadOffers('Zu erstellen');if(typeof d3Open==='function')d3Open('d3Offers','d3OfferOpen');await window.loadOffers('Offen');
   });return false;
 };
