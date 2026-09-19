@@ -237,7 +237,7 @@
 (function(){
   if(!('serviceWorker' in navigator))return;
   window.addEventListener('load',function(){
-    navigator.serviceWorker.register('./sw-8.0-prod.js?v=20260919-800-ui14',{updateViaCache:'none'})
+    navigator.serviceWorker.register('./sw-8.0-prod.js?v=20260919-800-ui15',{updateViaCache:'none'})
       .then(function(r){return r.update();})
       .catch(function(e){console.warn('DG Offline-Cache nicht bereit',e);});
   },{once:true});
@@ -247,7 +247,7 @@
 <script defer src="./app-8.0.js?v=20260918-800-prod1"></script>
 <script defer src="./app-8.0-customerflow.js?v=20260919-customerflow2"></script>
 <script defer src="./payroll-hotfix-8.0.js?v=20260919-800-ui8"></script>
-<script defer src="./ui-hotfix-8.0.js?v=20260919-800-ui14"></script>
+<script defer src="./ui-hotfix-8.0.js?v=20260919-800-ui15"></script>
 <script>
 (function(){
 'use strict';
