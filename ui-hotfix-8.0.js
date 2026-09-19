@@ -1711,3 +1711,170 @@ function install(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
+
+
+/* DG Zeiterfassung 8.0 - UI Hotfix 17
+   Jahreszaehler "Erstellte Angebote", Mitarbeiter-Tab blau,
+   einheitliche App-Aktionsleiste mit Aktualisieren. */
+(function(){
+'use strict';
+const V='8.0-ui17';
+const q=id=>document.getElementById(id);
+const S=window.DG80_UI17=window.DG80_UI17||{offers:[],offerYear:null,busy:false,timer:null};
+const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function apiCall(payload){
+  if(typeof window.api!=='function')throw new Error('Backend nicht bereit.');
+  if(typeof window.chefPayload==='function')return window.api(window.chefPayload(payload));
+  return window.api(payload);
+}
+function year(){return new Date().getFullYear();}
+function parseDateValue(v){
+  if(v==null||v==='')return null;
+  if(v instanceof Date&&!isNaN(v))return v;
+  const s=String(v).trim();
+  let m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m)return new Date(+m[1],+m[2]-1,+m[3],12);
+  m=s.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+  if(m)return new Date(+m[3],+m[2]-1,+m[1],12);
+  const d=new Date(s);return isNaN(d)?null:d;
+}
+function createdDate(r){
+  const keys=['offerCreatedAt','createdAt','createdDate','creationDate','dateCreated','reminderCreatedAt','insertedAt','created','date'];
+  for(const k of keys){const d=parseDateValue(r&&r[k]);if(d)return d;}
+  return null;
+}
+function deDate(d){return d?String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0')+'.'+d.getFullYear():'–';}
+function uniqueOffers(rows){
+  const map=new Map();
+  (rows||[]).forEach(r=>{
+    const key=String(r.offerId||r.offerNumber||r.id||((r.customer||'')+'|'+(r.createdAt||r.dueDate||'')));
+    if(!map.has(key))map.set(key,r);
+    else map.set(key,Object.assign({},map.get(key),r));
+  });
+  return [...map.values()];
+}
+
+function ensureCss(){
+  if(q('dg80Ui17Css'))return;
+  const s=document.createElement('style');s.id='dg80Ui17Css';
+  s.textContent=''
+    +'#employeeTab{background:#dbeafe!important;border-color:#93c5fd!important;color:#1d4ed8!important;font-weight:900!important}'
+    +'#employeeTab.active{background:#2563eb!important;border-color:#2563eb!important;color:#fff!important}'
+    +'#dg60OfficeToolbar{display:grid!important;grid-template-columns:1fr 1fr!important;gap:14px!important;justify-content:stretch!important;padding:10px 12px!important}'
+    +'#dg60OfficeToolbar button{width:100%!important;min-height:52px!important;border-radius:11px!important;padding:11px 16px!important;font-weight:900!important;font-size:16px!important;cursor:pointer!important}'
+    +'#dg60RefreshApp{border:0!important;background:#2563eb!important;color:#fff!important}'
+    +'#dg60OpenWindow{width:100%!important;min-height:52px!important}'
+    +'#bossView .dg80-created-offers-tile{background:#e8f7ea!important;border:1px solid #b9e4c1!important;color:#185c2c!important}'
+    +'#bossView .dg80-created-offers-tile span,#bossView .dg80-created-offers-tile strong{color:#185c2c!important}'
+    +'.dg80-offer-list{display:grid;gap:10px}'
+    +'.dg80-offer-row{border:1px solid #dbe2ea;border-radius:13px;padding:12px 14px;background:#fff}'
+    +'.dg80-offer-row-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}'
+    +'.dg80-offer-row-title{font-weight:900;font-size:16px}.dg80-offer-row-date{font-weight:900;color:#31589e}'
+    +'.dg80-offer-row-meta{margin-top:5px;font-size:13px;color:#64748b}'
+    +'@media(max-width:700px){#dg60OfficeToolbar{grid-template-columns:1fr!important}}';
+  document.head.appendChild(s);
+}
+
+function ensureToolbar(){
+  const bar=q('dg60OfficeToolbar');if(!bar)return false;
+  let refresh=q('dg60RefreshApp');
+  if(!refresh){
+    refresh=document.createElement('button');
+    refresh.id='dg60RefreshApp';refresh.type='button';refresh.textContent='App aktualisieren';
+    refresh.addEventListener('click',()=>{location.reload();});
+    bar.insertBefore(refresh,q('dg60OpenWindow')||bar.firstChild);
+  }
+  return true;
+}
+
+function archiveGrid(){
+  return q('bossView')?.querySelector('.dg80-final-section[data-section="archive"] .dg80-final-grid')||null;
+}
+function ensureCreatedTile(){
+  const grid=archiveGrid();if(!grid)return false;
+  let tile=grid.querySelector('[data-dg80-final="createdOffersYear"]');
+  if(!tile){
+    tile=document.createElement('button');
+    tile.type='button';tile.draggable=false;
+    tile.className='d3-tile dg80-final-tile dg80-created-offers-tile';
+    tile.dataset.dg80Final='createdOffersYear';
+    tile.innerHTML='<span>Erstellte Angebote '+year()+'</span><strong id="dg80c-createdOffersYear">…</strong>';
+    const archive=grid.querySelector('[data-dg80-final="offerArchive"]');
+    if(archive)grid.insertBefore(tile,archive);else grid.prepend(tile);
+  }
+  const label=tile.querySelector('span');if(label)label.textContent='Erstellte Angebote '+year();
+  return true;
+}
+
+async function fetchCreatedOffers(){
+  if(S.busy)return S.offers;S.busy=true;
+  try{
+    const jobs=await Promise.allSettled([
+      apiCall({action:'getOfferReminders',includeDone:true}),
+      apiCall({action:'getOfferReports',stage:'Offen'}),
+      apiCall({action:'getOfferReports',stage:'Archiv'})
+    ]);
+    const all=[];
+    jobs.forEach(j=>{if(j.status==='fulfilled'&&Array.isArray(j.value))all.push(...j.value);});
+    S.offers=uniqueOffers(all).map(r=>Object.assign({},r,{__createdDate:createdDate(r)}));
+    S.offerYear=year();
+    paintCount();
+    return S.offers;
+  }finally{S.busy=false;}
+}
+function currentYearOffers(){
+  const y=year();
+  return (S.offers||[]).filter(r=>r.__createdDate&&r.__createdDate.getFullYear()===y)
+    .sort((a,b)=>b.__createdDate-a.__createdDate);
+}
+function paintCount(){
+  ensureCreatedTile();
+  const e=q('dg80c-createdOffersYear');if(!e)return;
+  const n=currentYearOffers().length;
+  e.textContent=String(n);
+  const t=e.closest('.dg80-created-offers-tile');if(t){const s=t.querySelector('span');if(s)s.textContent='Erstellte Angebote '+year();}
+}
+
+function openCenter(title){
+  const root=q('bossView');if(!root)return null;
+  root.querySelectorAll(':scope > .dg80-shell-active').forEach(x=>x.classList.remove('dg80-shell-active'));
+  let card=q('dg80CreatedOffersCenter');
+  if(!card){card=document.createElement('div');card.id='dg80CreatedOffersCenter';card.className='card';root.appendChild(card);}
+  card.classList.add('dg80-shell-active');
+  q('dg80OfficeToolbar')?.classList.add('active');
+  const t=q('dg80OfficeTitle');if(t)t.textContent=title;
+  return card;
+}
+async function openCreatedOffers(){
+  const y=year(),card=openCenter('Erstellte Angebote '+y);if(!card)return;
+  card.innerHTML='<div class="dg80-ac-head"><h2>Erstellte Angebote '+y+'</h2><button class="btn secondary" type="button" id="dg17RefreshOffers">Aktualisieren</button></div><div class="status info">Angebote werden geladen ...</div>';
+  q('dg17RefreshOffers')?.addEventListener('click',openCreatedOffers);
+  try{
+    await fetchCreatedOffers();
+    const rows=currentYearOffers();
+    card.innerHTML='<div class="dg80-ac-head"><h2>Erstellte Angebote '+y+'</h2><button class="btn secondary" type="button" id="dg17RefreshOffers">Aktualisieren</button></div>'
+      +(rows.length?'<div class="dg80-offer-list">'+rows.map(r=>'<div class="dg80-offer-row"><div class="dg80-offer-row-head"><div class="dg80-offer-row-title">'+esc(r.customer||'Ohne Kundenname')+(r.offerNumber?' · Angebot '+esc(r.offerNumber):'')+'</div><div class="dg80-offer-row-date">'+esc(deDate(r.__createdDate))+'</div></div><div class="dg80-offer-row-meta">'+esc(r.status||r.offerStatus||'Erstellt')+(r.description?' · '+esc(r.description):'')+'</div></div>').join('')+'</div>':'<div class="status ok">Im Jahr '+y+' wurden noch keine Angebote erstellt.</div>');
+    q('dg17RefreshOffers')?.addEventListener('click',openCreatedOffers);
+  }catch(e){card.innerHTML='<div class="dg80-ac-head"><h2>Erstellte Angebote '+y+'</h2></div><div class="status error">'+esc(e.message||e)+'</div>';}
+}
+window.DG80_UI17_openCreatedOffers=openCreatedOffers;
+
+function bindCreatedTile(){
+  const tile=q('bossView')?.querySelector('[data-dg80-final="createdOffersYear"]');if(!tile||tile.dataset.dg17==='1')return;
+  tile.dataset.dg17='1';
+  tile.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();openCreatedOffers();},true);
+}
+function enforce(){
+  ensureCss();ensureToolbar();ensureCreatedTile();bindCreatedTile();paintCount();
+}
+function install(){
+  ensureCss();
+  let tries=0;(function ready(){enforce();if(archiveGrid()&&q('dg60OfficeToolbar')){fetchCreatedOffers().catch(()=>{});return;}if(++tries<60)setTimeout(ready,100);})();
+  const mo=new MutationObserver(()=>{clearTimeout(S.timer);S.timer=setTimeout(enforce,0);});
+  mo.observe(document.body,{subtree:true,childList:true,characterData:true});
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden){enforce();fetchCreatedOffers().catch(()=>{});}});
+  document.documentElement.dataset.dgUi17=V;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+})();
