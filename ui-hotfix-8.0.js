@@ -93,16 +93,16 @@ const S=window.DG80_UI2=window.DG80_UI2||{active:'',dirty:new Set(),lastDirty:{}
 
 const CATALOG=[
   {key:'calendar',label:'Mitarbeiter Kalender',panel:'dg62PlannerCard',cls:'calendar',counter:null,loader:'dg62Load'},
-  {key:'completed',label:'Abgeschlossene Aufträge',panel:'d3Completed',cls:'completed',counter:'d3Count-completed',loader:'d3Reports',args:['Abgeschlossen']},
+  {key:'completed',label:'Rechnung zu erstellen',panel:'d3Completed',cls:'completed',counter:'d3Count-completed',loader:'d3Reports',args:['Abgeschlossen']},
   {key:'billed',label:'Abgerechnete Aufträge',panel:'d3Completed',cls:'billed',counter:null,loader:'d3Reports',args:['Abgerechnet']},
   {key:'running',label:'Laufende Aufträge',panel:'d3Running',cls:'running',counter:'d3Count-running',loader:'d3Reports',args:['Laufend']},
-  {key:'offerCreate',label:'Angebote zu erstellen',parent:'d3Offers',child:'d3OfferCreate',cls:'offers',counter:'d3Count-offers',loader:'loadOffers',args:['Zu erstellen']},
-  {key:'offerOpen',label:'Offene Angebote',parent:'d3Offers',child:'d3OfferOpen',cls:'offer-open',counter:null,loader:'loadOffers',args:['Offen']},
+  {key:'offerCreate',label:'Erstellte Angebote',parent:'d3Offers',child:'d3OfferCreate',cls:'offers',counter:'d3Count-offers',loader:'loadOffers',args:['Zu erstellen']},
+  {key:'offerOpen',label:'Erstellte Angebote',parent:'d3Offers',child:'d3OfferOpen',cls:'offer-open',counter:null,loader:'loadOffers',args:['Offen']},
   {key:'offerArchive',label:'Angebotsarchiv',parent:'d3Offers',child:'d3OfferArchive',cls:'offer-archive',counter:null,loader:'loadOffers',args:['Archiv']},
   {key:'offerStats',label:'Angebotsstatistik',parent:'d3Offers',child:'d3Stats',cls:'offer-stats',counter:null,loader:'loadStats'},
-  {key:'shopping',label:'Einkauf',special:'shopping',cls:'shopping',counter:'d3Count-shopping'},
+  {key:'shopping',label:'Einkaufsliste',special:'shopping',cls:'shopping',counter:'d3Count-shopping'},
   {key:'maintenance',label:'Wartungen',panel:'d36Maintenance',cls:'maintenance',counter:'d3Count-maintenance',loader:'d36LoadMaintenance'},
-  {key:'days',label:'Mitarbeiter-Abschlüsse',parent:'d3Admin',child:'dg48EmployeeClosures',cls:'days',counter:'d3Count-days',loader:'loadBossDayClosuresV48'},
+  {key:'days',label:'Offene Tagesabschlüsse',parent:'d3Admin',child:'dg48EmployeeClosures',cls:'days',counter:'d3Count-days',loader:'loadBossDayClosuresV48'},
   {key:'payroll',label:'Monatsabschluss & Lohnübergabe',panel:'d3PayrollStandalone',cls:'payroll',counter:'dg80TopPayroll',loader:'dg80PayrollInstall'},
   {key:'absence',label:'Urlaub / Abwesenheiten / Feiertage',parent:'d3Admin',child:'dg48AbsenceGroup',cls:'absence',counter:null,loader:'loadChefAdministration'},
   {key:'sickness',label:'Krank-Fristen',parent:'d3Admin',child:'dg48AbsenceGroup',cls:'sickness734',counter:'d3Count-sickness734',loader:'loadChefAdministration',after:'sickness'},
@@ -479,25 +479,25 @@ const SECTIONS=[
 ];
 const TILES={
   calendar:{label:'Mitarbeiter Kalender',countId:'dg80c-calendar',open:'calendar'},
-  completed:{label:'Abgeschlossene Aufträge',countId:'d3Count-completed',open:'completed'},
+  completed:{label:'Rechnung zu erstellen',countId:'d3Count-completed',open:'completed'},
   billed:{label:'Abgerechnete Aufträge',countId:'dg80c-billed',open:'billed'},
   running:{label:'Laufende Aufträge',countId:'d3Count-running',open:'running'},
-  offerCreate:{label:'Angebote zu erstellen',countId:'d3Count-offers',open:'offerCreate'},
-  offerOpen:{label:'Offene Angebote',countId:'dg80c-offerOpen',open:'offerOpen'},
+  offerCreate:{label:'Erstellte Angebote',countId:'d3Count-offers',open:'offerCreate'},
+  offerOpen:{label:'Erstellte Angebote',countId:'dg80c-offerOpen',open:'offerOpen'},
   offerArchive:{label:'Angebotsarchiv',countId:'dg80c-offerArchive',open:'offerArchive'},
   offerStats:{label:'Angebotsstatistik',countId:'dg80c-offerStats',open:'offerStats'},
-  shopping:{label:'Einkauf',countId:'d3Count-shopping',open:'shopping'},
+  shopping:{label:'Einkaufsliste',countId:'d3Count-shopping',open:'shopping'},
   maintenance:{label:'Wartungen',countId:'d3Count-maintenance',open:'maintenance'},
-  days:{label:'Mitarbeiter-Abschlüsse',countId:'d3Count-days',open:'days'},
+  days:{label:'Offene Tagesabschlüsse',countId:'d3Count-days',open:'days'},
   reminders:{label:'Reminder',countId:'d3Count-reminders',open:'reminders'},
-  customers:{label:'Kundenanfragen',countId:'d3Count-inquiries',group:'customers'},
+  customers:{label:'Offene Anfragen',countId:'d3Count-inquiries',group:'customers'},
   payroll:{label:'Lohnübergabe',countId:'dg80TopPayroll',open:'payroll'},
-  admin:{label:'Verwaltung',countId:'dg80c-admin',group:'admin'},
+  admin:{label:'Mitarbeiterverwaltung',countId:'dg80c-admin',group:'admin'},
   health:{label:'Systemcheck',countId:'dg80c-health',open:'health'}
 };
 const GROUPS={
   customers:{
-    label:'Kundenanfragen',
+    label:'Offene Anfragen',
     items:[
       {key:'inquiries',label:'Offene Kundenanfragen',count:'regularInquiries'},
       {key:'aqon',label:'AQON PURE Anfragen',count:'aqonInquiries'},
@@ -505,7 +505,7 @@ const GROUPS={
     ]
   },
   admin:{
-    label:'Verwaltung',
+    label:'Mitarbeiterverwaltung',
     items:[
       {key:'employeeAdmin',label:'Mitarbeiterverwaltung',count:'employees'},
       {key:'absence',label:'Urlaub / Abwesenheiten / Feiertage'},
@@ -874,16 +874,16 @@ const S=window.DG80_UI4=window.DG80_UI4||{active:'',calendarPromise:null,install
 
 const LEAF={
   calendar:{wrapper:'dg62PlannerCard',loader:'dg62Load',title:'Mitarbeiter Kalender',after:'calendar'},
-  completed:{wrapper:'d3Completed',loader:'d3Reports',args:['Abgeschlossen'],title:'Abgeschlossene Aufträge'},
+  completed:{wrapper:'d3Completed',loader:'d3Reports',args:['Abgeschlossen'],title:'Rechnung zu erstellen'},
   billed:{wrapper:'d3Completed',loader:'d3Reports',args:['Abgerechnet'],title:'Abgerechnete Aufträge'},
   running:{wrapper:'d3Running',loader:'d3Reports',args:['Laufend'],title:'Laufende Aufträge'},
-  offerCreate:{wrapper:'d3Offers',child:'d3OfferCreate',loader:'loadOffers',args:['Zu erstellen'],title:'Angebote zu erstellen'},
-  offerOpen:{wrapper:'d3Offers',child:'d3OfferOpen',loader:'loadOffers',args:['Offen'],title:'Offene Angebote'},
+  offerCreate:{wrapper:'d3Offers',child:'d3OfferCreate',loader:'loadOffers',args:['Zu erstellen'],title:'Erstellte Angebote'},
+  offerOpen:{wrapper:'d3Offers',child:'d3OfferOpen',loader:'loadOffers',args:['Offen'],title:'Erstellte Angebote'},
   offerArchive:{wrapper:'d3Offers',child:'d3OfferArchive',loader:'loadOffers',args:['Archiv'],title:'Angebotsarchiv'},
   offerStats:{wrapper:'d3Offers',child:'d3Stats',loader:'loadStats',title:'Angebotsstatistik'},
-  shopping:{special:'shopping',title:'Einkauf'},
+  shopping:{special:'shopping',title:'Einkaufsliste'},
   maintenance:{wrapper:'d36Maintenance',loader:'d36LoadMaintenance',title:'Wartungen'},
-  days:{wrapper:'d3Admin',child:'dg48EmployeeClosures',loader:'loadBossDayClosuresV48',title:'Mitarbeiter-Abschlüsse'},
+  days:{wrapper:'d3Admin',child:'dg48EmployeeClosures',loader:'loadBossDayClosuresV48',title:'Offene Tagesabschlüsse'},
   reminders:{wrapper:'d3Reminder',loader:'loadReminders',title:'Reminder'},
   payroll:{wrapper:'d3PayrollStandalone',loader:'dg80PayrollInstall',title:'Lohnübergabe',after:'payroll'},
   inquiries:{wrapper:'d3InquiriesGroup',child:'d3Inquiries',loader:'d3Inquiries',title:'Offene Kundenanfragen'},
@@ -1070,4 +1070,229 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 [250,750,1600,3200,5200].forEach(ms=>setTimeout(()=>{install();arrangeTop();},ms));
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)setTimeout(()=>correctCalendarCount(false),150);});
 window.addEventListener('online',()=>setTimeout(()=>correctCalendarCount(true),250));
+})();
+
+
+/* DG Zeiterfassung 8.0 - UI Hotfix 5
+   Bezeichnungen finalisiert, Sammelkacheln robust geöffnet, Einkaufslisten-Zähler
+   lokal synchronisiert und Hauptkacheln mittig ausgerichtet. */
+(function(){
+'use strict';
+const V='8.0-ui5';
+const q=id=>document.getElementById(id);
+const S=window.DG80_UI5=window.DG80_UI5||{group:'',observer:null,lastShop:-1,installed:false};
+const SHOP_KEY='dg71_shopping_lists_v1';
+
+const LABELS={
+  completed:'Rechnung zu erstellen',
+  offerCreate:'Offene Angebote',
+  offerOpen:'Erstellte Angebote',
+  shopping:'Einkaufsliste',
+  days:'Offene Tagesabschlüsse',
+  customers:'Offene Anfragen',
+  admin:'Mitarbeiterverwaltung'
+};
+const TITLES={
+  completed:'Rechnung zu erstellen',
+  offerCreate:'Offene Angebote',
+  offerOpen:'Erstellte Angebote',
+  shopping:'Einkaufsliste',
+  days:'Offene Tagesabschlüsse',
+  inquiries:'Offene Anfragen',
+  aqon:'AQON PURE Anfragen',
+  inquiryArchive:'Anfragenarchiv',
+  employeeAdmin:'Mitarbeiterverwaltung',
+  absence:'Urlaub / Abwesenheiten / Feiertage',
+  sickness:'Krank-Fristen'
+};
+const GROUPS={
+  customers:{
+    title:'Offene Anfragen',
+    items:[
+      {key:'inquiries',label:'Offene Kundenanfragen'},
+      {key:'aqon',label:'AQON PURE Anfragen'},
+      {key:'inquiryArchive',label:'Anfragenarchiv'}
+    ]
+  },
+  admin:{
+    title:'Mitarbeiterverwaltung',
+    items:[
+      {key:'employeeAdmin',label:'Mitarbeiterverwaltung'},
+      {key:'absence',label:'Urlaub / Abwesenheiten / Feiertage'},
+      {key:'sickness',label:'Krank-Fristen'}
+    ]
+  }
+};
+
+function boss(){return q('bossView');}
+function dash(){return boss()?.querySelector(':scope > .d3-dashboard');}
+function empKey(){return String(localStorage.getItem('dg_employee')||'geraet').replace(/[^A-Za-z0-9_-]+/g,'_');}
+function orderKey(group){return 'dg80_ui3_sub_'+group+'_'+empKey();}
+function readJson(k,fallback){try{const x=JSON.parse(localStorage.getItem(k)||'null');return x===null?fallback:x;}catch(_e){return fallback;}}
+function writeJson(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(_e){}}
+function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+function css(){
+  if(q('dg80Ui5Css'))return;
+  const s=document.createElement('style');s.id='dg80Ui5Css';
+  s.textContent=''
+    +'#bossView .dg80-ui3-dashboard .dg80-ui3-tile{align-items:center!important;text-align:center!important}'
+    +'#bossView .dg80-ui3-dashboard .dg80-ui3-tile>span,#bossView .dg80-ui3-dashboard .dg80-ui3-tile>strong{width:100%!important;text-align:center!important;align-self:center!important}'
+    +'#bossView .dg80-ui4-top-actions .dg80-ui3-tile{display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;text-align:center!important;gap:8px!important}'
+    +'#bossView .dg80-ui4-top-actions .dg80-ui3-tile>span,#bossView .dg80-ui4-top-actions .dg80-ui3-tile>strong{width:100%!important;text-align:center!important}'
+    +'#bossView .dg80-ui3-dashboard .dg80-ui3-tile[data-ui3-key="admin"],#bossView .dg80-ui3-dashboard .dg80-ui3-tile[data-ui3-key="customers"]{cursor:pointer!important}'
+    +'#dg80GroupChooser .dg80-sub-button{background:#e8f7ea!important;color:#185c2c!important;border-color:#a9d9b4!important}'
+    +'#dg80GroupChooser .dg80-sub-button span{font-weight:900!important}'
+    +'#d3Completed .dg80-invoice-button{background:#3f6b3e!important;color:#fff!important;border-color:#3f6b3e!important}';
+  document.head.appendChild(s);
+}
+
+function setButtonLabelKeepCount(button,label){
+  if(!button)return;
+  const count=button.querySelector('.dg60-count');
+  if(count){
+    [...button.childNodes].forEach(n=>{if(n.nodeType===3)n.remove();});
+    button.insertBefore(document.createTextNode(label+' '),count);
+  }else{
+    button.textContent=label;
+  }
+}
+
+function shoppingCount(){
+  try{const rows=JSON.parse(localStorage.getItem(SHOP_KEY)||'[]');return Array.isArray(rows)?rows.length:0;}catch(_e){return 0;}
+}
+function syncShoppingCount(){
+  const n=shoppingCount();S.lastShop=n;
+  const e=q('d3Count-shopping');if(e)e.textContent=String(n);
+  try{if(window.DG80_UI3&&window.DG80_UI3.counts)window.DG80_UI3.counts.shopping=String(n);}catch(_e){}
+}
+
+function relabel(){
+  css();
+  const d=dash();
+  if(d){
+    Object.entries(LABELS).forEach(([key,label])=>{
+      const t=d.querySelector('.dg80-ui3-tile[data-ui3-key="'+CSS.escape(key)+'"]');
+      const s=t&&t.querySelector(':scope > span');if(s&&s.textContent!==label)s.textContent=label;
+    });
+  }
+
+  const completed=q('d3Completed');
+  if(completed){
+    const h=completed.querySelector(':scope > .dg48-head h2,:scope > h2');
+    if(h)h.textContent='Rechnung zu erstellen';
+    [...completed.querySelectorAll('button')].forEach(b=>{
+      if(/Offene Regieberichte|Rechnungen zu erstellen/i.test((b.textContent||'').trim())){
+        b.textContent='🟢 Rechnungen zu erstellen';b.classList.add('dg80-invoice-button');
+      }
+    });
+  }
+
+  const createBtn=document.querySelector('#d3Offers .d3-menu [data-panel="d3OfferCreate"]');
+  const openBtn=document.querySelector('#d3Offers .d3-menu [data-panel="d3OfferOpen"]');
+  setButtonLabelKeepCount(createBtn,'Offene Angebote');
+  setButtonLabelKeepCount(openBtn,'Erstellte Angebote');
+  const hCreate=q('d3OfferCreate')?.querySelector('h3');if(hCreate)hCreate.textContent='Offene Angebote';
+  const hOpen=q('d3OfferOpen')?.querySelector('h3');if(hOpen)hOpen.textContent='Erstellte Angebote';
+
+  const dayHead=q('dg48EmployeeClosures')?.querySelector(':scope > .dg48-head h2,:scope > h2');
+  if(dayHead)dayHead.textContent='Offene Tagesabschlüsse';
+
+  const shopHead=q('dg70ShopWindow')?.querySelector('.dg70-shop-head h2');
+  if(shopHead&&shopHead.textContent.trim()==='Einkauf')shopHead.textContent='Einkaufsliste';
+  const shopDialog=q('dg70ShopWindow');if(shopDialog)shopDialog.setAttribute('aria-label','Einkaufsliste');
+
+  const active=String(window.DG80_UI4?.active||window.DG80_UI2?.active||'');
+  const title=q('dg80OfficeTitle');
+  if(title&&TITLES[active])title.textContent=TITLES[active];
+
+  syncShoppingCount();
+}
+
+function orderedItems(group){
+  const g=GROUPS[group],saved=readJson(orderKey(group),[]),by={},out=[],used=new Set();
+  g.items.forEach(x=>by[x.key]=x);
+  (Array.isArray(saved)?saved:[]).forEach(k=>{if(by[k]&&!used.has(k)){out.push(by[k]);used.add(k);}});
+  g.items.forEach(x=>{if(!used.has(x.key))out.push(x);});
+  return out;
+}
+function closeGroup(){
+  q('dg80GroupChooser')?.classList.remove('dg80-shell-active');
+  dash()?.querySelectorAll('.dg80-group-active').forEach(x=>x.classList.remove('dg80-group-active'));
+  S.group='';
+}
+function renderGroup(group){
+  const g=GROUPS[group],r=boss();if(!g||!r)return;
+  const wasOpen=S.group===group&&q('dg80GroupChooser')?.classList.contains('dg80-shell-active');
+  if(wasOpen){closeGroup();return;}
+
+  if(typeof window.dg80Ui4Close==='function')try{window.dg80Ui4Close();}catch(_e){}
+  let box=q('dg80GroupChooser');
+  if(!box){box=document.createElement('div');box.id='dg80GroupChooser';box.className='card';r.appendChild(box);}
+  const items=orderedItems(group);
+  box.innerHTML='<div class="dg80-group-head"><h2>'+esc(g.title)+'</h2><button type="button" class="btn secondary dg80-group-close" aria-label="Schließen">×</button></div>'+
+    '<div class="dg80-sub-help">Unterpunkte können per Drag & Drop frei angeordnet werden.</div>'+
+    '<div class="dg80-sub-list">'+items.map(x=>'<button type="button" draggable="true" class="dg80-sub-button" data-dg80-sub="'+esc(x.key)+'"><span>'+esc(x.label)+'</span><strong>›</strong></button>').join('')+'</div>';
+
+  box.classList.add('dg80-shell-active');
+  q('dg80OfficeToolbar')?.classList.remove('active');
+  dash()?.querySelectorAll('.dg80-group-active,.dg80-leaf-active').forEach(x=>x.classList.remove('dg80-group-active','dg80-leaf-active'));
+  dash()?.querySelector('.dg80-ui3-tile[data-ui3-key="'+CSS.escape(group)+'"]')?.classList.add('dg80-group-active');
+  S.group=group;
+  try{if(window.DG80_UI3)window.DG80_UI3.activeGroup=group;}catch(_e){}
+
+  box.querySelector('.dg80-group-close')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();closeGroup();});
+
+  const list=box.querySelector('.dg80-sub-list');let drag='';
+  list.addEventListener('dragstart',e=>{const b=e.target.closest('[data-dg80-sub]');if(!b)return;drag=b.dataset.dg80Sub;b.classList.add('dragging');});
+  list.addEventListener('dragover',e=>{if(!drag)return;e.preventDefault();const b=e.target.closest('[data-dg80-sub]'),src=list.querySelector('[data-dg80-sub="'+CSS.escape(drag)+'"]');if(!src)return;if(b&&b!==src){const rc=b.getBoundingClientRect();list.insertBefore(src,e.clientY<rc.top+rc.height/2?b:b.nextSibling);}else if(!b)list.appendChild(src);});
+  list.addEventListener('drop',e=>{if(!drag)return;e.preventDefault();writeJson(orderKey(group),[...list.querySelectorAll('[data-dg80-sub]')].map(x=>x.dataset.dg80Sub));});
+  list.addEventListener('dragend',()=>{list.querySelectorAll('.dragging').forEach(x=>x.classList.remove('dragging'));writeJson(orderKey(group),[...list.querySelectorAll('[data-dg80-sub]')].map(x=>x.dataset.dg80Sub));drag='';});
+
+  setTimeout(()=>box.scrollIntoView({behavior:'smooth',block:'start'}),20);
+}
+
+function installGroupClicks(){
+  const r=boss();if(!r||r.dataset.dg80Ui5Groups==='1')return;r.dataset.dg80Ui5Groups='1';
+  r.addEventListener('click',e=>{
+    const tile=e.target.closest('.dg80-ui3-tile[data-ui3-key]');
+    if(!tile)return;
+    const key=tile.dataset.ui3Key;
+    if(key!=='customers'&&key!=='admin')return;
+    e.preventDefault();e.stopImmediatePropagation();renderGroup(key);
+  },true);
+}
+
+function observe(){
+  if(S.observer||!boss())return;
+  let timer=0;
+  S.observer=new MutationObserver(()=>{clearTimeout(timer);timer=setTimeout(relabel,45);});
+  S.observer.observe(boss(),{childList:true,subtree:true,characterData:true});
+}
+
+function selfTest(){
+  const result={
+    completed:!!q('d3Completed'),
+    offers:!!q('d3Offers')&&!!q('d3OfferCreate')&&!!q('d3OfferOpen'),
+    shopping:typeof window.dg70ShoppingOpen==='function',
+    days:!!q('dg48EmployeeClosures'),
+    inquiries:!!q('d3InquiriesGroup')&&!!q('d3Inquiries')&&!!q('d34AqonInquiries')&&!!q('d3InquiryArchive'),
+    admin:!!q('d3Admin')&&!!q('d3EmployeeAdmin')&&!!q('dg48AbsenceGroup'),
+    ui4:typeof window.dg80Ui4Open==='function'
+  };
+  const bad=Object.entries(result).filter(([,ok])=>!ok).map(([k])=>k);
+  if(bad.length)console.warn('DG UI5 Selbsttest: fehlend',bad);else console.info('DG UI5 Selbsttest: alle betroffenen Bereiche vorhanden.',result);
+  return result;
+}
+window.dg80Ui5SelfTest=selfTest;
+
+function install(){
+  css();relabel();installGroupClicks();observe();syncShoppingCount();
+  S.installed=true;document.documentElement.dataset.dgUiHotfix5=V;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+[120,350,900,1800,3600,6000].forEach(ms=>setTimeout(()=>{install();relabel();},ms));
+window.addEventListener('storage',e=>{if(e.key===SHOP_KEY)syncShoppingCount();});
+setInterval(()=>{if(shoppingCount()!==S.lastShop)syncShoppingCount();},1200);
+setTimeout(selfTest,2200);
 })();

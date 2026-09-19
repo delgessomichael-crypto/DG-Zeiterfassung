@@ -109,9 +109,9 @@
 <section class="hidden" id="bossView">
 <div class="card">
 <h2>Regieberichte</h2>
-<div class="muted small">Laufende Aufträge sind getrennt von offenen Regieberichten. Im Büro kann ein falsch gemeldeter Auftragsstatus jederzeit korrigiert werden. Abgeschlossene Aufträge wechseln zu „Offene Regieberichte“ und stehen dort zur Prüfung und Abrechnung bereit.</div>
+<div class="muted small">Laufende Aufträge sind getrennt von offenen Regieberichten. Im Büro kann ein falsch gemeldeter Auftragsstatus jederzeit korrigiert werden. Abgeschlossene Aufträge wechseln zu „Rechnungen zu erstellen“ und stehen dort zur Prüfung und Abrechnung bereit.</div>
 <div class="admin-grid hidden" id="regieDateFilter"><div><label>Jahr</label><input id="regieYear" type="number"/></div><div><label>Monat</label><select id="regieMonth"><option value="0">Alle Monate</option></select></div></div>
-<div class="button-row"><button class="btn success" onclick="loadRegieReports('Abgeschlossen')">🟢 Offene Regieberichte</button></div>
+<div class="button-row"><button class="btn success" onclick="loadRegieReports('Abgeschlossen')">🟢 Rechnungen zu erstellen</button></div>
 <button class="btn primary" onclick="loadRegieReports('Abgerechnet')" style="width:100%;margin-top:8px">Abgerechnete Aufträge</button>
 <div class="hidden" id="regieMergeToolbar" style="margin-top:10px;position:sticky;top:8px;z-index:20;background:#fff;padding:8px 0"><button class="btn success" disabled="" id="regieMergeBtn" onclick="requestMergeSelectedRegieReports()" style="width:100%">Markierte Regieberichte jetzt zusammenführen</button><div class="muted small" id="regieMergeHint" style="margin-top:6px">Bitte mindestens zwei offene Regieberichte markieren.</div></div>
 <div id="regieStatus"></div><div id="regieResult"></div>
@@ -237,7 +237,7 @@
 (function(){
   if(!('serviceWorker' in navigator))return;
   window.addEventListener('load',function(){
-    navigator.serviceWorker.register('./sw-8.0-prod.js?v=20260919-800-ui4',{updateViaCache:'none'})
+    navigator.serviceWorker.register('./sw-8.0-prod.js?v=20260919-800-ui5',{updateViaCache:'none'})
       .then(function(r){return r.update();})
       .catch(function(e){console.warn('DG Offline-Cache nicht bereit',e);});
   },{once:true});
@@ -246,7 +246,7 @@
 
 <script defer src="./app-8.0.js?v=20260918-800-prod1"></script>
 <script defer src="./payroll-hotfix-8.0.js?v=20260918-800-prod1"></script>
-<script defer src="./ui-hotfix-8.0.js?v=20260919-800-ui4"></script>
+<script defer src="./ui-hotfix-8.0.js?v=20260919-800-ui5"></script>
 <script>
 (function(){
 'use strict';
