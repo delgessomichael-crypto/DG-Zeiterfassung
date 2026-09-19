@@ -862,3 +862,212 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 [120,380,1080,2480,5280,6800].forEach(ms=>setTimeout(()=>{renderDashboard();paintSave();paintAdmin();},ms));
 setInterval(()=>{paintSave();paintAdmin();paintHealth();},500);
 })();
+
+
+/* DG Zeiterfassung 8.0 - UI Hotfix 4
+   Top-Aktionen breit, Kalenderzaehler korrigiert und robuste Menueoeffnung mit Struktur-Selbsttest. */
+(function(){
+'use strict';
+const V='8.0-ui4';
+const q=id=>document.getElementById(id);
+const S=window.DG80_UI4=window.DG80_UI4||{active:'',calendarPromise:null,installed:false,observer:null,repairing:false};
+
+const LEAF={
+  calendar:{wrapper:'dg62PlannerCard',loader:'dg62Load',title:'Mitarbeiter Kalender',after:'calendar'},
+  completed:{wrapper:'d3Completed',loader:'d3Reports',args:['Abgeschlossen'],title:'Abgeschlossene Aufträge'},
+  billed:{wrapper:'d3Completed',loader:'d3Reports',args:['Abgerechnet'],title:'Abgerechnete Aufträge'},
+  running:{wrapper:'d3Running',loader:'d3Reports',args:['Laufend'],title:'Laufende Aufträge'},
+  offerCreate:{wrapper:'d3Offers',child:'d3OfferCreate',loader:'loadOffers',args:['Zu erstellen'],title:'Angebote zu erstellen'},
+  offerOpen:{wrapper:'d3Offers',child:'d3OfferOpen',loader:'loadOffers',args:['Offen'],title:'Offene Angebote'},
+  offerArchive:{wrapper:'d3Offers',child:'d3OfferArchive',loader:'loadOffers',args:['Archiv'],title:'Angebotsarchiv'},
+  offerStats:{wrapper:'d3Offers',child:'d3Stats',loader:'loadStats',title:'Angebotsstatistik'},
+  shopping:{special:'shopping',title:'Einkauf'},
+  maintenance:{wrapper:'d36Maintenance',loader:'d36LoadMaintenance',title:'Wartungen'},
+  days:{wrapper:'d3Admin',child:'dg48EmployeeClosures',loader:'loadBossDayClosuresV48',title:'Mitarbeiter-Abschlüsse'},
+  reminders:{wrapper:'d3Reminder',loader:'loadReminders',title:'Reminder'},
+  payroll:{wrapper:'d3PayrollStandalone',loader:'dg80PayrollInstall',title:'Lohnübergabe',after:'payroll'},
+  inquiries:{wrapper:'d3InquiriesGroup',child:'d3Inquiries',loader:'d3Inquiries',title:'Offene Kundenanfragen'},
+  aqon:{wrapper:'d3InquiriesGroup',child:'d34AqonInquiries',loader:'d34AqonInquiries',title:'AQON PURE Anfragen'},
+  inquiryArchive:{wrapper:'d3InquiriesGroup',child:'d3InquiryArchive',loader:'d3InquiryArchiveList',title:'Anfragenarchiv'},
+  employeeAdmin:{wrapper:'d3Admin',child:'d3EmployeeAdmin',loader:'loadChefAdministration',title:'Mitarbeiterverwaltung'},
+  absence:{wrapper:'d3Admin',child:'dg48AbsenceGroup',loader:'loadChefAdministration',title:'Urlaub / Abwesenheiten / Feiertage'},
+  sickness:{wrapper:'d3Admin',child:'dg48AbsenceGroup',loader:'loadChefAdministration',title:'Krank-Fristen',after:'sickness'},
+  health:{wrapper:'d3Health',loader:'d3Health',title:'Systemcheck'}
+};
+const GROUP_MAIN={inquiries:'customers',aqon:'customers',inquiryArchive:'customers',employeeAdmin:'admin',absence:'admin',sickness:'admin'};
+
+function root(){return q('bossView');}
+function dash(){return root()?.querySelector(':scope > .d3-dashboard');}
+function ui2(){return window.DG80_UI2||null;}
+function fn(name){return name&&typeof window[name]==='function'?window[name]:(name&&typeof globalThis[name]==='function'?globalThis[name]:null);}
+function bodyOf(x){return x?.querySelector(':scope > .dg48-body')||x;}
+function isDirty(key){const s=ui2();return !!(s&&s.dirty instanceof Set&&s.dirty.has(key));}
+function setUi2Active(key){const s=ui2();if(s)s.active=key||'';}
+function clearHighlights(){dash()?.querySelectorAll('.dg80-group-active,.dg80-leaf-active').forEach(x=>x.classList.remove('dg80-group-active','dg80-leaf-active'));}
+function highlight(key){
+  clearHighlights();
+  const main=GROUP_MAIN[key]||key;
+  dash()?.querySelector('.dg80-ui3-tile[data-ui3-key="'+CSS.escape(main)+'"]')?.classList.add(GROUP_MAIN[key]?'dg80-group-active':'dg80-leaf-active');
+}
+function ensureCss(){
+  if(q('dg80Ui4Css'))return;
+  const s=document.createElement('style');s.id='dg80Ui4Css';
+  s.textContent=''
+    +'#bossView .dg80-ui4-top-actions{display:grid;grid-template-columns:1fr;gap:11px;margin:0 0 18px}'
+    +'#bossView .dg80-ui4-top-actions .dg80-ui3-tile{min-height:76px!important;width:100%!important;border-radius:18px!important;display:grid!important;grid-template-columns:1fr auto!important;align-items:center!important;padding:15px 20px!important;cursor:pointer!important}'
+    +'#bossView .dg80-ui4-top-actions .dg80-ui3-tile>span{font-size:21px!important;line-height:1.1!important}'
+    +'#bossView .dg80-ui4-top-actions .dg80-ui3-tile>strong{font-size:31px!important;margin:0!important}'
+    +'#bossView .dg80-ui4-top-actions .dg80-save-tile{order:1}'
+    +'#bossView .dg80-ui4-top-actions [data-ui3-key="calendar"]{order:2}'
+    +'#bossView .dg80-ui3-section[data-section="daily"] .dg80-ui3-grid:empty{display:none!important}'
+    +'@media(max-width:700px){#bossView .dg80-ui4-top-actions .dg80-ui3-tile{min-height:68px!important;padding:13px 15px!important}#bossView .dg80-ui4-top-actions .dg80-ui3-tile>span{font-size:18px!important}}';
+  document.head.appendChild(s);
+}
+
+function arrangeTop(){
+  const d=dash();if(!d)return false;
+  let top=q('dg80Ui4TopActions');
+  if(!top){top=document.createElement('div');top.id='dg80Ui4TopActions';top.className='dg80-ui4-top-actions';d.prepend(top);}
+  const save=d.querySelector('.dg80-save-tile'),cal=d.querySelector('.dg80-ui3-tile[data-ui3-key="calendar"]');
+  [save,cal].forEach(t=>{if(t){t.draggable=false;top.appendChild(t);}});
+  return !!(save&&cal);
+}
+function toolbar(){
+  let b=q('dg80OfficeToolbar');if(b)return b;
+  const d=dash();if(!d)return null;
+  b=document.createElement('div');b.id='dg80OfficeToolbar';b.className='dg80-office-toolbar';
+  b.innerHTML='<div class="dg80-office-toolbar-head"><h2 id="dg80OfficeTitle">Büro</h2><div class="dg80-office-actions"><button id="dg80SaveChanges" type="button" class="btn success" style="display:none">Änderungen Speichern</button><button id="dg80OfficeClose" type="button" class="btn secondary" aria-label="Untermenü schließen" title="Schließen">×</button></div></div><div id="dg80SaveHint" style="display:none"></div>';
+  d.insertAdjacentElement('afterend',b);return b;
+}
+
+function repairOffice(){
+  if(S.repairing)return;S.repairing=true;
+  try{const f=fn('dg742EnsureOffice');if(f)f();}catch(_e){}
+  finally{S.repairing=false;}
+}
+function selectChild(w,childId){
+  if(!w||!childId)return;
+  w.querySelectorAll('.d3-panel').forEach(p=>p.classList.toggle('hidden',p.id!==childId));
+  w.querySelectorAll('[data-panel]').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.panel===childId)));
+  const c=q(childId);if(c){c.classList.remove('hidden');bodyOf(c)?.classList.remove('hidden');}
+}
+function closeAll(){
+  const r=root();if(!r)return;
+  r.querySelectorAll(':scope > .dg80-shell-active').forEach(x=>x.classList.remove('dg80-shell-active'));
+  q('dg80GroupChooser')?.classList.remove('dg80-shell-active');
+  q('dg80OfficeToolbar')?.classList.remove('active');
+  clearHighlights();S.active='';setUi2Active('');
+  try{if(window.DG3)DG3.open='';}catch(_e){}
+  const shop=q('dg70ShopOverlay');if(shop&&getComputedStyle(shop).display!=='none'){const c=fn('dg70ShoppingClose');if(c)try{c();}catch(_e){}}
+}
+function invokeLoader(def,key){
+  if(!def||isDirty(key))return;
+  const f=fn(def.loader);if(!f)return;
+  try{Promise.resolve(f.apply(window,def.args||[])).catch(e=>console.warn('DG Menü laden',key,e));}catch(e){console.warn('DG Menü laden',key,e);}
+}
+function manualOpen(key,force){
+  const def=LEAF[key];if(!def)return false;
+  if(def.special==='shopping'){
+    const ov=q('dg70ShopOverlay'),shown=ov&&getComputedStyle(ov).display!=='none';
+    if((S.active===key||shown)&&!force){closeAll();return true;}
+    closeAll();const f=fn('dg70ShoppingOpen');if(f){f();S.active=key;setUi2Active(key);highlight(key);return true;}return false;
+  }
+  if(S.active===key&&!force){closeAll();return true;}
+  let w=q(def.wrapper);if(!w){repairOffice();w=q(def.wrapper);}
+  if(!w)return false;
+  const r=root(),bar=toolbar();if(!r||!bar)return false;
+  const shop=q('dg70ShopOverlay');if(shop&&getComputedStyle(shop).display!=='none'){const c=fn('dg70ShoppingClose');if(c)try{c();}catch(_e){}}
+  r.querySelectorAll(':scope > .dg80-shell-active').forEach(x=>x.classList.remove('dg80-shell-active'));
+  q('dg80GroupChooser')?.classList.remove('dg80-shell-active');
+  w.classList.add('dg80-shell-active');w.classList.remove('hidden');bodyOf(w)?.classList.remove('hidden');selectChild(w,def.child);
+  bar.classList.add('active');const title=q('dg80OfficeTitle');if(title)title.textContent=def.title||key;
+  if(w.parentElement===r&&w.previousElementSibling!==bar)try{bar.insertAdjacentElement('afterend',w);}catch(_e){}
+  S.active=key;setUi2Active(key);try{if(window.DG3)DG3.open=def.child||def.wrapper;}catch(_e){}highlight(key);
+  if(def.after==='calendar'){const det=w.querySelector('.dg62-main');if(det)det.open=true;const o=fn('dg62OpenPlanner');if(o)try{o();}catch(_e){}}
+  if(def.after==='payroll'){const p=fn('dg80PayrollInstall');if(p)try{p();}catch(_e){}}
+  invokeLoader(def,key);
+  if(def.after==='sickness')setTimeout(()=>{const a=fn('ensureAbsenceUi734');if(a)try{a();}catch(_e){}q('dg734SicknessAlertList')?.scrollIntoView({block:'nearest'});},120);
+  setTimeout(()=>bar.scrollIntoView({behavior:'smooth',block:'start'}),15);
+  return true;
+}
+
+function installClicks(){
+  const r=root();if(!r||r.dataset.dg80Ui4Clicks==='1')return;r.dataset.dg80Ui4Clicks='1';
+  r.addEventListener('click',e=>{
+    const x=e.target.closest('#dg80OfficeClose');if(x){e.preventDefault();e.stopImmediatePropagation();closeAll();return;}
+    const sub=e.target.closest('.dg80-sub-button[data-dg80-sub]');
+    if(sub){
+      const key=sub.dataset.dg80Sub;if(LEAF[key]){e.preventDefault();e.stopImmediatePropagation();manualOpen(key,false);}return;
+    }
+    const t=e.target.closest('.dg80-ui3-tile[data-ui3-key]');
+    if(!t)return;
+    const key=t.dataset.ui3Key;
+    if(key==='save'||key==='customers'||key==='admin')return; // UI3 behält Speichern und Gruppenauswahl.
+    if(LEAF[key]){e.preventDefault();e.stopImmediatePropagation();manualOpen(key,false);}
+  },true);
+}
+
+async function correctCalendarCount(force){
+  const el=q('dg80c-calendar');if(!el||!navigator.onLine)return;
+  if(S.calendarPromise&&!force)return S.calendarPromise;
+  S.calendarPromise=(async()=>{
+    try{
+      const apiFn=window.api;if(typeof apiFn!=='function')return;
+      const chef=typeof window.chefPayload==='function'?window.chefPayload:(typeof chefPayload==='function'?chefPayload:null);
+      if(!chef)return;
+      const [wr,er]=await Promise.allSettled([
+        apiFn(chef({action:'getPlannerWorkers'})),
+        apiFn({action:'getEmployees',force:Boolean(force)})
+      ]);
+      if(wr.status!=='fulfilled')return;
+      const rows=Array.isArray(wr.value)?wr.value:[],emps=er.status==='fulfilled'&&Array.isArray(er.value)?new Set(er.value.map(x=>String(x||'').trim())):null;
+      let valid=rows.filter(x=>x&&x.active&&String(x.calendarId||'').trim());
+      if(emps&&emps.size){
+        const matched=valid.filter(x=>emps.has(String(x.employeeName||'').trim()));
+        if(matched.length)valid=matched;
+      }
+      const ids=new Set(valid.map(x=>String(x.calendarId||'').trim()).filter(Boolean));
+      el.textContent=String(ids.size);
+      try{if(window.DG80_UI3)window.DG80_UI3.counts.calendar=String(ids.size);}catch(_e){}
+      return ids.size;
+    }catch(e){console.warn('DG Kalenderzähler',e);}
+    finally{S.calendarPromise=null;}
+  })();
+  return S.calendarPromise;
+}
+
+function selfTest(){
+  const out={};
+  Object.keys(LEAF).forEach(k=>{
+    const d=LEAF[k],special=d.special==='shopping';
+    out[k]={
+      wrapper:special?true:!!q(d.wrapper),
+      child:!d.child||!!q(d.child),
+      loader:special?!!fn('dg70ShoppingOpen'):(!d.loader||!!fn(d.loader))
+    };
+    out[k].ok=out[k].wrapper&&out[k].child&&out[k].loader;
+  });
+  const bad=Object.entries(out).filter(([,v])=>!v.ok);
+  if(bad.length){repairOffice();setTimeout(()=>console.warn('DG Menü-Selbsttest: fehlende Komponenten',bad),50);}
+  else console.info('DG Menü-Selbsttest: alle Menüs strukturell verfügbar.',out);
+  return out;
+}
+window.dg80Ui4SelfTest=selfTest;
+window.dg80Ui4Open=manualOpen;
+window.dg80Ui4Close=closeAll;
+
+function observe(){
+  if(S.observer||!root())return;
+  let timer=0;S.observer=new MutationObserver(()=>{clearTimeout(timer);timer=setTimeout(()=>{arrangeTop();installClicks();},80);});
+  S.observer.observe(root(),{childList:true,subtree:true});
+}
+function install(){
+  if(!root()||!dash())return false;
+  ensureCss();arrangeTop();installClicks();observe();setTimeout(()=>correctCalendarCount(false),120);setTimeout(selfTest,300);
+  S.installed=true;document.documentElement.dataset.dgUiHotfix4=V;return true;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+[250,750,1600,3200,5200].forEach(ms=>setTimeout(()=>{install();arrangeTop();},ms));
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)setTimeout(()=>correctCalendarCount(false),150);});
+window.addEventListener('online',()=>setTimeout(()=>correctCalendarCount(true),250));
+})();
