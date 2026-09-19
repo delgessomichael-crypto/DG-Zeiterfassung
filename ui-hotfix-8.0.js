@@ -1200,9 +1200,8 @@ function observe(){
 function install(){
   if(S.installed)return;S.installed=true;
   addCss();installCapture();observe();
-  let n=0;(function ready(){enforce();if(dash()){refreshAll(true);return;}if(++n<40)setTimeout(ready,100);})();
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden){enforce();refreshAll(false);}});
-  setInterval(()=>{if(bossRoot()&&!bossRoot().classList.contains('hidden'))refreshAll(false);},300000);
+  let n=0;(function ready(){enforce();if(dash())return;if(++n<40)setTimeout(ready,100);})();
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)enforce();});
   document.documentElement.dataset.dgUi12=V;
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
@@ -1699,14 +1698,20 @@ document.addEventListener('click',function(e){
 },true);
 
 function install(){
-  Promise.resolve(loadAdmins()).then(()=>Promise.allSettled([refreshCalendar(),refreshAudit()])).then(enforce);
+  enforce();
+  setTimeout(async()=>{
+    if(!q('bossView')||q('bossView').classList.contains('hidden'))return;
+    await loadAdmins();
+    await refreshCalendar();
+    await refreshAudit();
+    enforce();
+  },1800);
   const mo=new MutationObserver(()=>{
     clearTimeout(STATE.timer);
     STATE.timer=setTimeout(enforce,0);
   });
   mo.observe(document.body,{subtree:true,childList:true,characterData:true});
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden){loadAdmins().then(()=>Promise.allSettled([refreshCalendar(),refreshAudit()])).then(enforce);}});
-  setInterval(()=>{if(q('bossView')&&!q('bossView').classList.contains('hidden'))Promise.allSettled([refreshCalendar(),refreshAudit()]).then(enforce);},300000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)enforce();});
   document.documentElement.dataset.dgUi16=V;
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
@@ -1870,10 +1875,10 @@ function enforce(){
 }
 function install(){
   ensureCss();
-  let tries=0;(function ready(){enforce();if(archiveGrid()&&q('dg60OfficeToolbar')){fetchCreatedOffers().catch(()=>{});return;}if(++tries<60)setTimeout(ready,100);})();
+  let tries=0;(function ready(){enforce();if(archiveGrid()&&q('dg60OfficeToolbar'))return;if(++tries<60)setTimeout(ready,100);})();
   const mo=new MutationObserver(()=>{clearTimeout(S.timer);S.timer=setTimeout(enforce,0);});
   mo.observe(document.body,{subtree:true,childList:true,characterData:true});
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden){enforce();fetchCreatedOffers().catch(()=>{});}});
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)enforce();});
   document.documentElement.dataset.dgUi17=V;
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
@@ -2045,9 +2050,9 @@ function bindCreated(){
 }
 function enforce(){css();ensureQuickOfferTile();bindCreated();paint();}
 function install(){
-  css();let n=0;(function ready(){enforce();if(dailyGrid()&&q('dg80c-createdOffersYear')){refresh().catch(()=>{});return;}if(++n<60)setTimeout(ready,100);})();
+  css();let n=0;(function ready(){enforce();if(dailyGrid()&&q('dg80c-createdOffersYear'))return;if(++n<60)setTimeout(ready,100);})();
   const mo=new MutationObserver(()=>{clearTimeout(S.timer);S.timer=setTimeout(enforce,0);});mo.observe(document.body,{subtree:true,childList:true,characterData:true});
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden){enforce();refresh().catch(()=>{});}});
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)enforce();});
   document.documentElement.dataset.dgUi18=V;
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
@@ -2330,6 +2335,106 @@ function install(){
   });
 
   document.documentElement.dataset.dgUi22=V;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+})();
+
+
+/* DG Zeiterfassung 8.0 - UI Hotfix 23
+   Stabile Overlay-Navigation + reduzierte Backend-Last.
+   Geoeffnete Kachelbereiche liegen als echtes Overlay ueber dem Dashboard.
+   Keine Scroll-Automatik mehr noetig. */
+(function(){
+'use strict';
+const V='8.0-ui23';
+const q=id=>document.getElementById(id);
+const S=window.DG80_UI23=window.DG80_UI23||{timer:null,countLoaded:false};
+
+function root(){return q('bossView');}
+function activePanel(){
+  const r=root();if(!r)return null;
+  return r.querySelector(':scope > .dg80-shell-active');
+}
+function groupOpen(){
+  return !!q('dg80GroupChooser')?.classList.contains('dg80-shell-active');
+}
+function toolbarOpen(){
+  return !!q('dg80OfficeToolbar')?.classList.contains('active');
+}
+function overlayOpen(){return toolbarOpen()||groupOpen()||!!activePanel();}
+
+function css(){
+  if(q('dg80Ui23Css'))return;
+  const s=document.createElement('style');s.id='dg80Ui23Css';
+  s.textContent=''
+    /* neutralise the two earlier focus experiments */
+    +'#bossView.dg21-focus>.d3-dashboard,#bossView.dg22-focus>.d3-dashboard,#bossView.dg21-focus .dg80-final-dashboard,#bossView.dg22-focus .dg80-final-dashboard{display:block!important}'
+    /* dark/light backdrop */
+    +'body.dg23-office-overlay:before{content:"";position:fixed;inset:0;background:rgba(15,23,42,.28);z-index:8998;backdrop-filter:blur(2px)}'
+    /* main toolbar/header */
+    +'body.dg23-office-overlay #dg80OfficeToolbar.active{position:fixed!important;z-index:9001!important;top:12px!important;left:50%!important;transform:translateX(-50%)!important;width:min(1500px,calc(100vw - 24px))!important;max-height:110px!important;margin:0!important;box-sizing:border-box!important}'
+    /* active content pane */
+    +'body.dg23-office-overlay #bossView>.dg80-shell-active:not(#dg80GroupChooser){position:fixed!important;z-index:9000!important;left:50%!important;transform:translateX(-50%)!important;top:112px!important;bottom:12px!important;width:min(1500px,calc(100vw - 24px))!important;max-width:none!important;margin:0!important;overflow:auto!important;box-sizing:border-box!important;background:#fff!important;border-radius:18px!important;box-shadow:0 20px 55px rgba(15,23,42,.28)!important}'
+    /* chooser without toolbar */
+    +'body.dg23-office-overlay #dg80GroupChooser.dg80-shell-active{position:fixed!important;z-index:9001!important;left:50%!important;transform:translateX(-50%)!important;top:18px!important;bottom:18px!important;width:min(1000px,calc(100vw - 24px))!important;max-width:none!important;margin:0!important;overflow:auto!important;box-sizing:border-box!important;background:#fff!important;border-radius:18px!important;box-shadow:0 20px 55px rgba(15,23,42,.28)!important}'
+    +'body.dg23-office-overlay{overflow:hidden!important}'
+    +'@media(max-width:759px){body.dg23-office-overlay #dg80OfficeToolbar.active{top:6px!important;width:calc(100vw - 12px)!important;max-height:122px!important}body.dg23-office-overlay #bossView>.dg80-shell-active:not(#dg80GroupChooser){top:118px!important;bottom:6px!important;width:calc(100vw - 12px)!important;border-radius:14px!important}body.dg23-office-overlay #dg80GroupChooser.dg80-shell-active{top:6px!important;bottom:6px!important;width:calc(100vw - 12px)!important}}';
+  document.head.appendChild(s);
+}
+
+function syncOverlay(){
+  document.body.classList.toggle('dg23-office-overlay',overlayOpen());
+}
+
+async function loadCreatedOfferCount(){
+  if(S.countLoaded||typeof window.api!=='function')return;
+  S.countLoaded=true;
+  try{
+    const payload=typeof window.chefPayload==='function'?window.chefPayload({action:'getOfferStatistics'}):{action:'getOfferStatistics'};
+    const x=await window.api(payload);
+    const y=String(new Date().getFullYear());
+    let n=0,found=false;
+    if(x&&Array.isArray(x.months)){
+      x.months.forEach(m=>{
+        const mk=String(m&&m.month||'');
+        if(mk.startsWith(y)){n+=Number(m.total||0);found=true;}
+      });
+    }
+    if(!found&&x&&Number.isFinite(Number(x.total))&&(!x.months||!x.months.length)){n=Number(x.total||0);found=true;}
+    if(found){
+      const e=q('dg80c-createdOffersYear');if(e)e.textContent=String(n);
+      const t=e?.closest('[data-dg80-final="createdOffersYear"]');const l=t?.querySelector('span');
+      if(l)l.textContent='Erstellte Angebote '+y;
+    }
+  }catch(_e){S.countLoaded=false;}
+}
+
+function install(){
+  css();
+  const r=root();if(!r){setTimeout(install,100);return;}
+  if(r.dataset.dg23==='1')return;r.dataset.dg23='1';
+
+  // Remove stale focus classes from the old attempts.
+  r.classList.remove('dg21-focus','dg22-focus');
+
+  const mo=new MutationObserver(()=>{
+    clearTimeout(S.timer);S.timer=setTimeout(syncOverlay,0);
+  });
+  mo.observe(r,{subtree:true,childList:true,attributes:true,attributeFilter:['class']});
+
+  // Overlay state is driven only by actual open/close state; no scrolling involved.
+  r.addEventListener('click',()=>setTimeout(syncOverlay,0),true);
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'&&document.body.classList.contains('dg23-office-overlay')){
+      const close=q('dg80OfficeClose');
+      if(close&&toolbarOpen()){e.preventDefault();close.click();}
+    }
+  });
+
+  syncOverlay();
+  // One lightweight count request, delayed so normal office data gets priority.
+  setTimeout(loadCreatedOfferCount,4500);
+  document.documentElement.dataset.dgUi23=V;
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
