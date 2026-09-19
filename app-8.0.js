@@ -1680,10 +1680,21 @@ async function d3Inquiries(){
     setMessage('d3InquiryStatus',regular.length+' offene allgemeine Anfrage(n).','ok');d34SetAqonCount(aqon.length);d3Count('inquiries',all.length);
   }catch(e){setMessage('d3InquiryStatus',e.message,'error');}
 }
-async function d34AqonInquiries(){setMessage('d34AqonStatus','AQON PURE Posteingang wird abgeglichen ...','info');try{const sync=await api(chefPayload({action:'syncCustomerInquiries'}));if(sync.aqonReplyErrors||sync.gmailFileErrors)setMessage('d34AqonStatus','AQON-Abgleich abgeschlossen, aber mit '+Number(sync.aqonReplyErrors||0)+' Antwort- und '+Number(sync.gmailFileErrors||0)+' Gmail-Ablagefehler(n).','warn');const all=await api(chefPayload({action:'getCustomerInquiries',status:'Offen'}));DG3.inquiries=all;const rows=all.filter(r=>r.source==='AQON PURE');$('d34AqonList').innerHTML=rows.map((r,i)=>d32InquiryCard(r,i,false)).join('')||'Keine offenen AQON PURE Anfragen.';setMessage('d34AqonStatus',rows.length+' offene AQON PURE Anfrage(n).','ok');d34SetAqonCount(rows.length);d3Count('inquiries',all.length);}catch(e){setMessage('d34AqonStatus','AQON-Abgleich fehlgeschlagen: '+e.message,'error');}}
+async function d34AqonInquiries(){
+  setMessage('d34AqonStatus','AQON PURE Anfragen werden geladen ...','info');
+  try{
+    const all=await api(chefPayload({action:'getCustomerInquiries',status:'Offen'}));
+    DG3.inquiries=all||[];
+    const rows=(all||[]).filter(r=>r.source==='AQON PURE');
+    $('d34AqonList').innerHTML=rows.map((r,i)=>d32InquiryCard(r,i,false)).join('')||'Keine offenen AQON PURE Anfragen.';
+    setMessage('d34AqonStatus',rows.length+' offene AQON PURE Anfrage(n). · Gmail-Abgleich nur noch über „Jetzt synchronisieren“.','ok');
+    d34SetAqonCount(rows.length);d3Count('inquiries',(all||[]).length);
+  }catch(e){setMessage('d34AqonStatus','AQON-Anfragen konnten nicht geladen werden: '+e.message,'error');}
+}
 
 const d34BaseImport=d3Import;
 d3Import=async function(){
+  try{if(window.DG51&&DG51.readCache&&typeof DG51.readCache.clear==='function')DG51.readCache.clear();}catch(_e){}
   setMessage('d3InquiryStatus','Gmail wird abgeglichen ...','info');
   try{
     const r=await api(chefPayload({action:'syncCustomerInquiries'}));
@@ -1715,7 +1726,7 @@ function d3Startup(){
     document.querySelectorAll('[onclick]').forEach(e=>{const x=e.getAttribute('onclick');if(x&&!x.startsWith('return ')&&/^[\w.$]+\([\s\S]*\)$/.test(x.trim()))e.setAttribute('onclick','return '+x);});
     init();
     DG3.ready=true;
-    setInterval(d3Sync,300000);
+    setInterval(d3Sync,3600000);
     document.addEventListener('visibilitychange',()=>{if(!document.hidden)d3Sync();});
   }catch(e){
     console.error('DG Kernstart',e);
@@ -2853,8 +2864,8 @@ const PERF=window.DG51=window.DG51||{
   lastAutoSync:0,lastCalendarFetch:0,lastDayFetch:{},lastDashboardFetch:0,
   forceDay:false,forceCalendar:false,forceDashboard:false
 };
-const DAY_TTL=15000,CALENDAR_TTL=12000,DASHBOARD_TTL=90000,AUTO_SYNC_TTL=180000,EMPLOYEE_TTL=21600000,BACKEND_TTL=1800000;
-const READ_TTL51={getRegieReports:15000,getOfferReports:20000,getOfferReminders:20000,getCustomerInquiries:20000,getBossDayClosures:30000,getEmployeeAdminData:60000,getAbsences:60000,getPlannerWorkers:120000,getMaintenanceCustomer:30000,getMaintenanceArchive:30000};
+const DAY_TTL=3600000,CALENDAR_TTL=3600000,DASHBOARD_TTL=3600000,AUTO_SYNC_TTL=3600000,EMPLOYEE_TTL=21600000,BACKEND_TTL=3600000;
+const READ_TTL51={getAbsenceOverview:3600000,getAbsences:3600000,getBossDayClosures:3600000,getBossMonthData:3600000,getCustomerInquiries:3600000,getDashboardSummary51:3600000,getDayData:3600000,getEmployeeAdminData:3600000,getEmployeeCalendarEvents:3600000,getEmployees:3600000,getInquiryReminders:3600000,getMaintenanceArchive:3600000,getMaintenanceAttachment:3600000,getMaintenanceContracts:3600000,getMaintenanceCustomer:3600000,getMaintenanceOverview:3600000,getManualOrders:3600000,getMinimumWage:3600000,getMonthData:3600000,getMonthPayrollAudit:3600000,getObjectInternalNote:3600000,getObjectInternalNotes:3600000,getObjectReports:3600000,getOfferReminders:3600000,getOfferReports:3600000,getOfferStatistics:3600000,getOwnReminders:3600000,getPayrollCycleState:3600000,getPlannerAvailability:3600000,getPlannerEvents:3600000,getPlannerWorkers:3600000,getRegieAttachments:3600000,getRegieReports:3600000,getSicknessAlerts:3600000,getTimeBankAccount:3600000,getVacationAccount:3600000,getVacationAccounts:3600000,getWeekData:3600000};
 
 function jget51(key){try{return JSON.parse(localStorage.getItem(key)||'null');}catch(_e){return null;}}
 function jset51(key,value){try{localStorage.setItem(key,JSON.stringify(value));}catch(_e){}}
@@ -2885,7 +2896,8 @@ if(typeof apiBase51==='function')window.api=api=async function(payload){
   if(ttl)PERF.readCache.set(key,{ts:now51(),value:r});
   if(DAY_WRITES51.has(a))PERF.forceDay=true;
   if(CAL_WRITES51.has(a))PERF.forceCalendar=true;
-  if(DASH_WRITES51.has(a)){PERF.forceDashboard=true;clearReadCache51();try{localStorage.removeItem('dg51_dashboard');}catch(_e){}}
+  const isWrite=!!a&&!/^(get|check|search|find)/.test(String(a))&&!['ping','employeeLogin','systemHealthCheck'].includes(String(a));
+  if(DASH_WRITES51.has(a)||isWrite){PERF.forceDashboard=true;clearReadCache51();try{localStorage.removeItem('dg51_dashboard');}catch(_e){}}
   return r;
 };
 
@@ -2990,7 +3002,7 @@ window.openMain=openMain=function(){
   setTimeout(()=>{if(typeof d35InstallInspectionButton==='function')d35InstallInspectionButton();},0);
 };
 
-/* Ein Auto-Sync reicht alle drei Minuten; Tag und Kalender parallel statt nacheinander. */
+/* Automatische Synchronisierung maximal einmal pro Stunde; Tag und Kalender parallel. */
 window.d3Sync=d3Sync=async function(force){
   if(DG3.syncing||DG3.pending||document.hidden||!navigator.onLine||!DG3.ready||!auth().employee||d3Dirty())return;
   if(!force&&now51()-PERF.lastAutoSync<AUTO_SYNC_TTL)return;
@@ -3335,7 +3347,7 @@ function installOpenDayPatch521(){
 function applyFixes521(){addCss521();ensureDeleteModal521();ensurePayrollTile521();fixMaintenanceAndAdmin521();installDayRenderer521();installOpenDayPatch521();}
 const oldInstallOffice521=window.d3InstallOffice;if(typeof oldInstallOffice521==='function')window.d3InstallOffice=function(){const r=oldInstallOffice521.apply(this,arguments);setTimeout(applyFixes521,0);return r};
 let observer521Timer=0;const observer521=new MutationObserver(()=>{clearTimeout(observer521Timer);observer521Timer=setTimeout(()=>{ensurePayrollTile521();fixMaintenanceAndAdmin521();},120);});
-function boot521(){applyFixes521();const root=q521('bossView');if(root)observer521.observe(root,{childList:true,subtree:true});setTimeout(applyFixes521,250);setTimeout(applyFixes521,1200);setInterval(ensurePayrollTile521,300000);document.title='DG Zeiterfassung '+V521;document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version '+V521});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - '+V521});try{if(window.DG3)DG3.version=V521;window.DG_APP_VERSION=V521}catch(_e){}}
+function boot521(){applyFixes521();const root=q521('bossView');if(root)observer521.observe(root,{childList:true,subtree:true});setTimeout(applyFixes521,250);setTimeout(applyFixes521,1200);setInterval(ensurePayrollTile521,3600000);document.title='DG Zeiterfassung '+V521;document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version '+V521});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - '+V521});try{if(window.DG3)DG3.version=V521;window.DG_APP_VERSION=V521}catch(_e){}}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot521);else boot521();
 })();
 
@@ -3402,8 +3414,8 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 'use strict';
 const V525='5.2.5';
 const S=window.DG525=window.DG525||{dashboardPromise:null,lastDashboard:0,lastAuto:0};
-const DASH_TTL=180000;
-const AUTO_TTL=300000;
+const DASH_TTL=3600000;
+const AUTO_TTL=3600000;
 const OLD_TIMEOUT='Serverantwort dauert zu lange. Vor erneutem Anlegen zuerst Daten neu laden.';
 const READ_TIMEOUT='Datenabruf dauert zu lange. Der letzte bekannte Stand bleibt angezeigt.';
 const WRITE_TIMEOUT='Speichern dauert zu lange. Bitte nicht erneut speichern – zuerst Daten neu laden und prüfen, ob die Änderung bereits übernommen wurde.';
@@ -3455,7 +3467,7 @@ window.d3Dashboard=d3Dashboard=async function(force){
   return S.dashboardPromise;
 };
 
-/* Hintergrund-Sync nur noch alle fünf Minuten und ohne geöffnete Bürobereiche erneut zu laden. */
+/* Hintergrund-Sync nur noch einmal pro Stunde und ohne geöffnete Bürobereiche erneut zu laden. */
 window.d3Sync=d3Sync=async function(force){
   if(DG3.syncing||DG3.pending||document.hidden||!navigator.onLine||!DG3.ready||!auth().employee||d3Dirty())return;
   if(!force&&now()-S.lastAuto<AUTO_TTL)return;
@@ -3467,7 +3479,7 @@ window.d3Sync=d3Sync=async function(force){
     }else{
       await d3Dashboard(Boolean(force));
     }
-    if(document.getElementById('d3Sync'))document.getElementById('d3Sync').textContent='Zuletzt aktualisiert: '+new Date().toLocaleTimeString('de-DE')+' · automatische Prüfung alle 5 Minuten.';
+    if(document.getElementById('d3Sync'))document.getElementById('d3Sync').textContent='Zuletzt aktualisiert: '+new Date().toLocaleTimeString('de-DE')+' · automatische Prüfung einmal pro Stunde.';
   }catch(e){
     if(document.getElementById('d3Sync'))document.getElementById('d3Sync').textContent='Hintergrund-Aktualisierung ausgelassen: '+e.message;
   }finally{DG3.syncing=false;}
@@ -3490,7 +3502,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 /* DG Zeiterfassung 8.0 - konsolidierter Runtime-Layer */
 (function(){
 'use strict';
-const V='8.0',VIEW='dg60_view',STATE='dg60_office_state',BACK='dg60_backend',BACK_TTL=1800000,OFFER_TTL=30000;
+const V='8.0',VIEW='dg60_view',STATE='dg60_office_state',BACK='dg60_backend',BACK_TTL=3600000,OFFER_TTL=3600000;
 const q=id=>document.getElementById(id),esc60=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let offerAt=0,offerPromise=null;
 const parts=v=>String(v||'').split('.').map(x=>Number(x)||0);
