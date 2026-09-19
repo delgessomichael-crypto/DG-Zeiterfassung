@@ -2214,3 +2214,122 @@ function install(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
+
+
+/* DG Zeiterfassung 8.0 - UI Hotfix 22
+   Robuster Fokusmodus: Kachel anklicken -> Auswahl sofort ausblenden,
+   Inhalt an den Anfang der Bueroseite holen; Schliessen -> exakt zur
+   vorherigen Kachelposition zurueck. */
+(function(){
+'use strict';
+const V='8.0-ui22';
+const q=id=>document.getElementById(id);
+const S=window.DG80_UI22=window.DG80_UI22||{focus:false,originY:0,timer:null,scrollTimers:[]};
+
+function root(){return q('bossView');}
+function dashboard(){const r=root();return r?r.querySelector('.dg80-final-dashboard,.d3-dashboard'):null;}
+function hasOpenContent(){
+  const r=root();if(!r)return false;
+  if(q('dg80OfficeToolbar')?.classList.contains('active'))return true;
+  return !!r.querySelector(':scope > .dg80-shell-active');
+}
+function css(){
+  if(q('dg80Ui22Css'))return;
+  const s=document.createElement('style');s.id='dg80Ui22Css';
+  s.textContent=''
+    +'#bossView.dg22-focus .dg80-final-dashboard{display:none!important}'
+    +'#bossView.dg22-focus>.d3-dashboard{display:none!important}'
+    +'#bossView.dg22-focus>#dg80OfficeToolbar{display:block!important;margin-top:0!important}'
+    +'#bossView.dg22-focus>.dg80-shell-active{display:block!important}'
+    +'#bossView.dg22-focus #dg80OfficeClose{background:#e5e7eb!important;color:#111827!important}';
+  document.head.appendChild(s);
+}
+function clearScrollTimers(){
+  (S.scrollTimers||[]).forEach(t=>clearTimeout(t));S.scrollTimers=[];
+}
+function jumpToOpen(){
+  const r=root();if(!r)return;
+  const run=()=>{
+    const bar=q('dg80OfficeToolbar');
+    const target=(bar&&bar.classList.contains('active'))?bar:(r.querySelector(':scope > .dg80-shell-active')||r);
+    const top=Math.max(0,window.scrollY+target.getBoundingClientRect().top-8);
+    window.scrollTo(0,top);
+  };
+  clearScrollTimers();
+  [0,40,120,260].forEach(ms=>S.scrollTimers.push(setTimeout(run,ms)));
+}
+function enter(){
+  const r=root();if(!r)return;
+  if(!S.focus){
+    S.originY=window.scrollY;
+    S.focus=true;
+  }
+  r.classList.add('dg22-focus');
+  jumpToOpen();
+}
+function exit(){
+  const r=root();if(!r||!S.focus)return;
+  clearScrollTimers();
+  r.classList.remove('dg22-focus');
+  const y=S.originY;
+  S.focus=false;
+  requestAnimationFrame(()=>requestAnimationFrame(()=>window.scrollTo(0,Math.max(0,y||0))));
+}
+function isMainTile(el){
+  return !!el?.closest?.('.dg80-final-tile,[data-dg80-key],#dg80FinalCalendar');
+}
+function isClose(el){
+  return !!el?.closest?.('#dg80OfficeClose,.dg80-group-close');
+}
+function install(){
+  css();
+  const r=root();if(!r){setTimeout(install,100);return;}
+  if(r.dataset.dg22==='1')return;r.dataset.dg22='1';
+
+  // Direkte Steuerung statt nur auf DOM-Aenderungen zu hoffen.
+  r.addEventListener('click',e=>{
+    if(isMainTile(e.target)){
+      if(!S.focus)S.originY=window.scrollY;
+      // Nach der vorhandenen Kachel-Logik den Fokusmodus sicher aktivieren.
+      setTimeout(()=>{if(hasOpenContent()){S.focus=true;r.classList.add('dg22-focus');jumpToOpen();}},0);
+      setTimeout(()=>{if(hasOpenContent()){S.focus=true;r.classList.add('dg22-focus');jumpToOpen();}},80);
+      return;
+    }
+    if(isClose(e.target)){
+      // Erst bestehende Schliesslogik ausfuehren lassen, dann Auswahl zurueckholen.
+      setTimeout(()=>{if(!hasOpenContent())exit();},0);
+      setTimeout(()=>{if(!hasOpenContent())exit();},100);
+    }
+  },true);
+
+  // Untermenue-Klick: Fokus bleibt, geoeffneter Unterbereich wird wieder nach oben geholt.
+  r.addEventListener('click',e=>{
+    if(!S.focus)return;
+    if(e.target.closest('[data-dg80-sub]'))setTimeout(jumpToOpen,50);
+  },true);
+
+  // Fallback fuer programmatisches Oeffnen/Schliessen.
+  const mo=new MutationObserver(()=>{
+    clearTimeout(S.timer);
+    S.timer=setTimeout(()=>{
+      if(hasOpenContent()){
+        if(S.focus){r.classList.add('dg22-focus');}
+      }else if(S.focus){
+        exit();
+      }
+    },20);
+  });
+  mo.observe(r,{subtree:true,childList:true,attributes:true,attributeFilter:['class']});
+
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'&&S.focus){
+      const close=q('dg80OfficeClose');
+      if(close&&q('dg80OfficeToolbar')?.classList.contains('active')){e.preventDefault();close.click();}
+      else exit();
+    }
+  });
+
+  document.documentElement.dataset.dgUi22=V;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+})();
