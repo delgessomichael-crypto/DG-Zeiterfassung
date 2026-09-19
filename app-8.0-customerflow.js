@@ -192,10 +192,15 @@ async function closeManualReminder81(x){
   try{var rows=await api(chefPayload({action:'getOwnReminders',includeDone:false}))||[];for(var i=0;i<rows.length;i++)if(String(rows[i].text||'')===text)await api(chefPayload({action:'completeOwnReminder',reminderId:rows[i].id}));}catch(_e){}
 }
 function ensureOfferButton81(){
-  var p=byId('d3OfferOpen');if(!p||byId('dg81OfferActions'))return;
-  var box=document.createElement('div');box.id='dg81OfferActions';box.className='report-actions';box.style.marginBottom='12px';
-  var b=document.createElement('button');b.type='button';b.className='btn success';b.textContent='+ Angebotsanfrage anlegen';b.addEventListener('click',function(){window.dg81NewOfferRequest();});box.appendChild(b);
-  var h=p.querySelector('h3');if(h)h.insertAdjacentElement('afterend',box);else p.prepend(box);
+  var p=byId('d3OfferCreate');if(!p)return;
+  var h=p.querySelector('h3');if(h)h.textContent='Zu erstellende Angebote';
+  var box=byId('dg81OfferActions');
+  if(!box){
+    box=document.createElement('div');box.id='dg81OfferActions';box.style.cssText='width:100%;margin:12px 0 16px;';
+    var b=document.createElement('button');b.type='button';b.className='btn success';b.style.cssText='display:block;width:100%;padding:14px 16px;font-size:16px;font-weight:800;';
+    b.textContent='+ Angebotsanfrage manuell erfassen';b.addEventListener('click',function(){window.dg81NewOfferRequest();});box.appendChild(b);
+  }
+  if(h&&box.previousElementSibling!==h)h.insertAdjacentElement('afterend',box);else if(!h&&box.parentNode!==p)p.prepend(box);
 }
 function manualCard81(x,stage,index){
   var actions='';
@@ -225,9 +230,26 @@ async function appendManualOffers81(stage){
 
 window.dg81NewOfferRequest=function(){
   if(typeof d3Form!=='function')return false;
-  d3Form('Angebotsanfrage anlegen',[{name:'customer',label:'Kunde',required:true},{name:'address',label:'Ausführungsadresse(n)',type:'textarea'},{name:'phone',label:'Telefon'},{name:'email',label:'E-Mail',type:'email'},{name:'description',label:'Was soll angeboten werden?',type:'textarea',required:true},{name:'internalNote',label:'Interner Vermerk',type:'textarea'}],{},async function(item){
-    var id='ANGREQ-'+(typeof uid==='function'?uid():Date.now().toString(36));await api(chefPayload({action:'saveManualOrder',item:Object.assign({},item,{id:id,status:'Angebot zu erstellen',source:'Angebotsanfrage'})}));
-    if(typeof d3Open==='function')d3Open('d3Offers','d3OfferCreate');await window.loadOffers('Zu erstellen');if(typeof d3Notice==='function')d3Notice('✓ Angebotsanfrage wurde unter „Angebote zu erstellen“ angelegt.','ok');
+  d3Form('Angebotsanfrage manuell erfassen',[
+    {name:'name',label:'Name',required:true},
+    {name:'firstName',label:'Vorname'},
+    {name:'street',label:'Straße',required:true},
+    {name:'postalCode',label:'PLZ',required:true},
+    {name:'city',label:'Ort',required:true},
+    {name:'phone',label:'Telefon'},
+    {name:'email',label:'E-Mail',type:'email'},
+    {name:'description',label:'Was ist zu tun / Worum geht es?',type:'textarea',required:true}
+  ],{},async function(v){
+    var name=String(v.name||'').trim(),firstName=String(v.firstName||'').trim();
+    var customer=[firstName,name].filter(Boolean).join(' ').trim();
+    var street=String(v.street||'').trim(),postalCode=String(v.postalCode||'').trim(),city=String(v.city||'').trim();
+    var address=[street,[postalCode,city].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+    if(!customer||!street||!postalCode||!city||!String(v.description||'').trim())throw new Error('Bitte Name, Straße, PLZ, Ort und Beschreibung vollständig ausfüllen.');
+    var id='ANGREQ-'+(typeof uid==='function'?uid():Date.now().toString(36));
+    await api(chefPayload({action:'saveManualOrder',item:{id:id,customer:customer,address:address,phone:String(v.phone||'').trim(),email:String(v.email||'').trim(),description:String(v.description||'').trim(),internalNote:'',status:'Angebot zu erstellen',source:'Angebotsanfrage'}}));
+    if(typeof d3Open==='function')d3Open('d3Offers','d3OfferCreate');
+    await window.loadOffers('Zu erstellen');
+    if(typeof d3Notice==='function')d3Notice('✓ Angebotsanfrage wurde unter „Zu erstellende Angebote“ angelegt.','ok');
   });return false;
 };
 window.dg81ManualOfferCreated=function(id){
