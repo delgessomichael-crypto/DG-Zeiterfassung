@@ -95,7 +95,7 @@ const CATALOG=[
   {key:'completed',label:'Rechnung zu erstellen',panel:'d3Completed',cls:'completed',counter:'d3Count-completed',loader:'d3Reports',args:['Abgeschlossen']},
   {key:'billed',label:'Abgerechnete Aufträge',panel:'d3Completed',cls:'billed',counter:null,loader:'d3Reports',args:['Abgerechnet']},
   {key:'running',label:'Laufende Aufträge',panel:'d3Running',cls:'running',counter:'d3Count-running',loader:'d3Reports',args:['Laufend']},
-  {key:'offerCreate',label:'Erstellte Angebote',parent:'d3Offers',child:'d3OfferCreate',cls:'offers',counter:'d3Count-offers',loader:'loadOffers',args:['Zu erstellen']},
+  {key:'offerCreate',label:'Zu erstellende Angebote',parent:'d3Offers',child:'d3OfferCreate',cls:'offers',counter:'d3Count-offers',loader:'loadOffers',args:['Zu erstellen']},
   {key:'offerOpen',label:'Erstellte Angebote',parent:'d3Offers',child:'d3OfferOpen',cls:'offer-open',counter:null,loader:'loadOffers',args:['Offen']},
   {key:'offerArchive',label:'Angebotsarchiv',parent:'d3Offers',child:'d3OfferArchive',cls:'offer-archive',counter:null,loader:'loadOffers',args:['Archiv']},
   {key:'offerStats',label:'Angebotsstatistik',parent:'d3Offers',child:'d3Stats',cls:'offer-stats',counter:null,loader:'loadStats'},
@@ -472,8 +472,8 @@ const SECTIONS=[
 const TILES={
   completed:{label:'Rechnung zu erstellen',count:'d3Count-completed',legacy:'completed',leaf:'completed'},
   running:{label:'Laufende Aufträge',count:'d3Count-running',legacy:'running',leaf:'running'},
-  offerCreate:{label:'Offene Angebote',count:'d3Count-offers',legacy:'offers',leaf:'offerCreate'},
-  offerOpen:{label:'Erstellte Angebote',count:'dg80c-offerOpen',legacy:'offer-open',leaf:'offerOpen'},
+  offerCreate:{label:'Zu erstellende Angebote',count:'d3Count-offers',legacy:'offers',leaf:'offerCreate'},
+  offerOpen:{label:'Offene Angebote',count:'dg80c-offerOpen',legacy:'offer-open',leaf:'offerOpen'},
   shopping:{label:'Einkaufsliste',count:'d3Count-shopping',legacy:'shopping',leaf:'shopping'},
   maintenance:{label:'Wartungen',count:'d3Count-maintenance',legacy:'maintenance',leaf:'maintenance'},
   days:{label:'Offene Tagesabschlüsse',count:'d3Count-days',legacy:'days',leaf:'days'},
@@ -510,8 +510,8 @@ const LEAF={
   completed:{title:'Rechnung zu erstellen'},
   billed:{title:'Abgerechnete Aufträge'},
   running:{title:'Laufende Aufträge'},
-  offerCreate:{title:'Offene Angebote'},
-  offerOpen:{title:'Erstellte Angebote'},
+  offerCreate:{title:'Zu erstellende Angebote'},
+  offerOpen:{title:'Offene Angebote'},
   offerArchive:{title:'Angebotsarchiv'},
   offerStats:{title:'Angebotsstatistik'},
   shopping:{title:'Einkaufsliste'},
@@ -806,8 +806,8 @@ function syncLabels(){
     const h=completed.querySelector(':scope > .dg48-head h2,:scope > h2');if(h)h.textContent='Rechnung zu erstellen';
     [...completed.querySelectorAll('button')].forEach(b=>{if(/Offene Regieberichte|Rechnungen zu erstellen/i.test((b.textContent||'').trim()))b.textContent='🟢 Rechnungen zu erstellen';});
   }
-  const create=q('d3OfferCreate')?.querySelector('h3');if(create)create.textContent='Offene Angebote';
-  const open=q('d3OfferOpen')?.querySelector('h3');if(open)open.textContent='Erstellte Angebote';
+  const create=q('d3OfferCreate')?.querySelector('h3');if(create)create.textContent='Zu erstellende Angebote';
+  const open=q('d3OfferOpen')?.querySelector('h3');if(open)open.textContent='Offene Angebote';
   const head=q('dg48EmployeeClosures')?.querySelector(':scope > .dg48-head h2,:scope > h2');if(head)head.textContent='Offene Tagesabschlüsse';
   const sh=q('dg70ShopWindow')?.querySelector('.dg70-shop-head h2');if(sh&&sh.textContent.trim()==='Einkauf')sh.textContent='Einkaufsliste';
   syncShopping();
