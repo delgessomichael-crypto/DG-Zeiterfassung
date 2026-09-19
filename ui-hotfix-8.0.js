@@ -1118,6 +1118,7 @@ const GROUPS={
     title:'Mitarbeiterverwaltung',
     items:[
       {key:'employeeAdmin',label:'Mitarbeiterverwaltung'},
+      {key:'days',label:'Übertragene Tagesabschlüsse / Prüfung'},
       {key:'absence',label:'Urlaub / Abwesenheiten / Feiertage'},
       {key:'sickness',label:'Krank-Fristen'}
     ]
@@ -1295,4 +1296,111 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 window.addEventListener('storage',e=>{if(e.key===SHOP_KEY)syncShoppingCount();});
 setInterval(()=>{if(shoppingCount()!==S.lastShop)syncShoppingCount();},1200);
 setTimeout(selfTest,2200);
+})();
+
+
+/* DG Zeiterfassung 8.0 - UI Hotfix 6
+   Top-Aktionen dauerhaft sichtbar + Tagesabschluss-Prüfung wieder in Mitarbeiterverwaltung. */
+(function(){
+'use strict';
+const V='8.0-ui6';
+const q=id=>document.getElementById(id);
+const S=window.DG80_UI6=window.DG80_UI6||{observer:null,timer:null,installed:false};
+
+function boss(){return q('bossView');}
+function dash(){return boss()?.querySelector(':scope > .d3-dashboard');}
+
+function css(){
+  if(q('dg80Ui6Css'))return;
+  const s=document.createElement('style');s.id='dg80Ui6Css';
+  s.textContent=''
+    +'#bossView #dg80Ui4TopActions{display:grid!important;grid-template-columns:1fr!important;gap:12px!important;margin:0 0 18px!important;width:100%!important}'
+    +'#bossView #dg80Ui4TopActions .dg80-ui3-tile{display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;width:100%!important;min-height:82px!important;text-align:center!important}'
+    +'#bossView #dg80Ui4TopActions .dg80-ui3-tile>span,#bossView #dg80Ui4TopActions .dg80-ui3-tile>strong{width:100%!important;text-align:center!important}'
+    +'#bossView .dg80-ui3-section[data-section="daily"] .dg80-ui3-grid:empty{display:none!important}';
+  document.head.appendChild(s);
+}
+
+function ensureTopActions(){
+  const d=dash();if(!d)return false;
+  let top=q('dg80Ui4TopActions');
+  if(!top){
+    top=document.createElement('div');
+    top.id='dg80Ui4TopActions';
+    top.className='dg80-ui4-top-actions';
+    d.prepend(top);
+  }else if(top.parentElement!==d){
+    d.prepend(top);
+  }
+  const save=d.querySelector('.dg80-save-tile');
+  const cal=d.querySelector('.dg80-ui3-tile[data-ui3-key="calendar"]');
+  if(save){
+    save.draggable=false;
+    if(save.parentElement!==top)top.appendChild(save);
+  }
+  if(cal){
+    cal.draggable=false;
+    if(cal.parentElement!==top)top.appendChild(cal);
+  }
+  return !!(save&&cal);
+}
+
+function ensureAdminDayReviewButton(){
+  const box=q('dg80GroupChooser');
+  const title=box?.querySelector('.dg80-group-head h2');
+  if(!box||!title||title.textContent.trim()!=='Mitarbeiterverwaltung')return false;
+  const list=box.querySelector('.dg80-sub-list');if(!list)return false;
+  let btn=list.querySelector('[data-dg80-sub="days"]');
+  if(!btn){
+    btn=document.createElement('button');
+    btn.type='button';btn.draggable=true;btn.className='dg80-sub-button';btn.dataset.dg80Sub='days';
+    btn.innerHTML='<span>Übertragene Tagesabschlüsse / Prüfung</span><strong>›</strong>';
+    const first=list.querySelector('[data-dg80-sub="employeeAdmin"]');
+    if(first)first.insertAdjacentElement('afterend',btn);else list.prepend(btn);
+  }else{
+    const s=btn.querySelector('span');if(s)s.textContent='Übertragene Tagesabschlüsse / Prüfung';
+  }
+  return true;
+}
+
+function repair(){
+  css();
+  ensureTopActions();
+  ensureAdminDayReviewButton();
+}
+function schedule(){
+  clearTimeout(S.timer);S.timer=setTimeout(repair,35);
+}
+function observe(){
+  if(S.observer||!boss())return;
+  S.observer=new MutationObserver(schedule);
+  S.observer.observe(boss(),{childList:true,subtree:true});
+}
+function selfTest(){
+  const result={
+    topSave:!!q('dg80Ui4TopActions')?.querySelector('.dg80-save-tile'),
+    topCalendar:!!q('dg80Ui4TopActions')?.querySelector('[data-ui3-key="calendar"]'),
+    dayView:!!q('dg48EmployeeClosures'),
+    dayLoader:typeof window.loadBossDayClosuresV48==='function',
+    reviewCss:!!q('dg522Styles')||document.documentElement.innerHTML.includes('dg522')
+  };
+  const bad=Object.entries(result).filter(([,ok])=>!ok).map(([k])=>k);
+  if(bad.length)console.warn('DG UI6 Selbsttest: fehlend',bad);else console.info('DG UI6 Selbsttest erfolgreich',result);
+  return result;
+}
+window.dg80Ui6SelfTest=selfTest;
+
+function install(){
+  if(!boss()||!dash())return false;
+  repair();observe();
+  S.installed=true;document.documentElement.dataset.dgUiHotfix6=V;
+  return true;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+
+// UI3 rendert das Dashboard in den ersten Sekunden mehrfach neu.
+// Darum nach jedem möglichen Rebuild nochmals dauerhaft einhängen.
+[80,180,350,700,1200,2200,3600,5200,7000,9000,12000].forEach(ms=>setTimeout(repair,ms));
+setInterval(repair,4000);
+setTimeout(selfTest,2500);
 })();
