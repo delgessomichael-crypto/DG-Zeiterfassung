@@ -466,8 +466,8 @@ const SHOP_KEY='dg71_shopping_lists_v1';
 
 const SECTIONS=[
   {key:'daily',label:'Tägliches Geschäft',tiles:['completed','running','offerCreate','offerOpen','shopping','maintenance','days','reminders','customers']},
-  {key:'archive',label:'Archive & Auswertung',tiles:['billed','offerArchive','offerStats']},
-  {key:'admin',label:'Personal & Verwaltung',tiles:['payroll','admin','health']}
+  {key:'admin',label:'Personal & Verwaltung',tiles:['payroll','admin','health']},
+  {key:'archive',label:'Archive & Auswertung',tiles:['billed','offerArchive','offerStats']}
 ];
 const TILES={
   completed:{label:'Rechnung zu erstellen',count:'d3Count-completed',legacy:'completed',leaf:'completed'},
@@ -714,6 +714,7 @@ async function saveAll(){
 
 function syncShopping(){const n=shopCount(),e=q('d3Count-shopping');if(e)e.textContent=String(n);}
 function setCount(id,v){const e=q(id);if(e&&v!==undefined&&v!==null)e.textContent=String(v);}
+function setPercent(id,v){const e=q(id),n=Number(v);if(e&&Number.isFinite(n)){e.textContent=String(Math.max(0,Math.min(100,Math.round(n))))+' %';e.title='Annahmequote: angenommene Angebote ÷ entschiedene Angebote';}}
 function dg80PayrollNumericGuard(){
   const e=q('dg80TopPayroll');if(!e)return;
   const cache=readJson(extraKey(),null),v=cache&&cache.data?Number(cache.data.payroll):NaN;
@@ -725,7 +726,7 @@ function applyExtra(x){
   if(x.calendar!==undefined)setCount('dg80c-calendar',x.calendar);
   if(x.offerOpen!==undefined)setCount('dg80c-offerOpen',x.offerOpen);
   if(x.offerArchive!==undefined)setCount('dg80c-offerArchive',x.offerArchive);
-  if(x.offerStats!==undefined)setCount('dg80c-offerStats',x.offerStats);
+  if(x.offerAcceptance!==undefined)setPercent('dg80c-offerStats',x.offerAcceptance);
   if(x.billed!==undefined)setCount('dg80c-billed',x.billed);
   if(x.admin!==undefined)setCount('dg80c-admin',x.admin);
   if(x.health!==undefined)setCount('dg80c-health',x.health);
@@ -760,7 +761,7 @@ function diffDays(a,b){const A=a.split('-').map(Number),B=b.split('-').map(Numbe
 async function refreshExtra(force){
   const cached=readJson(extraKey(),null);if(cached&&cached.data)applyExtra(cached.data);
   if(!navigator.onLine||typeof window.api!=='function'||typeof window.chefPayload!=='function')return;
-  if(!force&&cached&&Date.now()-Number(cached.ts||0)<EXTRA_TTL)return cached.data;
+  if(!force&&cached&&cached.data&&cached.data.offerAcceptance!==undefined&&Date.now()-Number(cached.ts||0)<EXTRA_TTL)return cached.data;
   if(S.extraPromise)return S.extraPromise;
   S.extraPromise=(async()=>{
     const now=new Date(),year=now.getFullYear(),month=now.getMonth()+1,out=Object.assign({},cached?.data||{});
@@ -770,7 +771,7 @@ async function refreshExtra(force){
       window.api(window.chefPayload({action:'getPayrollCycleState',year,month}))
     ]);
     if(jobs[0].status==='fulfilled'){
-      const x=jobs[0].value||{};out.offerOpen=Number(x.open||0);out.offerStats=Number(x.total||0);out.offerArchive=Math.max(0,Number(x.accepted||0)+Number(x.declined||0));
+      const x=jobs[0].value||{},accepted=Math.max(0,Number(x.accepted||0)),declined=Math.max(0,Number(x.declined||0)),decided=accepted+declined;out.offerOpen=Number(x.open||0);out.offerAcceptance=decided>0?(accepted/decided*100):0;out.offerArchive=decided;delete out.offerStats;
     }
     if(jobs[1].status==='fulfilled')out.billed=Array.isArray(jobs[1].value)?jobs[1].value.length:0;
     if(jobs[2].status==='fulfilled'){
