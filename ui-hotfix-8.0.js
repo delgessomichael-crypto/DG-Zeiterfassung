@@ -955,3 +955,260 @@ window.dg80FinalClose=closeMenus;
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&visibleBoss()){syncLabels();paintDirty();refreshExtra(false);}});
 })();
+
+
+/* DG Zeiterfassung 8.0 - UI Hotfix 12
+   Dashboard-Handlungsfarben, aktive Kalender, offene Tagesabschluesse,
+   Auffaelligkeiten-Pruefzentrale, dynamische Lohnfaelligkeit und Jahreszaehler. */
+(function(){
+'use strict';
+const V='8.0-ui12';
+const q=id=>document.getElementById(id);
+const S=window.DG80_UI12=window.DG80_UI12||{
+  installed:false,calendarCount:null,billedYear:null,billedCount:null,
+  audit:null,adminRows:[],busy:false,observer:null
+};
+
+function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function norm(v){return String(v==null?'':v).trim().toLowerCase().replace(/\s+/g,' ');}
+function isActive(v){
+  if(v===false||v===0||v===null)return false;
+  const s=String(v==null?'1':v).trim().toLowerCase();
+  return !['0','false','nein','no','inaktiv','inactive','gelöscht','geloescht','deleted'].includes(s);
+}
+function apiCall(payload){
+  if(typeof window.api!=='function')return Promise.reject(new Error('Backend nicht bereit.'));
+  if(typeof window.chefPayload==='function')return window.api(window.chefPayload(payload));
+  return window.api(payload);
+}
+function bossRoot(){return q('bossView');}
+function dash(){return bossRoot()?.querySelector(':scope > .d3-dashboard');}
+function fmtDate(v){const p=String(v||'').split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:String(v||'');}
+function monthKey(){const d=new Date();return {year:d.getFullYear(),month:d.getMonth()+1};}
+function empId(name){
+  const n=norm(name),r=(S.adminRows||[]).find(x=>norm(x.name||x.employee||x.displayName)===n);
+  return r?(r.personnelNumber||r.employeeId||r.id||r.name):name;
+}
+function setText(id,v){const e=q(id);if(e&&e.textContent!==String(v))e.textContent=String(v);}
+function numericText(el){if(!el)return NaN;const m=String(el.textContent||'').match(/-?\d+/);return m?Number(m[0]):NaN;}
+
+function addCss(){
+  if(q('dg80Ui12Css'))return;
+  const s=document.createElement('style');s.id='dg80Ui12Css';
+  s.textContent=''
+    +'#dg80FinalSave{background:#fee2e2!important;border-color:#ef9a9a!important;color:#991b1b!important}'
+    +'#dg80FinalSave span,#dg80FinalSave strong{color:#991b1b!important}'
+    +'#dg80FinalCalendar{background:#dbeafe!important;border-color:#93c5fd!important;color:#1d4ed8!important}'
+    +'#dg80FinalCalendar span,#dg80FinalCalendar strong{color:#1d4ed8!important}'
+    +'#bossView .dg80-final-tile.dg80-hot,#bossView .dg80-final-tile.dg80-anomaly.dg80-hot{background:#fee2e2!important;border-color:#ef9a9a!important;color:#991b1b!important}'
+    +'#bossView .dg80-final-tile.dg80-hot span,#bossView .dg80-final-tile.dg80-hot strong,#bossView .dg80-final-tile.dg80-anomaly.dg80-hot span,#bossView .dg80-final-tile.dg80-anomaly.dg80-hot strong{color:#991b1b!important}'
+    +'#bossView .dg80-final-tile.dg80-anomaly{background:#e8f7ea;border:1px solid #b9e4c1}'
+    +'#dg80ActionCenter{padding:18px!important}'
+    +'.dg80-ac-head{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:14px}'
+    +'.dg80-ac-head h2{margin:0;color:#31589e}'
+    +'.dg80-ac-tablewrap{overflow:auto;border:1px solid #dbe2ea;border-radius:14px;background:#fff}'
+    +'.dg80-ac-table{width:100%;border-collapse:collapse;min-width:760px}'
+    +'.dg80-ac-table th,.dg80-ac-table td{padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:left;vertical-align:top}'
+    +'.dg80-ac-table th{background:#f8fafc;font-size:13px;color:#475569;position:sticky;top:0}'
+    +'.dg80-ac-actions{display:flex;gap:7px;flex-wrap:wrap}.dg80-ac-actions .btn{width:auto!important;margin:0!important}'
+    +'.dg80-ac-badge{display:inline-block;border-radius:999px;padding:3px 8px;font-size:12px;font-weight:900}'
+    +'.dg80-ac-badge.error{background:#fee2e2;color:#991b1b}.dg80-ac-badge.warn{background:#fef3c7;color:#92400e}.dg80-ac-badge.ok{background:#dcfce7;color:#166534}'
+    +'@media(max-width:759px){#dg80ActionCenter{padding:12px!important}.dg80-ac-actions .btn{width:100%!important}.dg80-ac-head .btn{width:100%!important}}';
+  document.head.appendChild(s);
+}
+
+function ensureAnomalyTile(){
+  const d=dash();if(!d)return;
+  const sec=d.querySelector('.dg80-final-section[data-section="admin"] .dg80-final-grid');if(!sec)return;
+  let t=sec.querySelector('[data-dg80-final="anomalies"]');
+  if(!t){
+    t=document.createElement('button');t.type='button';t.draggable=false;
+    t.className='d3-tile dg80-final-tile dg80-anomaly';
+    t.dataset.dg80Final='anomalies';
+    t.innerHTML='<span>Auffälligkeiten</span><strong id="dg80c-anomalies">0</strong>';
+    const health=sec.querySelector('[data-dg80-final="health"]');
+    if(health)sec.insertBefore(t,health);else sec.appendChild(t);
+  }
+  const n=S.audit&&Array.isArray(S.audit.issues)?S.audit.issues.filter(x=>!x.reviewed).length:0;
+  setText('dg80c-anomalies',n);t.classList.toggle('dg80-hot',n>0);
+}
+
+function paintActionTiles(){
+  const d=dash();if(!d)return;
+  ['completed','offerCreate','days','reminders','customers'].forEach(k=>{
+    const t=d.querySelector('[data-dg80-final="'+k+'"]');if(!t)return;
+    const n=numericText(t.querySelector('strong'));t.classList.toggle('dg80-hot',Number.isFinite(n)&&n>0);
+  });
+  ensureAnomalyTile();
+  const year=new Date().getFullYear();
+  const billed=d.querySelector('[data-dg80-final="billed"]');
+  if(billed){
+    const lab=billed.querySelector('span');if(lab)lab.textContent='Abgerechnete Aufträge '+year;
+    if(S.billedYear===year&&S.billedCount!==null)setText(billed.querySelector('strong')?.id||'dg80c-billed',S.billedCount);
+  }
+}
+
+function formatPayroll(){
+  const e=q('dg80TopPayroll');if(!e)return;
+  const n=numericText(e);
+  if(!Number.isFinite(n))return;
+  let txt='';
+  if(n===0)txt='heute fällig';
+  else if(n===1)txt='in 1 Tag fällig';
+  else if(n>1)txt='in '+n+' Tagen fällig';
+  else if(n===-1)txt='seit 1 Tag fällig';
+  else txt='seit '+Math.abs(n)+' Tagen fällig';
+  if(e.textContent!==txt)e.textContent=txt;
+}
+
+async function refreshCalendarCount(){
+  try{
+    let rows=[];
+    try{rows=await apiCall({action:'getEmployeeAdminData'});}catch(_e){}
+    if(Array.isArray(rows)&&rows.length){
+      S.adminRows=rows.slice();
+      const active=rows.filter(r=>isActive(r.active)&&String(r.calendarId||r.googleCalendarId||'').trim());
+      S.calendarCount=new Set(active.map(r=>String(r.calendarId||r.googleCalendarId||'').trim())).size;
+    }else{
+      const wr=await apiCall({action:'getPlannerWorkers'});
+      rows=Array.isArray(wr)?wr:[];
+      S.calendarCount=new Set(rows.filter(r=>isActive(r.active)&&String(r.calendarId||'').trim()).map(r=>String(r.calendarId).trim())).size;
+    }
+    setText('dg80c-calendar',S.calendarCount);
+  }catch(_e){}
+}
+
+async function refreshYearlyBilled(){
+  const year=new Date().getFullYear();
+  try{
+    const rows=await apiCall({action:'getRegieReports',status:'Abgerechnet',year:year,month:0});
+    S.billedYear=year;S.billedCount=Array.isArray(rows)?rows.length:0;
+    setText('dg80c-billed',S.billedCount);paintActionTiles();
+  }catch(_e){}
+}
+
+async function refreshAudit(){
+  const p=monthKey();
+  try{
+    const a=await apiCall({action:'getMonthPayrollAudit',year:p.year,month:p.month});
+    S.audit=a||{issues:[]};
+    if(!S.adminRows.length){
+      try{const r=await apiCall({action:'getEmployeeAdminData'});if(Array.isArray(r))S.adminRows=r;}catch(_e){}
+    }
+    ensureAnomalyTile();
+    return S.audit;
+  }catch(_e){
+    S.audit=S.audit||{issues:[]};ensureAnomalyTile();return S.audit;
+  }
+}
+
+async function refreshAll(force){
+  if(S.busy&&!force)return;S.busy=true;
+  try{await Promise.allSettled([refreshCalendarCount(),refreshYearlyBilled(),refreshAudit()]);}
+  finally{S.busy=false;enforce();}
+}
+
+function openCenter(title){
+  const r=bossRoot();if(!r)return null;
+  r.querySelectorAll(':scope > .dg80-shell-active').forEach(x=>x.classList.remove('dg80-shell-active'));
+  let card=q('dg80ActionCenter');
+  if(!card){card=document.createElement('div');card.id='dg80ActionCenter';card.className='card';r.appendChild(card);}
+  card.classList.add('dg80-shell-active');
+  const tb=q('dg80OfficeToolbar');if(tb)tb.classList.add('active');
+  const t=q('dg80OfficeTitle');if(t)t.textContent=title;
+  return card;
+}
+
+async function loadOpenDaysCenter(){
+  const card=openCenter('Offene Tagesabschlüsse');if(!card)return;
+  card.innerHTML='<div class="dg80-ac-head"><h2>Offene Tagesabschlüsse</h2><button class="btn secondary" type="button" id="dg80ReloadOpenDays">Aktualisieren</button></div><div class="status info">Offene Tagesabschlüsse werden geladen ...</div>';
+  q('dg80ReloadOpenDays')?.addEventListener('click',loadOpenDaysCenter);
+  try{
+    const p=monthKey();
+    const [rows,admins]=await Promise.all([
+      apiCall({action:'getBossDayClosures',year:p.year,month:p.month}),
+      S.adminRows.length?Promise.resolve(S.adminRows):apiCall({action:'getEmployeeAdminData'}).catch(()=>[])
+    ]);
+    if(Array.isArray(admins))S.adminRows=admins;
+    const list=[];
+    (rows||[]).forEach(emp=>(emp.days||[]).forEach(d=>{if(!d.closed)list.push({employee:emp.employee,date:d.date,hours:d.hours,entryCount:d.entryCount});}));
+    list.sort((a,b)=>String(a.date).localeCompare(String(b.date))||String(a.employee).localeCompare(String(b.employee)));
+    if(!list.length){card.innerHTML='<div class="dg80-ac-head"><h2>Offene Tagesabschlüsse</h2><button class="btn secondary" type="button" id="dg80ReloadOpenDays">Aktualisieren</button></div><div class="status ok">✓ Keine offenen Tagesabschlüsse vorhanden.</div>';q('dg80ReloadOpenDays')?.addEventListener('click',loadOpenDaysCenter);return;}
+    card.innerHTML='<div class="dg80-ac-head"><h2>Offene Tagesabschlüsse</h2><button class="btn secondary" type="button" id="dg80ReloadOpenDays">Aktualisieren</button></div><div class="dg80-ac-tablewrap"><table class="dg80-ac-table"><thead><tr><th>Tag</th><th>Mitarbeiter</th><th>Mitarbeiter-ID</th><th>Stunden</th><th>Einträge</th><th>Aktion</th></tr></thead><tbody>'
+      +list.map((x,i)=>'<tr><td><strong>'+esc(fmtDate(x.date))+'</strong></td><td>'+esc(x.employee)+'</td><td>'+esc(empId(x.employee))+'</td><td>'+Number(x.hours||0).toFixed(2).replace('.',',')+'</td><td>'+Number(x.entryCount||0)+'</td><td><div class="dg80-ac-actions"><button class="btn success" type="button" data-dg80-close-day="'+i+'">Manuell erfassen / freigeben</button></div></td></tr>').join('')
+      +'</tbody></table></div>';
+    q('dg80ReloadOpenDays')?.addEventListener('click',loadOpenDaysCenter);
+    card.querySelectorAll('[data-dg80-close-day]').forEach(b=>b.addEventListener('click',async()=>{
+      const x=list[Number(b.dataset.dg80CloseDay)];if(!x)return;
+      if(!confirm('Tag '+fmtDate(x.date)+' für '+x.employee+' manuell abschließen und freigeben?'))return;
+      try{b.disabled=true;await apiCall({action:'manualCloseBossDay',targetEmployee:x.employee,date:x.date});await refreshAll(true);await loadOpenDaysCenter();}catch(e){alert(e.message||e);}finally{b.disabled=false;}
+    }));
+  }catch(e){card.innerHTML='<div class="dg80-ac-head"><h2>Offene Tagesabschlüsse</h2></div><div class="status error">'+esc(e.message||e)+'</div>';}
+}
+
+async function markIssueReviewed(x){
+  const p=monthKey();
+  await apiCall({action:'markPayrollIssueReviewed',issueId:x.id,targetEmployee:x.employee,year:p.year,month:p.month,date:x.date||'',note:'Im Büro geprüft und freigegeben'});
+}
+
+async function removeIssueEntry(x){
+  if(!x.entryId||String(x.entryId).indexOf('assigned:')===0)throw new Error('Für diese Auffälligkeit ist kein direkt löschbarer Mitarbeitereintrag hinterlegt.');
+  const reason=prompt('Begründung für das Entfernen des Mitarbeitereintrags:','Fehleintrag / Doppelbuchung');
+  if(reason===null)return false;
+  if(!String(reason).trim())throw new Error('Bitte eine Begründung eintragen.');
+  if(!confirm('Eintrag von '+x.employee+' am '+fmtDate(x.date)+' wirklich entfernen? Die Stunden werden aus Tages- und Monatswerten neu berechnet.'))return false;
+  await apiCall({action:'deleteBossDayEntry',targetEmployee:x.employee,date:x.date,entryId:x.entryId,reason:String(reason).trim()});
+  return true;
+}
+
+async function loadAnomalyCenter(){
+  const card=openCenter('Auffälligkeiten');if(!card)return;
+  card.innerHTML='<div class="dg80-ac-head"><h2>Auffälligkeiten</h2><button class="btn secondary" type="button" id="dg80ReloadIssues">Aktualisieren</button></div><div class="status info">Auffälligkeiten werden geprüft ...</div>';
+  q('dg80ReloadIssues')?.addEventListener('click',loadAnomalyCenter);
+  const a=await refreshAudit(),issues=(a&&Array.isArray(a.issues)?a.issues:[]).filter(x=>!x.reviewed).slice();
+  issues.sort((a,b)=>String(a.date||'9999').localeCompare(String(b.date||'9999'))||String(a.employee||'').localeCompare(String(b.employee||'')));
+  if(!issues.length){card.innerHTML='<div class="dg80-ac-head"><h2>Auffälligkeiten</h2><button class="btn secondary" type="button" id="dg80ReloadIssues">Aktualisieren</button></div><div class="status ok">✓ Keine offenen Auffälligkeiten vorhanden.</div>';q('dg80ReloadIssues')?.addEventListener('click',loadAnomalyCenter);return;}
+  card.innerHTML='<div class="dg80-ac-head"><h2>Auffälligkeiten</h2><button class="btn secondary" type="button" id="dg80ReloadIssues">Aktualisieren</button></div><div class="dg80-ac-tablewrap"><table class="dg80-ac-table"><thead><tr><th>Tag</th><th>Mitarbeiter</th><th>Mitarbeiter-ID</th><th>Auffälligkeit</th><th>Details</th><th>Aktionen</th></tr></thead><tbody>'
+    +issues.map((x,i)=>'<tr><td>'+esc(x.date?fmtDate(x.date):'–')+'</td><td><strong>'+esc(x.employee||'–')+'</strong></td><td>'+esc(empId(x.employee||''))+'</td><td><span class="dg80-ac-badge '+(x.severity==='error'?'error':'warn')+'">'+(x.severity==='error'?'Fehler':'Prüfen')+'</span><br><strong>'+esc(x.title||x.type||'Auffälligkeit')+'</strong></td><td>'+esc(x.detail||'')+'</td><td><div class="dg80-ac-actions"><button class="btn success" type="button" data-dg80-review="'+i+'">✓ Geprüft / freigeben</button>'+(x.entryId&&String(x.entryId).indexOf('assigned:')!==0?'<button class="btn danger" type="button" data-dg80-remove="'+i+'">Mitarbeitereintrag entfernen</button>':'')+'</div></td></tr>').join('')
+    +'</tbody></table></div>';
+  q('dg80ReloadIssues')?.addEventListener('click',loadAnomalyCenter);
+  card.querySelectorAll('[data-dg80-review]').forEach(b=>b.addEventListener('click',async()=>{const x=issues[Number(b.dataset.dg80Review)];if(!x)return;try{b.disabled=true;await markIssueReviewed(x);await refreshAll(true);await loadAnomalyCenter();}catch(e){alert(e.message||e);}finally{b.disabled=false;}}));
+  card.querySelectorAll('[data-dg80-remove]').forEach(b=>b.addEventListener('click',async()=>{const x=issues[Number(b.dataset.dg80Remove)];if(!x)return;try{b.disabled=true;const ok=await removeIssueEntry(x);if(ok){await refreshAll(true);await loadAnomalyCenter();}}catch(e){alert(e.message||e);}finally{b.disabled=false;}}));
+}
+
+function installCapture(){
+  if(document.documentElement.dataset.dg80Ui12Clicks==='1')return;
+  document.documentElement.dataset.dg80Ui12Clicks='1';
+  document.addEventListener('click',e=>{
+    const t=e.target.closest('[data-dg80-final]');
+    if(!t||!bossRoot()?.contains(t))return;
+    const k=t.dataset.dg80Final;
+    if(k==='days'){e.preventDefault();e.stopImmediatePropagation();loadOpenDaysCenter();}
+    else if(k==='anomalies'){e.preventDefault();e.stopImmediatePropagation();loadAnomalyCenter();}
+  },true);
+}
+
+function enforce(){
+  addCss();ensureAnomalyTile();paintActionTiles();formatPayroll();
+  if(S.calendarCount!==null)setText('dg80c-calendar',S.calendarCount);
+  const year=new Date().getFullYear(),b=dash()?.querySelector('[data-dg80-final="billed"]');
+  if(b){
+    const lab=b.querySelector('span');if(lab)lab.textContent='Abgerechnete Aufträge '+year;
+    if(S.billedYear===year&&S.billedCount!==null){const st=b.querySelector('strong');if(st&&st.textContent!==String(S.billedCount))st.textContent=String(S.billedCount);}
+  }
+}
+function observe(){
+  if(S.observer)return;
+  S.observer=new MutationObserver(()=>{clearTimeout(S._timer);S._timer=setTimeout(enforce,0);});
+  S.observer.observe(document.body,{subtree:true,childList:true,characterData:true});
+}
+function install(){
+  if(S.installed)return;S.installed=true;
+  addCss();installCapture();observe();
+  let n=0;(function ready(){enforce();if(dash()){refreshAll(true);return;}if(++n<40)setTimeout(ready,100);})();
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden){enforce();refreshAll(false);}});
+  setInterval(()=>{if(bossRoot()&&!bossRoot().classList.contains('hidden'))refreshAll(false);},300000);
+  document.documentElement.dataset.dgUi12=V;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+})();
