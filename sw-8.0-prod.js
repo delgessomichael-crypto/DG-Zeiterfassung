@@ -1,8 +1,8 @@
 /* DG Zeiterfassung 8.0 production service worker */
-const CACHE='dg-zeiterfassung-8.0-prod-20260919-18';
+const CACHE='dg-zeiterfassung-8.0-prod-20260919-19';
 const STATIC=[
   './app-5.0.css?v=20260918-800-prod1',
-  './app-8.0.js?v=20260919-800-ui16',
+  './app-8.0.js?v=20260919-800-ui19',
   './app-8.0-customerflow.js?v=20260919-customerflow2',
   './payroll-hotfix-8.0.js?v=20260919-800-ui8',
   './ui-hotfix-8.0.js?v=20260919-800-ui18',
