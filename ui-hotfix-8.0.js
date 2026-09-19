@@ -2120,3 +2120,97 @@ function install(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
+
+
+/* DG Zeiterfassung 8.0 - UI Hotfix 21
+   Fokusmodus fuer Kachel-Navigation:
+   geoeffneter Bereich erscheint oben, Dashboard-Kacheln werden ausgeblendet,
+   beim Schliessen wird die vorherige Kachelposition wiederhergestellt. */
+(function(){
+'use strict';
+const V='8.0-ui21';
+const q=id=>document.getElementById(id);
+const S=window.DG80_UI21=window.DG80_UI21||{originY:null,focus:false,timer:null,restorePending:false};
+
+function root(){return q('bossView');}
+function dash(){return root()?.querySelector(':scope > .d3-dashboard')||null;}
+function activeShell(){
+  const r=root();if(!r)return null;
+  return r.querySelector(':scope > .dg80-shell-active');
+}
+function toolbarActive(){
+  const b=q('dg80OfficeToolbar');return !!(b&&b.classList.contains('active'));
+}
+function css(){
+  if(q('dg80Ui21Css'))return;
+  const s=document.createElement('style');s.id='dg80Ui21Css';
+  s.textContent=''
+    +'#bossView.dg21-focus>.d3-dashboard{display:none!important}'
+    +'#bossView.dg21-focus>#dg80OfficeToolbar{display:block!important;margin-top:0!important;scroll-margin-top:10px!important}'
+    +'#bossView.dg21-focus>.dg80-shell-active{display:block!important;scroll-margin-top:84px!important}'
+    +'#bossView.dg21-focus{padding-top:0!important}'
+    +'#bossView.dg21-focus #dg80OfficeClose{background:#e5e7eb!important;color:#111827!important}'
+    +'@media(max-width:759px){#bossView.dg21-focus>.dg80-shell-active{scroll-margin-top:72px!important}}';
+  document.head.appendChild(s);
+}
+function rememberOrigin(){
+  if(S.focus)return;
+  S.originY=window.scrollY;
+}
+function scrollOpen(){
+  const bar=q('dg80OfficeToolbar'),panel=activeShell();
+  const target=bar&&toolbarActive()?bar:panel;
+  if(!target)return;
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    try{target.scrollIntoView({behavior:'smooth',block:'start'});}catch(_e){}
+  }));
+}
+function enter(){
+  const r=root();if(!r||S.focus)return;
+  S.focus=true;r.classList.add('dg21-focus');
+  scrollOpen();
+}
+function exit(){
+  const r=root();if(!r||!S.focus||S.restorePending)return;
+  S.restorePending=true;
+  r.classList.remove('dg21-focus');S.focus=false;
+  const y=Number.isFinite(S.originY)?S.originY:null;
+  S.originY=null;
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    if(y!==null){try{window.scrollTo({top:y,behavior:'smooth'});}catch(_e){window.scrollTo(0,y);}}
+    S.restorePending=false;
+  }));
+}
+function sync(){
+  const has=!!activeShell()||toolbarActive();
+  if(has)enter();else exit();
+}
+function install(){
+  css();
+  const r=root();if(!r){setTimeout(install,100);return;}
+  if(r.dataset.dg21==='1')return;r.dataset.dg21='1';
+
+  // Ausgangsposition merken, bevor die bestehende Kachellogik den Bereich oeffnet.
+  r.addEventListener('click',e=>{
+    const t=e.target.closest('.dg80-final-tile,[data-dg80-key],#dg80FinalCalendar');
+    if(t&&!S.focus)rememberOrigin();
+  },true);
+
+  // Auch Untermenues bleiben im Fokusmodus; die urspruengliche Kachelposition bleibt erhalten.
+  const mo=new MutationObserver(()=>{
+    clearTimeout(S.timer);S.timer=setTimeout(sync,0);
+  });
+  mo.observe(r,{subtree:true,childList:true,attributes:true,attributeFilter:['class']});
+
+  // Escape entspricht dem X: Bereich schliessen und zur Kachelauswahl zurueck.
+  document.addEventListener('keydown',e=>{
+    if(e.key!=='Escape'||!S.focus)return;
+    const close=q('dg80OfficeClose');
+    if(close&&toolbarActive()){e.preventDefault();close.click();}
+  });
+
+  sync();
+  document.documentElement.dataset.dgUi21=V;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+})();
