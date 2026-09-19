@@ -1,11 +1,11 @@
 /* DG Zeiterfassung 8.0 production service worker */
-const CACHE='dg-zeiterfassung-8.0-prod-20260919-14';
+const CACHE='dg-zeiterfassung-8.0-prod-20260919-15';
 const STATIC=[
   './app-5.0.css?v=20260918-800-prod1',
   './app-8.0.js?v=20260918-800-prod1',
   './app-8.0-customerflow.js?v=20260919-customerflow2',
   './payroll-hotfix-8.0.js?v=20260919-800-ui8',
-  './ui-hotfix-8.0.js?v=20260919-800-ui14',
+  './ui-hotfix-8.0.js?v=20260919-800-ui15',
   './dg_icon_192.png',
   './dg_icon_512.png',
   './manifest.json'
