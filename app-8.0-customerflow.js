@@ -10,12 +10,12 @@ function esc81(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){ret
 function norm81(v){
   var s=String(v==null?'':v).trim().toLowerCase();
   try{s=s.normalize('NFD').replace(/[̀-ͯ]/g,'');}catch(_e){}
-  return s.replace(/ß/g,'ss').replace(/[^a-z0-9@.+-]+/g,' ').replace(/s+/g,' ').trim();
+  return s.replace(/ß/g,'ss').replace(/[^a-z0-9@.+-]+/g,' ').replace(/\s+/g,' ').trim();
 }
 function unique81(a){return Array.from(new Set((a||[]).filter(Boolean)));}
 function intersects81(a,b){var s=new Set(a||[]);return (b||[]).some(function(x){return s.has(x);});}
 function bool81(v){var s=norm81(v);return v===true||v===1||s==='ja'||s==='true'||s==='1';}
-function parseDate81(v){var m=String(v||'').match(/(d{4})-(d{2})-(d{2})/);return m?Date.UTC(+m[1],+m[2]-1,+m[3]):NaN;}
+function parseDate81(v){var m=String(v||'').match(/(\d{4})-(\d{2})-(\d{2})/);return m?Date.UTC(+m[1],+m[2]-1,+m[3]):NaN;}
 function gapDays81(a,b){
   var a1=parseDate81(a.firstDate),a2=parseDate81(a.lastDate||a.firstDate),b1=parseDate81(b.firstDate),b2=parseDate81(b.lastDate||b.firstDate);
   if(!isFinite(a1)||!isFinite(a2)||!isFinite(b1)||!isFinite(b2))return 9999;
@@ -26,19 +26,19 @@ function customerName81(v){
   var s=String(v||'').trim();
   if(!s)return'';
   s=s.split(/s*,?s+-s+/)[0];
-  var zip=s.search(/d{5}/);if(zip>0)s=s.slice(0,zip);
+  var zip=s.search(/\bd{5}\b/);if(zip>0)s=s.slice(0,zip);
   s=s.replace(/([^)]*)/g,' ');
   s=norm81(s)
-    .replace(/^(?:frau|herr|familie|fam|eheleute|firma|fa|dr|prof).?s*/g,'')
-    .replace(/(?:nk|bk|mh|wa|bes|wp|klima|aqon)/g,' ')
-    .replace(/ans*d+[a-z]?/g,' ')
-    .replace(/s+/g,' ').trim();
+    .replace(/^(?:frau|herr|familie|fam|eheleute|firma|fa|dr|prof)\b.?s*/g,'')
+    .replace(/\b(?:nk|bk|mh|wa|bes|wp|klima|aqon)\b/g,' ')
+    .replace(/\bans*d+[a-z]?\b/g,' ')
+    .replace(/\s+/g,' ').trim();
   return s;
 }
 function stripUnit81(v){
   var s=String(v||'').trim();
-  s=s.replace(/(?:wohnung|whg.?|wohneinheit|we)s*[-:#]?s*[w.-]+.*$/i,'');
-  s=s.replace(/(?:[,;s]+)(?:eg|dg|ug|kg|d+s*.?s*og).*$/i,'');
+  s=s.replace(/\b(?:wohnung|whg.?|wohneinheit|we)s*[-:#]?s*[w.-]+.*$/i,'');
+  s=s.replace(/(?:[,;s]+)(?:eg|dg|ug|kg|d+s*.?s*og)\b.*$/i,'');
   return s.replace(/[s,;-]+$/g,'').trim();
 }
 function addressDisplay81(v){
@@ -58,18 +58,18 @@ function reportAddresses81(r){
 }
 function addressKey81(v){
   var s=norm81(stripUnit81(v));
-  return s.replace(/strasse/g,'str').replace(/str/g,'str').replace(/s+/g,' ').trim();
+  return s.replace(/\bstrasse\b/g,'str').replace(/\bstr\b/g,'str').replace(/\s+/g,' ').trim();
 }
 function tokens81(text){
   var s=String(text||''),out=[],m;
-  var rx=/(?:AN|ANG|AUF|BES|KT)s*[-:#]?s*[A-Z0-9-]{2,}/gi;
-  while((m=rx.exec(s)))out.push(norm81(m[0]).replace(/s+/g,''));
+  var rx=/\b(?:AN|ANG|AUF|BES|KT)s*[-:#]?s*[A-Z0-9-]{2,}\b/gi;
+  while((m=rx.exec(s)))out.push(norm81(m[0]).replace(/\s+/g,''));
   return unique81(out);
 }
 function contacts81(text){
   var s=String(text||''),out=[],mail=s.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+.[A-Z]{2,}/gi)||[];
   mail.forEach(function(x){out.push('m:'+norm81(x));});
-  var ph=s.match(/(?:+?49|0)[ds()/-]{6,}/g)||[];
+  var ph=s.match(/(?:+?49|0)[\ds()/-]{6,}/g)||[];
   ph.forEach(function(x){var d=x.replace(/D/g,'');if(d.length>=7)out.push('p:'+d.replace(/^49/,'0'));});
   return unique81(out);
 }
@@ -84,8 +84,8 @@ function meta81(g){
     [r.maintenanceObjectId,r.wartungObjectId,r.wartungObjektId].forEach(function(x){if(x)maintObjects.push(String(x));});
   });
   var displays=[];all.forEach(function(r){reportAddresses81(r).forEach(function(x){displays.push(x);});});
-  var maintenance=all.some(function(r){return bool81(r.isMaintenance)||bool81(r.maintenance);})||/wartung(?:sauftrag|svertrag)?/i.test(joined);
-  var detailed=displays.length>0||texts.some(function(x){return /d{5}/.test(String(x||''));});
+  var maintenance=all.some(function(r){return bool81(r.isMaintenance)||bool81(r.maintenance);})||/\bwartung(?:sauftrag|svertrag)?\b/i.test(joined);
+  var detailed=displays.length>0||texts.some(function(x){return /\bd{5}\b/.test(String(x||''));});
   var bare=all.some(function(r){var c=String(r.customer||'').trim();return !!customerName81(c)&&!addressDisplay81(c)&&!/(?:d{5}|stra(?:ss|ß)e|str.|weg|platz|allee|gasse|ring)/i.test(c);});
   return {group:g,names:names,addresses:unique81(addresses),displayAddresses:unique81(displays),sourceIds:unique81(sourceIds),maintCustomers:unique81(maintCustomers),maintObjects:unique81(maintObjects),orderTokens:tokens81(joined),contacts:contacts81(joined),maintenance:maintenance,detailed:detailed,bare:bare,firstDate:g.firstDate||(reports[0]&&reports[0].date)||'',lastDate:g.lastDate||(reports[reports.length-1]&&reports[reports.length-1].date)||g.firstDate||''};
 }
@@ -170,7 +170,7 @@ function displayPlaces81(g){
 }
 function decoratePlaces81(view){
   var groups=window.DG3&&DG3.reports&&DG3.reports[view]||[],root=byId(view==='Laufend'?'d3RunningList':'regieResult');if(!root)return;
-  groups.forEach(function(g,i){var places=displayPlaces81(g);if(places.length<2)return;var card=root.querySelector('.report-card[data-index="'+i+'"]');if(!card||card.querySelector('.dg81-locations'))return;var d=document.createElement('div');d.className='status info dg81-locations';d.style.marginTop='8px';var s=document.createElement('strong');s.textContent='Ausführungsorte ('+places.length+')';d.appendChild(s);places.forEach(function(p){var x=document.createElement('div');x.textContent='• '+p;d.appendChild(x);});var head=card.querySelector('.total');if(head)head.insertAdjacentElement('afterend',d);else card.prepend(d);});
+  groups.forEach(function(g,i){var places=displayPlaces81(g);if(places.length<2)return;var card=root.querySelector('.report-card[\data-index="'+i+'"]');if(!card||card.querySelector('.dg81-locations'))return;var d=document.createElement('div');d.className='status info dg81-locations';d.style.marginTop='8px';var s=document.createElement('strong');s.textContent='Ausführungsorte ('+places.length+')';d.appendChild(s);places.forEach(function(p){var x=document.createElement('div');x.textContent='• '+p;d.appendChild(x);});var head=card.querySelector('.total');if(head)head.insertAdjacentElement('afterend',d);else card.prepend(d);});
 }
 
 var baseReports81=window.d3Reports;
@@ -212,7 +212,7 @@ function updateOfferCounts81(all){
   var mc=all.filter(function(x){return manualStage81(x)==='Zu erstellen';}).length,mo=all.filter(function(x){return manualStage81(x)==='Offen';}).length,ma=all.filter(function(x){return manualStage81(x)==='Archiv';}).length;
   var rc=window.DG3&&DG3.offers&&Array.isArray(DG3.offers['Zu erstellen'])?DG3.offers['Zu erstellen'].length:0,ro=window.DG3&&DG3.offers&&Array.isArray(DG3.offers.Offen)?DG3.offers.Offen.length:0,ra=window.DG3&&DG3.offers&&Array.isArray(DG3.offers.Archiv)?DG3.offers.Archiv.length:0;
   if(window.DG3)DG3.offerCounts={open:ro+mo,create:rc+mc};
-  var buttons=document.querySelectorAll('#d3Offers .d3-menu [data-panel]');buttons.forEach(function(b){var p=b.getAttribute('data-panel'),n=null,label='';if(p==='d3OfferOpen'){n=ro+mo;label='Offene Angebote';}if(p==='d3OfferCreate'){n=rc+mc;label='Angebote zu erstellen';}if(p==='d3OfferArchive'){n=ra+ma;label='Angebotsarchiv';}if(n!==null)b.innerHTML=esc81(label)+' <span class="dg60-count">'+n+'</span>';});
+  var buttons=document.querySelectorAll('#d3Offers .d3-menu [\data-panel]');buttons.forEach(function(b){var p=b.getAttribute('data-panel'),n=null,label='';if(p==='d3OfferOpen'){n=ro+mo;label='Offene Angebote';}if(p==='d3OfferCreate'){n=rc+mc;label='Angebote zu erstellen';}if(p==='d3OfferArchive'){n=ra+ma;label='Angebotsarchiv';}if(n!==null)b.innerHTML=esc81(label)+' <span class="dg60-count">'+n+'</span>';});
   if(typeof d3Count==='function')d3Count('offers',rc+mc);
 }
 async function appendManualOffers81(stage){
