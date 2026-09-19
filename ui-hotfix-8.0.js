@@ -1184,7 +1184,7 @@ function installCapture(){
     if(!t||!bossRoot()?.contains(t))return;
     const k=t.dataset.dg80Final;
     if(k==='days'){e.preventDefault();e.stopImmediatePropagation();loadOpenDaysCenter();}
-    else if(k==='anomalies'){e.preventDefault();e.stopImmediatePropagation();loadAnomalyCenter();}
+    else if(k==='anomalies'){e.preventDefault();e.stopImmediatePropagation();(window.DG80_UI13_openAnomalies||loadAnomalyCenter)();}
   },true);
 }
 
@@ -1209,6 +1209,256 @@ function install(){
   document.addEventListener('visibilitychange',()=>{if(!document.hidden){enforce();refreshAll(false);}});
   setInterval(()=>{if(bossRoot()&&!bossRoot().classList.contains('hidden'))refreshAll(false);},300000);
   document.documentElement.dataset.dgUi12=V;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+})();
+
+
+/* DG Zeiterfassung 8.0 - UI Hotfix 13
+   Verschlankte Pruefregeln + gezielte Tagesbearbeitung aus Auffaelligkeiten. */
+(function(){
+'use strict';
+const V='8.0-ui13';
+const q=id=>document.getElementById(id);
+const S=window.DG80_UI13=window.DG80_UI13||{admins:[],audit:null,wrapped:false,cleanTimer:null};
+
+function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function norm(v){return String(v==null?'':v).trim().toLowerCase().replace(/\s+/g,' ');}
+function fmtDate(v){const p=String(v||'').split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:String(v||'');}
+function monthKey(){const d=new Date();return {year:d.getFullYear(),month:d.getMonth()+1};}
+function isActive(v){
+  if(v===false||v===0||v===null)return false;
+  const s=String(v==null?'1':v).trim().toLowerCase();
+  return !['0','false','nein','no','inaktiv','inactive','gelöscht','geloescht','deleted'].includes(s);
+}
+function adminFor(name){const n=norm(name);return (S.admins||[]).find(x=>norm(x.name||x.employee||x.displayName)===n)||null;}
+function isChef(name){const a=adminFor(name);return !!(a&&a.chefAccess);}
+function isInactive(name){const a=adminFor(name);return !!(a&&!isActive(a.active));}
+function empId(name){const a=adminFor(name);return a?(a.personnelNumber||a.employeeId||a.id||a.name):name;}
+function issueEmployee(x){return String(x&&x.employee||'');}
+
+function isPauseIssue(x){
+  const s=norm((x&&x.type)+' '+(x&&x.title)+' '+(x&&x.detail));
+  return s.includes('pause_short')||s.includes('pause zu kurz');
+}
+function isTargetDeviation(x){
+  const s=norm((x&&x.type)+' '+(x&&x.title)+' '+(x&&x.detail));
+  return s.includes('tages-soll')||s.includes('tagessoll')||s.includes('abweichung von tages')||s.includes('target deviation')||s.includes('daily_target');
+}
+function isWageMissing(x){
+  const s=norm((x&&x.type)+' '+(x&&x.title)+' '+(x&&x.detail));
+  return s.includes('stundenlohn fehlt')||s.includes('hourly wage')&&s.includes('fehlt')||s.includes('missing_hourly')||s.includes('hourly_wage_missing');
+}
+function isOverlap(x){
+  const s=norm((x&&x.type)+' '+(x&&x.title)+' '+(x&&x.detail));
+  return s.includes('overlap')||s.includes('überschneid')||s.includes('ueberschneid');
+}
+function suppressIssue(x){
+  if(!x)return false;
+  if(isPauseIssue(x)||isTargetDeviation(x))return true;
+  const emp=issueEmployee(x);
+  if(isWageMissing(x)&&isInactive(emp))return true;
+  if(isOverlap(x)&&isChef(emp))return true;
+  return false;
+}
+function sanitizeAudit(a){
+  if(!a||typeof a!=='object')return a;
+  const out=Object.assign({},a);
+  out.issues=(Array.isArray(a.issues)?a.issues:[]).filter(x=>!suppressIssue(x));
+  const errors=out.issues.filter(x=>x.severity==='error'&&!x.reviewed).length;
+  const warnings=out.issues.filter(x=>x.severity!=='error'&&!x.reviewed).length;
+  const reviewedWarnings=out.issues.filter(x=>x.severity!=='error'&&x.reviewed).length;
+  out.summary=Object.assign({},a.summary||{},{
+    errors:errors,warnings:warnings,reviewedWarnings:reviewedWarnings
+  });
+  out.canRelease=errors===0&&warnings===0;
+  return out;
+}
+async function loadAdminsWith(base){
+  try{
+    const rows=await base({action:'getEmployeeAdminData',employee:localStorage.getItem('dg_employee')||'',employeePin:sessionStorage.getItem('dg_employee_pin')||''});
+    if(Array.isArray(rows))S.admins=rows;
+  }catch(_e){}
+}
+function wrapApi(){
+  if(S.wrapped||typeof window.api!=='function')return;S.wrapped=true;
+  const base=window.api;
+  window.api=async function(payload){
+    const r=await base.apply(this,arguments);
+    try{
+      if(payload&&payload.action==='getEmployeeAdminData'&&Array.isArray(r))S.admins=r;
+      if(payload&&payload.action==='getMonthPayrollAudit'){
+        if(!S.admins.length)await loadAdminsWith(base);
+        const clean=sanitizeAudit(r);S.audit=clean;return clean;
+      }
+    }catch(_e){}
+    return r;
+  };
+}
+
+function employeeFromNode(node){
+  const box=node?.closest?.('.dg48-days-employee');
+  if(box){
+    const h=box.querySelector('.dg521-employee-head strong')||box.querySelector(':scope > strong');
+    if(h)return String(h.textContent||'').trim();
+  }
+  const txt=String(node?.textContent||'');
+  const a=(S.admins||[]).find(x=>txt.includes(String(x.name||'')));
+  return a?String(a.name):'';
+}
+function hideLegacyNoise(){
+  const sels=['.dg522-issue','.dg80-review-issue','.dg520-issue'];
+  document.querySelectorAll(sels.join(',')).forEach(el=>{
+    const txt=String(el.textContent||''),emp=employeeFromNode(el);
+    const fake={employee:emp,title:txt,detail:txt,type:''};
+    if(suppressIssue(fake))el.remove();
+  });
+  document.querySelectorAll('.dg48-days-employee').forEach(box=>{
+    const remaining=box.querySelectorAll('.dg522-issue,.dg80-review-issue');
+    if(remaining.length)return;
+    const head=box.querySelector(':scope > .dg521-employee-head');
+    if(!head)return;
+    head.querySelector('.dg521-lamp')?.classList.add('ok');
+    head.querySelector('.dg521-lamp')?.classList.remove('bad');
+    const l=head.querySelector('.dg521-plausibility');if(l){l.textContent='Alles plausibel';l.classList.add('ok');l.classList.remove('bad');}
+  });
+}
+
+function openCenter(title){
+  const root=q('bossView');if(!root)return null;
+  root.querySelectorAll(':scope > .dg80-shell-active').forEach(x=>x.classList.remove('dg80-shell-active'));
+  let card=q('dg80ActionCenter');
+  if(!card){card=document.createElement('div');card.id='dg80ActionCenter';card.className='card';root.appendChild(card);}
+  card.classList.add('dg80-shell-active');
+  q('dg80OfficeToolbar')?.classList.add('active');
+  const t=q('dg80OfficeTitle');if(t)t.textContent=title;
+  return card;
+}
+async function apiCall(payload){
+  if(typeof window.api!=='function')throw new Error('Backend nicht bereit.');
+  if(typeof window.chefPayload==='function')return window.api(window.chefPayload(payload));
+  return window.api(payload);
+}
+async function getAudit(){
+  const p=monthKey();
+  const [a,admins]=await Promise.all([
+    apiCall({action:'getMonthPayrollAudit',year:p.year,month:p.month}),
+    S.admins.length?Promise.resolve(S.admins):apiCall({action:'getEmployeeAdminData'}).catch(()=>[])
+  ]);
+  if(Array.isArray(admins))S.admins=admins;
+  S.audit=sanitizeAudit(a||{issues:[]});return S.audit;
+}
+async function markReviewed(x,note){
+  const p=monthKey();
+  await apiCall({action:'markPayrollIssueReviewed',issueId:x.id,targetEmployee:x.employee,year:p.year,month:p.month,date:x.date||'',note:note||'Geprüft – korrekt'});
+}
+function issueSeverity(x){return x.severity==='error'?'Fehler':'Prüfen';}
+
+async function openAnomalies(){
+  const card=openCenter('Auffälligkeiten');if(!card)return;
+  card.innerHTML='<div class="dg80-ac-head"><h2>Auffälligkeiten</h2><button class="btn secondary" type="button" id="dg13Reload">Aktualisieren</button></div><div class="status info">Auffälligkeiten werden geprüft ...</div>';
+  q('dg13Reload')?.addEventListener('click',openAnomalies);
+  try{
+    const a=await getAudit(),issues=(a.issues||[]).filter(x=>!x.reviewed&&!suppressIssue(x)).slice()
+      .sort((x,y)=>String(x.date||'9999').localeCompare(String(y.date||'9999'))||String(x.employee||'').localeCompare(String(y.employee||'')));
+    const count=q('dg80c-anomalies');if(count)count.textContent=String(issues.length);
+    q('bossView')?.querySelector('[data-dg80-final="anomalies"]')?.classList.toggle('dg80-hot',issues.length>0);
+    if(!issues.length){
+      card.innerHTML='<div class="dg80-ac-head"><h2>Auffälligkeiten</h2><button class="btn secondary" type="button" id="dg13Reload">Aktualisieren</button></div><div class="status ok">✓ Keine offenen Auffälligkeiten vorhanden.</div>';
+      q('dg13Reload')?.addEventListener('click',openAnomalies);return;
+    }
+    card.innerHTML='<div class="dg80-ac-head"><h2>Auffälligkeiten</h2><button class="btn secondary" type="button" id="dg13Reload">Aktualisieren</button></div><div class="dg80-ac-tablewrap"><table class="dg80-ac-table"><thead><tr><th>Tag</th><th>Mitarbeiter</th><th>Mitarbeiter-ID</th><th>Auffälligkeit</th><th>Details</th><th>Aktionen</th></tr></thead><tbody>'
+      +issues.map((x,i)=>'<tr><td>'+esc(x.date?fmtDate(x.date):'–')+'</td><td><strong>'+esc(x.employee||'–')+'</strong></td><td>'+esc(empId(x.employee||''))+'</td><td><span class="dg80-ac-badge '+(x.severity==='error'?'error':'warn')+'">'+issueSeverity(x)+'</span><br><strong>'+esc(x.title||x.type||'Auffälligkeit')+'</strong></td><td>'+esc(x.detail||'')+'</td><td><div class="dg80-ac-actions">'
+        +(x.date?'<button class="btn primary" type="button" data-dg13-day="'+i+'">Tag öffnen</button>':'')
+        +'<button class="btn success" type="button" data-dg13-ok="'+i+'">✓ Geprüft / freigeben</button>'
+        +'<button class="btn secondary" type="button" data-dg13-false="'+i+'">Falschmeldung löschen</button>'
+        +'</div></td></tr>').join('')
+      +'</tbody></table></div>';
+    q('dg13Reload')?.addEventListener('click',openAnomalies);
+    card.querySelectorAll('[data-dg13-ok]').forEach(b=>b.addEventListener('click',async()=>{const x=issues[Number(b.dataset.dg13Ok)];if(!x)return;try{b.disabled=true;await markReviewed(x,'Geprüft / freigegeben');await openAnomalies();}catch(e){alert(e.message||e);}finally{b.disabled=false;}}));
+    card.querySelectorAll('[data-dg13-false]').forEach(b=>b.addEventListener('click',async()=>{const x=issues[Number(b.dataset.dg13False)];if(!x)return;if(!confirm('Diese Meldung als Falschmeldung entfernen?'))return;try{b.disabled=true;await markReviewed(x,'Falschmeldung gelöscht');await openAnomalies();}catch(e){alert(e.message||e);}finally{b.disabled=false;}}));
+    card.querySelectorAll('[data-dg13-day]').forEach(b=>b.addEventListener('click',()=>{const x=issues[Number(b.dataset.dg13Day)];if(x)openSingleDay(x.employee,x.date);}));
+  }catch(e){card.innerHTML='<div class="dg80-ac-head"><h2>Auffälligkeiten</h2></div><div class="status error">'+esc(e.message||e)+'</div>';}
+}
+window.DG80_UI13_openAnomalies=openAnomalies;
+
+async function getDay(employee,date){
+  const p=String(date).split('-').map(Number),rows=await apiCall({action:'getBossDayClosures',year:p[0],month:p[1]});
+  const emp=(rows||[]).find(x=>norm(x.employee)===norm(employee));
+  return emp?(emp.days||[]).find(d=>String(d.date)===String(date))||null:null;
+}
+function toMinutes(t){const m=String(t||'').match(/^(\d{1,2}):(\d{2})$/);return m?Number(m[1])*60+Number(m[2]):null;}
+function fromMinutes(m){m=((m%1440)+1440)%1440;return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');}
+
+async function editEntry(employee,date,r){
+  if(!r||!r.id||String(r.id).startsWith('assigned:'))return;
+  const start=prompt('Von (HH:MM):',r.start||'');if(start===null)return;
+  const end=prompt('Bis (HH:MM):',r.end||'');if(end===null)return;
+  const reason=prompt('Grund der Bearbeitung:','Korrektur durch Büro');if(reason===null||!reason.trim())return;
+  await apiCall({action:'updateBossDayEntry',targetEmployee:employee,date,entryId:r.id,start:start.trim(),end:end.trim(),reason:reason.trim()});
+}
+async function deleteEntry(employee,date,r){
+  if(!r||!r.id||String(r.id).startsWith('assigned:'))return;
+  const reason=prompt('Begründung für das Löschen:','Fehleintrag');if(reason===null||!reason.trim())return;
+  if(!confirm('Eintrag wirklich löschen? Tages- und Monatsstunden werden neu berechnet.'))return;
+  await apiCall({action:'deleteBossDayEntry',targetEmployee:employee,date,entryId:r.id,reason:reason.trim()});
+}
+async function adjustEntry(employee,date,r,sign){
+  if(!r||!r.id||String(r.id).startsWith('assigned:'))return;
+  const raw=prompt((sign>0?'Stunden hinzufügen':'Stunden abziehen')+' (z. B. 0,5):','0,5');if(raw===null)return;
+  const h=Number(String(raw).replace(',','.'));if(!(h>0&&h<=12))throw new Error('Bitte eine gültige Stundenanzahl zwischen 0 und 12 eingeben.');
+  const a=toMinutes(r.start),b=toMinutes(r.end);if(a===null||b===null)throw new Error('Für diesen Eintrag fehlen gültige Von-/Bis-Zeiten.');
+  let end=b;if(end<a)end+=1440;
+  const next=end+sign*Math.round(h*60);
+  if(next<=a)throw new Error('Die Korrektur würde den Eintrag auf 0 oder negative Stunden setzen.');
+  const reason=prompt('Grund der Stundenkorrektur:','Stundenkorrektur durch Büro');if(reason===null||!reason.trim())return;
+  await apiCall({action:'updateBossDayEntry',targetEmployee:employee,date,entryId:r.id,start:r.start,end:fromMinutes(next),reason:reason.trim()});
+}
+async function openSingleDay(employee,date){
+  const card=openCenter('Tag bearbeiten');if(!card)return;
+  card.innerHTML='<div class="dg80-ac-head"><h2>'+esc(fmtDate(date))+' · '+esc(employee)+'</h2><div class="dg80-ac-actions"><button class="btn secondary" type="button" id="dg13BackIssues">← Auffälligkeiten</button><button class="btn secondary" type="button" id="dg13ReloadDay">Aktualisieren</button></div></div><div class="status info">Tag wird geladen ...</div>';
+  q('dg13BackIssues')?.addEventListener('click',openAnomalies);
+  q('dg13ReloadDay')?.addEventListener('click',()=>openSingleDay(employee,date));
+  try{
+    const d=await getDay(employee,date);if(!d)throw new Error('Tagesdaten wurden nicht gefunden.');
+    const reports=d.reports||[];
+    card.innerHTML='<div class="dg80-ac-head"><h2>'+esc(fmtDate(date))+' · '+esc(employee)+'</h2><div class="dg80-ac-actions"><button class="btn secondary" type="button" id="dg13BackIssues">← Auffälligkeiten</button><button class="btn secondary" type="button" id="dg13ReloadDay">Aktualisieren</button></div></div>'
+      +'<div class="status info"><strong>Mitarbeiter-ID:</strong> '+esc(empId(employee))+' · <strong>Tagessumme:</strong> '+Number(d.hours||0).toFixed(2).replace('.',',')+' Std. · <strong>Status:</strong> '+(d.closed?'abgeschlossen':'offen')+'</div>'
+      +(reports.length?'<div class="dg80-ac-tablewrap"><table class="dg80-ac-table"><thead><tr><th>Kunde / Baustelle</th><th>Von</th><th>Bis</th><th>Stunden</th><th>Tätigkeit</th><th>Bearbeiten</th></tr></thead><tbody>'
+        +reports.map((r,i)=>'<tr><td><strong>'+esc(r.customer||'–')+'</strong></td><td>'+esc(r.start||'–')+'</td><td>'+esc(r.end||'–')+'</td><td>'+Number(r.hours||0).toFixed(2).replace('.',',')+'</td><td>'+esc(r.activity||'')+'</td><td><div class="dg80-ac-actions">'
+          +(String(r.id||'').startsWith('assigned:')?'<span class="muted small">Zugeordnete Mitarbeit – Quellbericht bearbeiten.</span>':'<button class="btn primary" type="button" data-dg13-edit="'+i+'">Bearbeiten</button><button class="btn danger" type="button" data-dg13-del="'+i+'">Löschen</button><button class="btn success" type="button" data-dg13-plus="'+i+'">Stunden +</button><button class="btn secondary" type="button" data-dg13-minus="'+i+'">Stunden −</button>')
+          +'</div></td></tr>').join('')
+        +'</tbody></table></div>':'<div class="status info">Für diesen Tag sind keine Einzelberichte vorhanden.</div>');
+    q('dg13BackIssues')?.addEventListener('click',openAnomalies);
+    q('dg13ReloadDay')?.addEventListener('click',()=>openSingleDay(employee,date));
+    const action=async(type,i,b)=>{
+      const r=reports[i];if(!r)return;
+      try{b.disabled=true;if(type==='edit')await editEntry(employee,date,r);if(type==='del')await deleteEntry(employee,date,r);if(type==='plus')await adjustEntry(employee,date,r,1);if(type==='minus')await adjustEntry(employee,date,r,-1);await openSingleDay(employee,date);}catch(e){alert(e.message||e);}finally{b.disabled=false;}
+    };
+    card.querySelectorAll('[data-dg13-edit]').forEach(b=>b.addEventListener('click',()=>action('edit',Number(b.dataset.dg13Edit),b)));
+    card.querySelectorAll('[data-dg13-del]').forEach(b=>b.addEventListener('click',()=>action('del',Number(b.dataset.dg13Del),b)));
+    card.querySelectorAll('[data-dg13-plus]').forEach(b=>b.addEventListener('click',()=>action('plus',Number(b.dataset.dg13Plus),b)));
+    card.querySelectorAll('[data-dg13-minus]').forEach(b=>b.addEventListener('click',()=>action('minus',Number(b.dataset.dg13Minus),b)));
+  }catch(e){card.innerHTML='<div class="dg80-ac-head"><h2>Tag bearbeiten</h2><button class="btn secondary" type="button" id="dg13BackIssues">← Auffälligkeiten</button></div><div class="status error">'+esc(e.message||e)+'</div>';q('dg13BackIssues')?.addEventListener('click',openAnomalies);}
+}
+
+function refreshFilteredCount(){
+  if(!S.audit)return;
+  const open=(S.audit.issues||[]).filter(x=>!x.reviewed&&!suppressIssue(x));
+  const e=q('dg80c-anomalies');if(e)e.textContent=String(open.length);
+  q('bossView')?.querySelector('[data-dg80-final="anomalies"]')?.classList.toggle('dg80-hot',open.length>0);
+}
+async function refreshAudit(){
+  try{S.audit=await getAudit();refreshFilteredCount();}catch(_e){}
+}
+function install(){
+  wrapApi();
+  let tries=0;(function ready(){if(S.admins.length||++tries>20)return;apiCall({action:'getEmployeeAdminData'}).then(r=>{if(Array.isArray(r))S.admins=r;hideLegacyNoise();refreshAudit();}).catch(()=>setTimeout(ready,150));})();
+  const mo=new MutationObserver(()=>{clearTimeout(S.cleanTimer);S.cleanTimer=setTimeout(()=>{hideLegacyNoise();refreshFilteredCount();},0);});
+  mo.observe(document.body,{subtree:true,childList:true,characterData:true});
+  setTimeout(()=>{hideLegacyNoise();refreshAudit();},400);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden){hideLegacyNoise();refreshAudit();}});
+  document.documentElement.dataset.dgUi13=V;
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
