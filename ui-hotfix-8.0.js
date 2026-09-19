@@ -1146,6 +1146,8 @@ async function loadOpenDaysCenter(){
   }catch(e){card.innerHTML='<div class="dg80-ac-head"><h2>Offene Tagesabschlüsse</h2></div><div class="status error">'+esc(e.message||e)+'</div>';}
 }
 
+window.DG80_UI12_openDays=loadOpenDaysCenter;
+
 async function markIssueReviewed(x){
   const p=monthKey();
   await apiCall({action:'markPayrollIssueReviewed',issueId:x.id,targetEmployee:x.employee,year:p.year,month:p.month,date:x.date||'',note:'Im Büro geprüft und freigegeben'});
@@ -1459,6 +1461,52 @@ function install(){
   setTimeout(()=>{hideLegacyNoise();refreshAudit();},400);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden){hideLegacyNoise();refreshAudit();}});
   document.documentElement.dataset.dgUi13=V;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+})();
+
+
+/* DG Zeiterfassung 8.0 - UI Hotfix 14
+   Hardened click binding for "Offene Tagesabschluesse". */
+(function(){
+'use strict';
+const V='8.0-ui14';
+function bind(){
+  const root=document.getElementById('bossView');
+  if(!root)return false;
+  const tile=root.querySelector('[data-dg80-final="days"]');
+  if(!tile)return false;
+  if(tile.dataset.dg80Days14!=='1'){
+    tile.dataset.dg80Days14='1';
+    tile.addEventListener('click',function(e){
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      const fn=window.DG80_UI12_openDays;
+      if(typeof fn==='function'){
+        Promise.resolve(fn()).then(function(){
+          const card=document.getElementById('dg80ActionCenter');
+          if(card){
+            card.classList.add('dg80-shell-active');
+            card.style.display='block';
+            setTimeout(function(){try{card.scrollIntoView({behavior:'smooth',block:'start'});}catch(_e){}},0);
+          }
+        }).catch(function(err){
+          alert('Offene Tagesabschlüsse konnten nicht geöffnet werden: '+(err&&err.message?err.message:err));
+        });
+      }else{
+        alert('Die Tagesabschluss-Ansicht ist noch nicht bereit. Bitte die App einmal neu laden.');
+      }
+      return false;
+    },true);
+  }
+  return true;
+}
+function install(){
+  let n=0;(function retry(){if(bind())return;if(++n<50)setTimeout(retry,100);})();
+  const mo=new MutationObserver(function(){bind();});
+  mo.observe(document.body,{subtree:true,childList:true});
+  document.documentElement.dataset.dgUi14=V;
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
