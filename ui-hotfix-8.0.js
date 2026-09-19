@@ -461,7 +461,7 @@ const S=window.DG80_FINAL=window.DG80_FINAL||{
   reviewRows:[],reviewIssues:[],reviewBusy:false,
   wrapped:false
 };
-const EXTRA_TTL=300000;
+const EXTRA_TTL=3600000;
 const SHOP_KEY='dg71_shopping_lists_v1';
 
 const SECTIONS=[
@@ -831,7 +831,7 @@ function mount(force){
   root()?.classList.add('dg80-office-shell');
   buildDashboard(!!force||d.dataset.dg80Final!=='1');
   syncLabels();paintDirty();setOfficeMode(visibleBoss());
-  refreshExtra(false);
+  const cachedExtra=readJson(extraKey(),null);if(cachedExtra&&cachedExtra.data)applyExtra(cachedExtra.data);
   S.mounted=true;document.documentElement.dataset.dgUiFinal=V;return true;
 }
 
@@ -847,7 +847,7 @@ function wrapRuntime(){
     try{if(typeof showEmployee!=='undefined')showEmployee=window.showEmployee;}catch(_e){}
   }
   if(typeof db==='function'){
-    window.d3Dashboard=async function(){const r=await db.apply(this,arguments);syncLabels();paintDirty();refreshExtra(false);return r;};
+    window.d3Dashboard=async function(){const r=await db.apply(this,arguments);syncLabels();paintDirty();return r;};
     try{if(typeof d3Dashboard!=='undefined')d3Dashboard=window.d3Dashboard;}catch(_e){}
   }
   root()?.addEventListener('input',paintDirty,true);root()?.addEventListener('change',paintDirty,true);
@@ -953,7 +953,7 @@ function install(){
 window.dg80FinalMount=mount;
 window.dg80FinalClose=closeMenus;
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&visibleBoss()){syncLabels();paintDirty();refreshExtra(false);}});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&visibleBoss()){syncLabels();paintDirty();}});
 })();
 
 
@@ -1447,11 +1447,11 @@ async function refreshAudit(){
 }
 function install(){
   wrapApi();
-  let tries=0;(function ready(){if(S.admins.length||++tries>20)return;apiCall({action:'getEmployeeAdminData'}).then(r=>{if(Array.isArray(r))S.admins=r;hideLegacyNoise();refreshAudit();}).catch(()=>setTimeout(ready,150));})();
+  hideLegacyNoise();refreshFilteredCount();
   const mo=new MutationObserver(()=>{clearTimeout(S.cleanTimer);S.cleanTimer=setTimeout(()=>{hideLegacyNoise();refreshFilteredCount();},0);});
   mo.observe(document.body,{subtree:true,childList:true,characterData:true});
-  setTimeout(()=>{hideLegacyNoise();refreshAudit();},400);
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden){hideLegacyNoise();refreshAudit();}});
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden){hideLegacyNoise();refreshFilteredCount();}});
+  setInterval(async()=>{if(document.hidden||!q('bossView')||q('bossView').classList.contains('hidden'))return;try{const r=await apiCall({action:'getEmployeeAdminData'});if(Array.isArray(r))S.admins=r;await refreshAudit();}catch(_e){}},3600000);
   document.documentElement.dataset.dgUi13=V;
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
@@ -2423,8 +2423,6 @@ function install(){
   });
 
   syncOverlay();
-  // One lightweight count request, delayed so normal office data gets priority.
-  setTimeout(loadCreatedOfferCount,4500);
   document.documentElement.dataset.dgUi23=V;
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
@@ -2551,6 +2549,9 @@ async function manualSync(){
   try{
     clearReadCaches();forceFlags();
     await runLoaderByTitle(title);
+    try{
+      if(window.DG80_FINAL&&typeof window.dg80FinalRefreshExtra==='function')await window.dg80FinalRefreshExtra(true);
+    }catch(_e){}
     const times=readTimes();times[stampKey(title)]=Date.now();saveTimes(times);
     setSyncUi(title,false,stampText(title));
   }catch(e){
