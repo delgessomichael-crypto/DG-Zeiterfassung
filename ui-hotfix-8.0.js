@@ -590,6 +590,7 @@ function css(){
     +'.dg80-review-head{font-weight:900}.dg80-review-detail{font-size:13px;color:#64748b;margin-top:3px}.dg80-review-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}.dg80-review-actions .btn{width:auto!important;margin:0!important}'
     +'@media(max-width:759px){#bossView .dg80-final-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}#bossView .dg80-final-tile{min-height:108px;border-radius:17px;padding:12px}#bossView .dg80-final-tile span{font-size:14px}#bossView .dg80-final-tile strong{font-size:27px}#bossView .dg80-final-top-btn{min-height:52px;padding:8px 12px}#bossView .dg80-final-top-btn span{font-size:16px}#bossView .dg80-final-top-btn strong{font-size:22px}.dg80-review-actions .btn{width:100%!important}}';
   document.head.appendChild(s);
+  const fix=document.createElement('style');fix.id='dg80FinalLegacyAlign';fix.textContent='#bossView .d3-tile.sickness734{align-items:center!important;justify-content:space-between!important;text-align:center!important}#bossView .d3-tile.sickness734>span,#bossView .d3-tile.sickness734>strong{width:100%!important;text-align:center!important;align-self:center!important}';document.head.appendChild(fix);
 }
 
 function currentCounts(){
@@ -713,6 +714,12 @@ async function saveAll(){
 
 function syncShopping(){const n=shopCount(),e=q('d3Count-shopping');if(e)e.textContent=String(n);}
 function setCount(id,v){const e=q(id);if(e&&v!==undefined&&v!==null)e.textContent=String(v);}
+function dg80PayrollNumericGuard(){
+  const e=q('dg80TopPayroll');if(!e)return;
+  const cache=readJson(extraKey(),null),v=cache&&cache.data?Number(cache.data.payroll):NaN;
+  if(Number.isFinite(v))e.textContent=String(Math.max(0,Math.round(v)));
+  const tile=e.closest('.d3-tile');if(tile&&Number.isFinite(v)){tile.classList.toggle('urgent',v<=3);tile.classList.remove('warn','done');}
+}
 function applyExtra(x){
   if(!x)return;
   if(x.calendar!==undefined)setCount('dg80c-calendar',x.calendar);
@@ -723,6 +730,7 @@ function applyExtra(x){
   if(x.admin!==undefined)setCount('dg80c-admin',x.admin);
   if(x.health!==undefined)setCount('dg80c-health',x.health);
   if(x.payroll!==undefined)setCount('dg80TopPayroll',x.payroll);
+  dg80PayrollNumericGuard();
   const pt=dash()?.querySelector('[data-dg80-final="payroll"]'),n=Number(x.payroll);if(pt&&Number.isFinite(n))pt.classList.toggle('urgent',n<=3);
 }
 function norm(s){return String(s||'').trim().toLowerCase().replace(/\s+/g,' ');}

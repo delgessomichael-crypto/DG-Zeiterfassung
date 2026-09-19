@@ -75,7 +75,7 @@ function ensureCss(){
     '#dg80MonthState.closed{background:#dcfce7;color:#166534;border-color:#86efac}'+
     '#dg80MonthState.open{background:#fee2e2;color:#991b1b;border-color:#fecaca}'+
     '#dg80ForceTop{width:100%!important;margin-top:12px!important;background:#b42318!important;color:#fff!important;border-color:#b42318!important;padding:15px 18px!important;font-size:18px!important;font-weight:900!important}'+
-    '#dg80TopPayroll{display:block!important}';
+    '#dg80TopPayroll{display:block!important;text-align:center!important;width:100%!important;font-size:31px!important;line-height:1!important}';
   document.head.appendChild(s);
 }
 function ensurePayrollSectionUi(){
@@ -145,16 +145,24 @@ function renderTopTile(due,r){
   [old1,old2,old3].forEach(x=>{if(x)x.style.display='none';});
   let strong=$('dg80TopPayroll');
   if(!strong){strong=document.createElement('strong');strong.id='dg80TopPayroll';tile.appendChild(strong);}
-  const d=daysTo(due);
-  if(completed(r))strong.textContent='✓ Abgeschlossen · '+de(due).slice(0,5);
-  else if(d===0)strong.textContent='Heute · '+de(due).slice(0,5);
-  else if(d>0)strong.textContent=de(due).slice(0,5)+' · '+d+' Tag'+(d===1?'':'e');
-  else strong.textContent=de(due).slice(0,5)+' · '+Math.abs(d)+' Tag'+(Math.abs(d)===1?'':'e')+' überf.';
+  const now=new Date();
+  let target=String(due||'');
+  if(completed(r)){
+    if(r&&/^\d{4}-\d{2}-\d{2}$/.test(String(r.nextDueDate||'')))target=String(r.nextDueDate);
+    else{
+      let y=now.getFullYear(),m=now.getMonth()+2;
+      if(m>12){m=1;y++;}
+      target=localDue(y,m);
+    }
+  }
+  let d=daysTo(target);
+  if(!Number.isFinite(d))d=0;
+  d=Math.max(0,d);
+  strong.textContent=String(d);
   tile.classList.remove('warn','error','done');
-  if(completed(r))tile.classList.add('done');
-  else if(d<=0)tile.classList.add('error');
-  else if(d<=5)tile.classList.add('warn');
-  tile.title='Lohn-Stichtag '+de(due)+(completed(r)?' · abgeschlossen':'');
+  tile.classList.toggle('error',d<=3);
+  tile.classList.toggle('done',d>3);
+  tile.title='Lohnübergabe in '+d+' Tag'+(d===1?'':'en')+' · '+de(target);
 }
 async function getState(y,m){
   const fallback={year:y,month:m,dueDate:localDue(y,m),state:{status:'Offen'}};
@@ -258,5 +266,5 @@ function install(){
 }
 window.dg80PayrollInstall=install;
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
-[100,400,1000,2500,5000].forEach(ms=>setTimeout(install,ms));
+
 })();
