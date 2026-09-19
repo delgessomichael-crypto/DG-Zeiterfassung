@@ -2052,3 +2052,71 @@ function install(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
+
+
+/* DG Zeiterfassung 8.0 - UI Hotfix 20
+   Laufende-Auftraege: eindeutige Aktionsreihenfolge/Farben.
+   Strukturierte Einzelberichte. */
+(function(){
+'use strict';
+const V='8.0-ui20';
+const q=id=>document.getElementById(id);
+const S=window.DG80_UI20=window.DG80_UI20||{timer:null};
+
+function css(){
+  if(q('dg80Ui20Css'))return;
+  const s=document.createElement('style');s.id='dg80Ui20Css';
+  s.textContent=''
+    +'.dg20-single{padding:15px 0!important}'
+    +'.dg20-single+.dg20-single{border-top:1px solid #dbe2ea!important}'
+    +'.dg20-worktime{font-size:16px;margin-bottom:14px;color:#0f172a}'
+    +'.dg20-section{margin:0 0 15px}'
+    +'.dg20-section:last-of-type{margin-bottom:4px}'
+    +'.dg20-label{font-size:14px;font-weight:900;color:#31589e;margin-bottom:5px}'
+    +'.dg20-text{font-size:16px;line-height:1.45;white-space:pre-line;color:#111827}'
+    +'.dg20-material{white-space:pre-line}'
+    +'#d3RunningList .report-card>.report-actions{display:flex!important;gap:8px!important;flex-wrap:wrap!important}'
+    +'#d3RunningList .report-card>.report-actions .btn{margin:0!important}'
+    +'@media(max-width:759px){#d3RunningList .report-card>.report-actions .btn{width:100%!important}}';
+  document.head.appendChild(s);
+}
+function setKind(btn,kind){
+  if(!btn)return;
+  btn.classList.remove('primary','secondary','success','danger');
+  btn.classList.add('btn',kind);
+}
+function arrangeCard(card){
+  if(!card||card.dataset.view!=='Laufend')return;
+  const actions=card.querySelector(':scope > .report-actions');if(!actions)return;
+  const buttons=[...actions.querySelectorAll(':scope > button')];
+  const find=re=>buttons.find(b=>re.test(String(b.textContent||'').trim()));
+  const hand=find(/Übergabe an Rechnung zu erstellen|Auftrag abschlie/i);
+  const edit=find(/^Bericht bearbeiten$/i);
+  const note=find(/^Interner Vermerk$/i);
+  const customer=find(/Kunde korrigieren|Kundendaten korrigieren/i);
+  const offer=find(/Angebot zu erstellen|Angebot zu Kunde erstellen/i);
+  const merge=find(/Ausgewählte zusammenführen/i);
+
+  if(hand){hand.textContent='Übergabe an Rechnung zu erstellen';setKind(hand,'danger');}
+  if(edit)setKind(edit,'primary');
+  if(note)setKind(note,'primary');
+  if(customer){customer.textContent='Kundendaten Korrigieren';setKind(customer,'danger');}
+  if(offer){offer.textContent='Angebot zu Kunde erstellen';setKind(offer,'primary');}
+  if(merge)setKind(merge,'success');
+
+  const ordered=[hand,edit,note,customer,offer,merge].filter(Boolean);
+  ordered.forEach(b=>actions.appendChild(b));
+  buttons.filter(b=>!ordered.includes(b)).forEach(b=>actions.appendChild(b));
+}
+function enforce(){
+  css();
+  document.querySelectorAll('#d3RunningList .report-card[data-view="Laufend"]').forEach(arrangeCard);
+}
+function install(){
+  css();enforce();
+  const mo=new MutationObserver(()=>{clearTimeout(S.timer);S.timer=setTimeout(enforce,0);});
+  mo.observe(document.body,{subtree:true,childList:true});
+  document.documentElement.dataset.dgUi20=V;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+})();
