@@ -536,7 +536,7 @@ function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;',
 function empKey(){return String(localStorage.getItem('dg_employee')||'geraet').replace(/[^A-Za-z0-9_-]+/g,'_');}
 function layoutKey(){return 'dg80_final_layout_'+empKey();}
 function subKey(g){return 'dg80_final_sub_'+g+'_'+empKey();}
-function extraKey(){return 'dg80_final_extra_'+empKey();}
+function extraKey(){return 'dg80_final_extra_v2_'+empKey();}
 function readJson(k,f){try{const v=JSON.parse(localStorage.getItem(k)||'null');return v===null?f:v;}catch(_e){return f;}}
 function writeJson(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(_e){}}
 function visibleBoss(){const r=root();return !!(r&&!r.classList.contains('hidden'));}
@@ -595,8 +595,13 @@ function css(){
 
 function currentCounts(){
   const out={};
-  Object.entries(TILES).forEach(([k,t])=>{const e=t.count&&q(t.count);if(e&&String(e.textContent||'').trim())out[k]=String(e.textContent).trim();});
-  const cache=readJson(extraKey(),null);if(cache&&cache.data)Object.assign(out,cache.data);
+  Object.entries(TILES).forEach(([k,t])=>{if(k==='offerStats')return;const e=t.count&&q(t.count);if(e&&String(e.textContent||'').trim())out[k]=String(e.textContent).trim();});
+  const cache=readJson(extraKey(),null);if(cache&&cache.data){
+    Object.assign(out,cache.data);
+    const rate=Number(cache.data.offerAcceptance);
+    if(Number.isFinite(rate))out.offerStats=String(Math.max(0,Math.min(100,Math.round(rate))))+' %';
+    else delete out.offerStats;
+  }
   out.shopping=String(shopCount());
   return out;
 }
@@ -771,7 +776,7 @@ async function refreshExtra(force){
       window.api(window.chefPayload({action:'getPayrollCycleState',year,month}))
     ]);
     if(jobs[0].status==='fulfilled'){
-      const x=jobs[0].value||{},accepted=Math.max(0,Number(x.accepted||0)),declined=Math.max(0,Number(x.declined||0)),decided=accepted+declined;out.offerOpen=Number(x.open||0);out.offerAcceptance=decided>0?(accepted/decided*100):0;out.offerArchive=decided;delete out.offerStats;
+      const x=jobs[0].value||{},accepted=Math.max(0,Number(x.accepted||0)),declined=Math.max(0,Number(x.declined||0)),decided=accepted+declined,backendRate=Number(x.acceptanceRate);out.offerOpen=Number(x.open||0);out.offerAcceptance=Number.isFinite(backendRate)?backendRate:(decided>0?(accepted/decided*100):0);out.offerArchive=decided;delete out.offerStats;
     }
     if(jobs[1].status==='fulfilled')out.billed=Array.isArray(jobs[1].value)?jobs[1].value.length:0;
     if(jobs[2].status==='fulfilled'){
