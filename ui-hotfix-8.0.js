@@ -1878,3 +1878,177 @@ function install(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
+
+
+/* DG Zeiterfassung 8.0 - UI Hotfix 18
+   Erstellte Angebote: belastbarer Jahreszaehler aus tatsaechlich erstellten Vorgaengen.
+   Schnellkachel "+ Angebotsanfrage" im taeglichen Geschaeft. */
+(function(){
+'use strict';
+const V='8.0-ui18';
+const q=id=>document.getElementById(id);
+const REG='dg80_created_offer_year_registry_v1';
+const S=window.DG80_UI18=window.DG80_UI18||{rows:[],busy:false,timer:null};
+const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function apiCall(payload){
+  if(typeof window.api!=='function')throw new Error('Backend nicht bereit.');
+  if(typeof window.chefPayload==='function')return window.api(window.chefPayload(payload));
+  return window.api(payload);
+}
+function nowYear(){return new Date().getFullYear();}
+function readReg(){try{return JSON.parse(localStorage.getItem(REG)||'{}')||{};}catch(_e){return {};}}
+function writeReg(x){try{localStorage.setItem(REG,JSON.stringify(x));}catch(_e){}}
+function parseDate(v){
+  if(!v)return null;
+  const s=String(v).trim();
+  let m=s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);if(m)return new Date(+m[1],+m[2]-1,+m[3],12);
+  m=s.match(/^(\d{2})\.(\d{2})\.(\d{4})(?:[,\s].*)?$/);if(m)return new Date(+m[3],+m[2]-1,+m[1],12);
+  const d=new Date(s);return isNaN(d)?null:d;
+}
+function bestDate(r){
+  const keys=['offerCreatedAt','createdAt','createdDate','creationDate','dateCreated','createdOn','offerDate','sentAt','completedAt','statusAt','updatedAt'];
+  for(const k of keys){const d=parseDate(r&&r[k]);if(d)return d;}
+  return null;
+}
+function keyOf(r){
+  if(r.__manual)return 'M:'+String(r.id||r.offerId||r.offerNumber||r.customer||'');
+  return 'O:'+String(r.offerId||r.offerNumber||r.id||r.customer||'');
+}
+function manualOfferNumber(r){
+  const m=String(r&&r.internalNote||'').match(/\[DG-ANGEBOT:([^\]]+)\]/);return m?m[1].trim():'';
+}
+function manualCreated(r){
+  const src=String(r&&r.source||''),id=String(r&&r.id||''),status=String(r&&r.status||'');
+  const isOffer=src==='Angebotsanfrage'||/^ANGREQ-/.test(id);
+  if(!isOffer)return false;
+  if(status==='Angebot zu erstellen')return false;
+  return !!manualOfferNumber(r)||status==='Offenes Angebot'||status==='Angebot Abgelehnt'||status==='Angebot Angenommen'||status==='Laufend'||status==='Abgeschlossen';
+}
+function normalizeRows(normalOpen,normalArchive,manual){
+  const map=new Map();
+  (normalOpen||[]).forEach(r=>map.set(keyOf(r),Object.assign({},r,{__stage:'Offen',__manual:false})));
+  (normalArchive||[]).forEach(r=>map.set(keyOf(r),Object.assign({},r,{__stage:'Archiv',__manual:false})));
+  (manual||[]).filter(manualCreated).forEach(r=>{
+    const x=Object.assign({},r,{__stage:String(r.status||''),__manual:true,offerNumber:manualOfferNumber(r)});
+    map.set(keyOf(x),x);
+  });
+  return [...map.values()];
+}
+function assignYears(rows){
+  const reg=readReg(),y=nowYear(),stamp=new Date().toISOString();let changed=false;
+  rows.forEach(r=>{
+    const k=keyOf(r),d=bestDate(r);
+    if(d){
+      r.__createdDate=d;r.__createdYear=d.getFullYear();
+      if(!reg[k]||reg[k].year!==r.__createdYear){reg[k]={year:r.__createdYear,firstSeen:reg[k]?.firstSeen||stamp,exact:true};changed=true;}
+    }else if(reg[k]){
+      r.__createdYear=Number(reg[k].year)||y;
+      r.__createdDate=reg[k].exact&&reg[k].date?parseDate(reg[k].date):null;
+      r.__firstSeen=reg[k].firstSeen||'';
+    }else{
+      reg[k]={year:y,firstSeen:stamp,exact:false};changed=true;
+      r.__createdYear=y;r.__createdDate=null;r.__firstSeen=stamp;
+    }
+  });
+  if(changed)writeReg(reg);
+  return rows;
+}
+function currentRows(){
+  const y=nowYear();
+  return (S.rows||[]).filter(r=>Number(r.__createdYear)===y).sort((a,b)=>{
+    const ad=a.__createdDate?a.__createdDate.getTime():Date.parse(a.__firstSeen||0)||0;
+    const bd=b.__createdDate?b.__createdDate.getTime():Date.parse(b.__firstSeen||0)||0;
+    if(bd!==ad)return bd-ad;
+    return String(b.offerNumber||b.offerId||'').localeCompare(String(a.offerNumber||a.offerId||''),'de');
+  });
+}
+function paint(){
+  const e=q('dg80c-createdOffersYear');if(!e)return;
+  e.textContent=String(currentRows().length);
+  const s=e.closest('[data-dg80-final="createdOffersYear"]')?.querySelector('span');
+  if(s)s.textContent='Erstellte Angebote '+nowYear();
+}
+async function refresh(){
+  if(S.busy)return S.rows;S.busy=true;
+  try{
+    const got=await Promise.allSettled([
+      apiCall({action:'getOfferReports',stage:'Offen'}),
+      apiCall({action:'getOfferReports',stage:'Archiv'}),
+      apiCall({action:'getManualOrders',status:'Alle'})
+    ]);
+    const open=got[0].status==='fulfilled'&&Array.isArray(got[0].value)?got[0].value:[];
+    const arch=got[1].status==='fulfilled'&&Array.isArray(got[1].value)?got[1].value:[];
+    const manual=got[2].status==='fulfilled'&&Array.isArray(got[2].value)?got[2].value:[];
+    S.rows=assignYears(normalizeRows(open,arch,manual));
+    paint();return S.rows;
+  }finally{S.busy=false;}
+}
+function de(d){return d?String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0')+'.'+d.getFullYear():'Bestand '+nowYear();}
+function openCenter(){
+  const root=q('bossView');if(!root)return null;
+  root.querySelectorAll(':scope > .dg80-shell-active').forEach(x=>x.classList.remove('dg80-shell-active'));
+  let card=q('dg80CreatedOffersCenter');if(!card){card=document.createElement('div');card.id='dg80CreatedOffersCenter';card.className='card';root.appendChild(card);}
+  card.classList.add('dg80-shell-active');
+  q('dg80OfficeToolbar')?.classList.add('active');
+  const t=q('dg80OfficeTitle');if(t)t.textContent='Erstellte Angebote '+nowYear();
+  return card;
+}
+async function openList(){
+  const card=openCenter();if(!card)return;
+  card.innerHTML='<div class="dg80-ac-head"><h2>Erstellte Angebote '+nowYear()+'</h2><button class="btn secondary" id="dg18Refresh">Aktualisieren</button></div><div class="status info">Angebote werden geladen ...</div>';
+  q('dg18Refresh')?.addEventListener('click',openList);
+  try{
+    await refresh();const rows=currentRows();
+    card.innerHTML='<div class="dg80-ac-head"><h2>Erstellte Angebote '+nowYear()+'</h2><button class="btn secondary" id="dg18Refresh">Aktualisieren</button></div>'
+      +(rows.length?'<div class="dg80-offer-list">'+rows.map(r=>'<div class="dg80-offer-row"><div class="dg80-offer-row-head"><div class="dg80-offer-row-title">'+esc(r.customer||'Ohne Kundenname')+(r.offerNumber?' · Angebot '+esc(r.offerNumber):'')+'</div><div class="dg80-offer-row-date">'+esc(de(r.__createdDate))+'</div></div><div class="dg80-offer-row-meta">'+esc(r.status||r.offerStatus||r.__stage||'Erstellt')+(r.description?' · '+esc(r.description):'')+'</div></div>').join('')+'</div>':'<div class="status ok">Im Jahr '+nowYear()+' wurden noch keine Angebote erstellt.</div>');
+    q('dg18Refresh')?.addEventListener('click',openList);
+  }catch(e){card.innerHTML='<div class="status error">'+esc(e.message||e)+'</div>';}
+}
+window.DG80_UI18_openCreatedOffers=openList;
+
+function dailyGrid(){return q('bossView')?.querySelector('.dg80-final-section[data-section="daily"] .dg80-final-grid')||null;}
+function ensureQuickOfferTile(){
+  const grid=dailyGrid();if(!grid)return false;
+  let t=grid.querySelector('[data-dg80-final="quickOfferRequest"]');
+  if(!t){
+    t=document.createElement('button');t.type='button';t.draggable=false;
+    t.className='d3-tile dg80-final-tile dg80-quick-offer';
+    t.dataset.dg80Final='quickOfferRequest';
+    t.innerHTML='<strong class="dg80-quick-plus">+</strong><span>Angebotsanfrage</span>';
+    grid.appendChild(t);
+  }
+  if(t.dataset.dg18!=='1'){
+    t.dataset.dg18='1';
+    t.addEventListener('click',e=>{
+      e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();
+      if(typeof window.dg81NewOfferRequest==='function')window.dg81NewOfferRequest();
+      else alert('Die Eingabemaske für Angebotsanfragen ist noch nicht bereit. Bitte die App einmal aktualisieren.');
+    },true);
+  }
+  return true;
+}
+function css(){
+  if(q('dg80Ui18Css'))return;
+  const s=document.createElement('style');s.id='dg80Ui18Css';
+  s.textContent=''
+    +'#bossView .dg80-quick-offer{background:#dbeafe!important;border-color:#93c5fd!important;color:#1d4ed8!important;justify-content:center!important;gap:8px!important}'
+    +'#bossView .dg80-quick-offer .dg80-quick-plus{font-size:48px!important;line-height:.8!important;color:#1d4ed8!important}'
+    +'#bossView .dg80-quick-offer span{color:#1d4ed8!important;font-size:17px!important}'
+    +'#bossView .dg80-quick-offer:hover{background:#bfdbfe!important;border-color:#60a5fa!important}';
+  document.head.appendChild(s);
+}
+function bindCreated(){
+  const t=q('bossView')?.querySelector('[data-dg80-final="createdOffersYear"]');if(!t||t.dataset.dg18==='1')return;
+  t.dataset.dg18='1';
+  t.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();openList();},true);
+}
+function enforce(){css();ensureQuickOfferTile();bindCreated();paint();}
+function install(){
+  css();let n=0;(function ready(){enforce();if(dailyGrid()&&q('dg80c-createdOffersYear')){refresh().catch(()=>{});return;}if(++n<60)setTimeout(ready,100);})();
+  const mo=new MutationObserver(()=>{clearTimeout(S.timer);S.timer=setTimeout(enforce,0);});mo.observe(document.body,{subtree:true,childList:true,characterData:true});
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden){enforce();refresh().catch(()=>{});}});
+  document.documentElement.dataset.dgUi18=V;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+})();
