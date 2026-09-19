@@ -1379,7 +1379,27 @@ function d3Count(k,v){const e=$('d3Count-'+k);if(e&&e.textContent!==String(v))e.
 async function d3Dashboard(){if(!canAccessBoss()||!navigator.onLine)return;const d=new Date(),reportsP=api(chefPayload({action:'getRegieReports',status:'Offen',year:0,month:0})),offerOpenP=api(chefPayload({action:'getOfferReports',stage:'Offen'})),offerCreateP=api(chefPayload({action:'getOfferReports',stage:'Zu erstellen'})),daysP=api(chefPayload({action:'getBossDayClosures',year:d.getFullYear(),month:d.getMonth()+1})),remindersP=api(chefPayload({action:'getOfferReminders',includeDone:false})),inquiriesP=api(chefPayload({action:'getCustomerInquiries',status:'Offen'})),safe=async(p,fn,keys)=>{try{fn(await p);}catch(_e){keys.forEach(k=>d3Count(k,'!'));}};await Promise.all([safe(reportsP,a=>{d3Count('running',a.filter(g=>g.jobStatus==='Laufend').length);d3Count('completed',a.filter(g=>g.jobStatus!=='Laufend').length);},['running','completed']),safe(Promise.all([offerOpenP,offerCreateP]),([o,c])=>{DG3.offerCounts={open:o.length,create:c.length};d3Count('offers',o.length+c.length);},['offers']),safe(daysP,a=>d3Count('days',a.reduce((n,x)=>n+(x.days||[]).filter(d35MandatoryDayClosure).length,0)),['days']),safe(remindersP,a=>d3Count('reminders',a.filter(x=>x.isDue).length),['reminders']),safe(inquiriesP,a=>d3Count('inquiries',a.length),['inquiries'])]);}
 function d3ReportRoot(view){return $(view==='Laufend'?'d3RunningList':'regieResult');}
 async function d3Reports(view='Abgeschlossen'){DG3.active=view;window.__regieStatus=view;if(view!=='Laufend')DG3.completedView=view;const root=d3ReportRoot(view),st=view==='Laufend'?'d3RunningStatus':'regieStatus',billed=view==='Abgerechnet';DG3.tokens=DG3.tokens||{};const token=DG3.tokens[root.id]=(DG3.tokens[root.id]||0)+1;if(view!=='Laufend')$('regieDateFilter')?.classList.toggle('hidden',!billed);if(!navigator.onLine){setMessage(st,'Offline. Angezeigte Daten sind moeglicherweise veraltet.','warn');return;}setMessage(st,'Auftr\u00e4ge werden geladen ...','info');try{const data=await api(chefPayload({action:'getRegieReports',status:billed?'Abgerechnet':'Offen',year:billed?(+$('regieYear').value||0):0,month:billed?(+$('regieMonth').value||0):0}));if(DG3.tokens[root.id]!==token)return;const groups=data.filter(g=>billed||(view==='Laufend'?g.jobStatus==='Laufend':g.jobStatus!=='Laufend'));DG3.reports[view]=groups;root.replaceChildren();if(!billed&&groups.length)root.append(d3Element('div','d3-merge-top',d3Button('Ausgew\u00e4hlte zusammenf\u00fchren','requestMergeSelectedRegieReports',[view],'success')+'<div class="muted small d3-hint">Mindestens zwei Kundenkarten markieren.</div>'));groups.forEach((g,i)=>root.append(d3ReportCard(g,view,i)));if(!groups.length)root.innerHTML='<div class="status ok">Keine Eintr\u00e4ge.</div>';setMessage(st,groups.length+' Kundenkarte(n) geladen - '+new Date().toLocaleTimeString('de-DE'),'ok');if(view==='Laufend')await d3Orders();}catch(e){setMessage(st,'Laden fehlgeschlagen: '+e.message,'error');}}
-function d3Single(r){return '<div class="entry"><strong>'+esc(formatDateDE(r.date))+' - '+esc(r.employee)+' - '+formatHours(r.hours)+' Std.</strong><div>'+esc(r.start)+' - '+esc(r.end)+'</div><div>'+esc(r.activity||'')+'</div>'+(r.materialUsed?'<div>Material: '+esc(r.material)+'</div>':'')+(r.isSupplement?'<div class="status info">Nachtrag '+esc(r.supplementCreatedAt||'')+'</div>':'')+'</div>';}
+function d3Single(r){
+  const personName=x=>typeof x==='string'?x:(x&&(x.name||x.employee||x.displayName)||'');
+  const extra=v=>{
+    if(Array.isArray(v))return v;
+    if(!v)return [];
+    const s=String(v).trim();
+    if(!s)return [];
+    if(s[0]==='['){try{const a=JSON.parse(s);if(Array.isArray(a))return a;}catch(_e){}}
+    return s.split(/[,;|]/).map(x=>x.trim()).filter(Boolean);
+  };
+  const employees=[r.employee,...extra(r.additionalEmployees),...extra(r.employees),...extra(r.employeeNames)].map(personName).map(x=>String(x||'').trim()).filter(Boolean);
+  const uniqueEmployees=[...new Set(employees)];
+  const material=String(r.material||'').trim();
+  return '<div class="entry dg20-single">'
+    +'<div class="dg20-worktime"><strong>'+esc(formatDateDE(r.date))+' · '+esc(r.start)+'–'+esc(r.end)+' · '+formatHours(r.hours)+' Std.</strong></div>'
+    +'<div class="dg20-section"><div class="dg20-label">Mitarbeiter</div><div class="dg20-text">'+esc(uniqueEmployees.join(', ')||r.employee||'–')+'</div></div>'
+    +'<div class="dg20-section"><div class="dg20-label">Tätigkeitsbeschreibung</div><div class="dg20-text">'+esc(r.activity||'–')+'</div></div>'
+    +'<div class="dg20-section"><div class="dg20-label">Verbautes Material</div><div class="dg20-text dg20-material">'+(material?esc(material):'<span class="muted">Kein Material eingetragen.</span>')+'</div></div>'
+    +(r.isSupplement?'<div class="status info">Nachtrag '+esc(r.supplementCreatedAt||'')+'</div>':'')
+    +'</div>';
+}
 function d3ReportCard(g,view,index){const billed=view==='Abgerechnet',ids=[...new Set((g.objectIds||[g.objectId]).filter(Boolean))],reports=(g.reports||[]).filter(x=>x.id),key=view+':'+index,c=d3Element('div','report-card '+(billed?'billed':'open')+(index%2?' d3-alt':''));c.dataset.index=index;c.dataset.view=view;window.__dgGroupMap[key]=reports.map(x=>String(x.id));reports.forEach(r=>window.__dgReportMap[String(r.id)]=r);const state=billed?'Abgerechnet':view==='Laufend'?'Laufend':'Abgeschlossen';c.innerHTML=(!billed?'<label class="d3-selection"><input type="checkbox" class="regie-merge-select" data-index="'+index+'" data-object-ids="'+esc(ids.join(','))+'"> Zum Zusammenf\u00fchren markieren</label>':'')+'<div class="d3-head"><strong>\ud83c\udfe2 '+esc(g.customer)+'</strong><span class="job-status '+(billed?'billed':view==='Laufend'?'running':'completed')+'">'+state+'</span></div><div class="report-meta">'+esc(formatDateDE(g.firstDate))+(g.lastDate!==g.firstDate?' bis '+esc(formatDateDE(g.lastDate)):'')+' - '+reports.length+' Bericht(e)</div><div class="total">Gesamt Personal: '+formatHours(g.totalHours)+' Std.</div><div class="report-meta"><strong>Mitarbeiter:</strong> '+esc((g.employees||[]).join(', '))+'</div><details><summary>Einzelberichte anzeigen</summary>'+reports.map(d3Single).join('')+'</details>';
  const photos=new Map();reports.forEach(r=>{const p=String(r.photoFileIds||'').split(','),u=String(r.photoUrls||'').split(' | ');p.forEach((id,i)=>{if(id.trim())photos.set(id.trim(),u[i]||'');});});c.append(d3Element('div','d3-export','<strong>Bericht herunterladen</strong><div class="muted small">Exportiert genau die '+reports.length+' angezeigten Einzelberichte mit Unterschriften und ausgew\u00e4hlten Bildern.</div>'+[...photos].map(([id,u],i)=>'<label class="d3-selection"><input type="checkbox" class="d3-photo" value="'+esc(id)+'" checked> Bild '+(i+1)+' <a target="_blank" rel="noopener" href="'+esc(u)+'">ansehen</a></label>').join('')+d3Button('Bericht herunterladen','d3Export',[view,index])+'<div class="d3-export-status"></div>'));
  const b=[d3Button('Bericht bearbeiten','dgRequestGroupEdit',[key])];if(!billed){b.push(d3Button(view==='Laufend'?'Übergabe an Rechnung zu erstellen':'Auf laufend zurücksetzen','setRegieObjectJobStatus',[ids.join(','),view==='Laufend'?'Abgeschlossen':'Laufend'],view==='Laufend'?'danger':'success'));if(view==='Abgeschlossen')b.push(d3Button('Als abgerechnet markieren','markRegieObjectBilled',[ids.join(',')],'success'));b.push(d3Button('Angebot zu erstellen','d3MoveOffer',[reports.map(x=>x.id)]));}b.push(d3Button('Interner Vermerk','d3Note',[ids[0],g.customer]));if(!billed)b.push(d3Button('Ausgew\u00e4hlte zusammenf\u00fchren','requestMergeSelectedRegieReports',[view],'success'));c.append(d3Element('div','report-actions',b.join('')));if(billed)c.append(d3Element('div','status info','Abgerechnet am '+esc(g.billedAt||'')+' von '+esc(g.billedBy||'')));c.querySelector('.regie-merge-select')?.addEventListener('change',()=>updateRegieMergeButton(view));return c;}
@@ -3706,15 +3726,28 @@ function startSpeech60(targetId,button){
   recognition.maxAlternatives=1;
 
   const original=String(target.value||'').trimEnd();
+  const materialMode=targetId==='material';
+  const sessionBase=materialMode?(original?original+'\n':''):original;
   let hadFinal=false;
   const processed=new Set();
   let lastFinal='',lastFinalAt=0;
   const normSpeech60=v=>String(v||'').toLowerCase().replace(/[^a-z0-9äöüß]+/gi,' ').trim().replace(/\s+/g,' ');
+  const formatMaterialSpeech60=v=>{
+    let s=String(v||'').trim();
+    const words={ein:1,eins:1,eine:1,einen:1,einem:1,einer:1,zwei:2,drei:3,vier:4,fünf:5,fuenf:5,sechs:6,sieben:7,acht:8,neun:9,zehn:10,elf:11,zwölf:12,zwoelf:12,dreizehn:13,vierzehn:14,fünfzehn:15,fuenfzehn:15,sechzehn:16,siebzehn:17,achtzehn:18,neunzehn:19,zwanzig:20};
+    s=s.replace(/\b(\d+)\s*(?:mal|x)\b/gi,'$1 x');
+    Object.keys(words).forEach(w=>{s=s.replace(new RegExp('\\b'+w+'\\s*mal\\b','gi'),words[w]+' x');});
+    return s;
+  };
   const appendUniqueSpeech60=(base,piece)=>{
-    const cur=String(base||'').trimEnd(),p=String(piece||'').trim();if(!p)return cur;
-    const a=cur.split(/\s+/),b=p.split(/\s+/);let overlap=0,limit=Math.min(12,a.length,b.length);
+    let cur=String(base||'');
+    if(!materialMode)cur=cur.trimEnd();else cur=cur.replace(/[ \t]+$/g,'');
+    const p=materialMode?formatMaterialSpeech60(piece):String(piece||'').trim();if(!p)return cur;
+    const a=cur.trim().split(/\s+/),b=p.split(/\s+/);let overlap=0,limit=Math.min(12,a.length,b.length);
     for(let n=1;n<=limit;n++){if(normSpeech60(a.slice(-n).join(' '))===normSpeech60(b.slice(0,n).join(' ')))overlap=n;}
-    const rest=b.slice(overlap).join(' ');return rest?cur+(cur?' ':'')+rest:cur;
+    const rest=b.slice(overlap).join(' ');if(!rest)return cur;
+    const sep=cur?(materialMode&&/\n$/.test(cur)?'':' '):'';
+    return cur+sep+rest;
   };
 
   function cleanup(message,type){
@@ -3725,7 +3758,8 @@ function startSpeech60(targetId,button){
 
   recognition.onstart=function(){
     button.classList.add('listening');button.textContent='⏹ Aufnahme stoppen';
-    status60(targetId,'Aufnahme läuft – sprich deutlich. Erkannter Text wird angehängt.','ok');
+    if(materialMode&&target.value!==sessionBase)target.value=sessionBase;
+    status60(targetId,materialMode?'Aufnahme läuft – neuer Materialeintrag beginnt in einer neuen Zeile.':'Aufnahme läuft – sprich deutlich. Erkannter Text wird angehängt.','ok');
   };
 
   recognition.onresult=function(event){
