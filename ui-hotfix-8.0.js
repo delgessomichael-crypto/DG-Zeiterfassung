@@ -1510,3 +1510,128 @@ function install(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
+
+
+/* DG Zeiterfassung 8.0 - UI Hotfix 15
+   Kalenderzaehler exakt auf aktive Mitarbeiter begrenzen,
+   Stundenlohn-fehlt komplett ignorieren, Tagesabschluss-Button umbenennen. */
+(function(){
+'use strict';
+const V='8.0-ui15';
+const q=id=>document.getElementById(id);
+const norm=v=>String(v==null?'':v).trim().toLowerCase().replace(/\s+/g,' ');
+
+async function apiCall(payload){
+  if(typeof window.api!=='function')throw new Error('Backend nicht bereit.');
+  if(typeof window.chefPayload==='function')return window.api(window.chefPayload(payload));
+  return window.api(payload);
+}
+
+function isWageMissingText(text){
+  const s=norm(text);
+  return s.includes('stundenlohn fehlt')||
+         s.includes('brutto-stundenlohn')||
+         s.includes('brutto stundenlohn')||
+         s.includes('missing_hourly')||
+         s.includes('hourly_wage_missing');
+}
+
+function removeWageWarnings(){
+  document.querySelectorAll('.dg80-ac-table tbody tr,.dg520-issue,.dg522-issue,.dg80-review-issue').forEach(el=>{
+    if(isWageMissingText(el.textContent||''))el.remove();
+  });
+
+  const table=q('dg80ActionCenter')?.querySelector('.dg80-ac-table tbody');
+  if(table){
+    const rows=[...table.querySelectorAll('tr')];
+    const count=rows.length;
+    const c=q('dg80c-anomalies');if(c)c.textContent=String(count);
+    q('bossView')?.querySelector('[data-dg80-final="anomalies"]')?.classList.toggle('dg80-hot',count>0);
+    if(count===0){
+      const wrap=table.closest('.dg80-ac-tablewrap');
+      if(wrap)wrap.outerHTML='<div class="status ok">✓ Keine offenen Auffälligkeiten vorhanden.</div>';
+    }
+  }
+}
+
+function renameDayCloseButtons(){
+  document.querySelectorAll('[data-dg80-close-day]').forEach(b=>{
+    if((b.textContent||'').trim()!=='Tag manuell abschließen')b.textContent='Tag manuell abschließen';
+  });
+}
+
+async function refreshExactCalendarCount(){
+  try{
+    const [workersRes,activeNamesRes,adminRes]=await Promise.allSettled([
+      apiCall({action:'getPlannerWorkers'}),
+      window.api?window.api({action:'getEmployees'}):Promise.resolve([]),
+      apiCall({action:'getEmployeeAdminData'})
+    ]);
+
+    const workers=workersRes.status==='fulfilled'&&Array.isArray(workersRes.value)?workersRes.value:[];
+    const activeNames=new Set(
+      activeNamesRes.status==='fulfilled'&&Array.isArray(activeNamesRes.value)
+        ?activeNamesRes.value.map(norm)
+        :[]
+    );
+    const adminRows=adminRes.status==='fulfilled'&&Array.isArray(adminRes.value)?adminRes.value:[];
+
+    const adminActiveNames=new Set(
+      adminRows.filter(r=>{
+        const v=r&&r.active;
+        if(v===false||v===0||v===null)return false;
+        const s=String(v==null?'1':v).trim().toLowerCase();
+        return !['0','false','nein','no','inaktiv','inactive','gelöscht','geloescht','deleted'].includes(s);
+      }).map(r=>norm(r.name||r.employee||r.displayName)).filter(Boolean)
+    );
+
+    const hasAdminActive=adminActiveNames.size>0;
+    const matched=workers.filter(w=>{
+      if(!w)return false;
+      const cal=String(w.calendarId||'').trim();
+      if(!cal)return false;
+      const wn=[norm(w.employeeName),norm(w.displayName),norm(w.name)].filter(Boolean);
+      const activeWorker=!(w.active===false||w.active===0||String(w.active).trim().toLowerCase()==='false'||String(w.active).trim()==='0');
+      if(!activeWorker)return false;
+      const inLogin=activeNames.size?wn.some(n=>activeNames.has(n)):true;
+      const inAdmin=hasAdminActive?wn.some(n=>adminActiveNames.has(n)):true;
+      return inLogin&&inAdmin;
+    });
+
+    const n=new Set(matched.map(w=>String(w.calendarId||'').trim()).filter(Boolean)).size;
+    if(q('dg80c-calendar'))q('dg80c-calendar').textContent=String(n);
+
+    try{
+      if(window.DG80_UI12)window.DG80_UI12.calendarCount=n;
+    }catch(_e){}
+    return n;
+  }catch(_e){return null;}
+}
+
+function enforce(){
+  renameDayCloseButtons();
+  removeWageWarnings();
+}
+
+function install(){
+  let tries=0;
+  (function ready(){
+    enforce();
+    if(q('dg80c-calendar')){refreshExactCalendarCount();return;}
+    if(++tries<50)setTimeout(ready,100);
+  })();
+
+  const mo=new MutationObserver(()=>{
+    clearTimeout(window.__dg80ui15t);
+    window.__dg80ui15t=setTimeout(enforce,0);
+  });
+  mo.observe(document.body,{subtree:true,childList:true,characterData:true});
+
+  document.addEventListener('visibilitychange',()=>{
+    if(!document.hidden){refreshExactCalendarCount();enforce();}
+  });
+  setInterval(()=>{if(q('bossView')&&!q('bossView').classList.contains('hidden'))refreshExactCalendarCount();},300000);
+  document.documentElement.dataset.dgUi15=V;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+})();
