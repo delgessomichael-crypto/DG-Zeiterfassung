@@ -427,9 +427,9 @@ async function refreshPayrollCounter80(force){
 }
 function installCounter80(){
   const base=window.renderDay;if(typeof base==='function'&&!window.__DG80_UI2_RENDERDAY_WRAP){window.__DG80_UI2_RENDERDAY_WRAP=true;const wrapped=function(){const r=base.apply(this,arguments);setTimeout(()=>refreshPayrollCounter80(true),100);return r;};try{window.renderDay=wrapped;if(typeof renderDay!=='undefined')renderDay=wrapped;}catch(_e){window.renderDay=wrapped;}}
-  window.addEventListener('online',()=>setTimeout(()=>refreshPayrollCounter80(true),350));
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshPayrollCounter80(false);});
-  setInterval(()=>refreshPayrollCounter80(false),300000);
+  window.addEventListener('online',()=>{});
+  document.addEventListener('visibilitychange',()=>{});
+  setInterval(()=>refreshPayrollCounter80(false),3600000);
 }
 
 function ensureShell(){
@@ -439,7 +439,7 @@ function ensureShell(){
   addCss();ensurePayrollStandalone();renameEmployeeClosures();r.classList.add('dg80-office-shell');ensureToolbar();bindDirtyTracking();wrapApiForDirty();routerInstall();paintDirty();S.installed=true;return true;
 }
 function install(){
-  ensureShell();installCalendarRepair();installCounter80();setTimeout(()=>refreshPayrollCounter80(true),450);setTimeout(()=>calendar80(false),700);document.documentElement.dataset.dgUiHotfix2=V;
+  ensureShell();installCalendarRepair();installCounter80();document.documentElement.dataset.dgUiHotfix2=V;
 }
 window.dg80Ui2Install=install;
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
@@ -1571,7 +1571,7 @@ function install(){
   let tries=0;
   (function ready(){
     enforce();
-    if(q('dg80c-calendar')){refreshExactCalendarCount();return;}
+    if(q('dg80c-calendar'))return;
     if(++tries<50)setTimeout(ready,100);
   })();
 
@@ -1581,10 +1581,8 @@ function install(){
   });
   mo.observe(document.body,{subtree:true,childList:true,characterData:true});
 
-  document.addEventListener('visibilitychange',()=>{
-    if(!document.hidden){refreshExactCalendarCount();enforce();}
-  });
-  setInterval(()=>{if(q('bossView')&&!q('bossView').classList.contains('hidden'))refreshExactCalendarCount();},300000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)enforce();});
+  setInterval(()=>{if(q('bossView')&&!q('bossView').classList.contains('hidden'))refreshExactCalendarCount();},3600000);
   document.documentElement.dataset.dgUi15=V;
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
@@ -1699,13 +1697,6 @@ document.addEventListener('click',function(e){
 
 function install(){
   enforce();
-  setTimeout(async()=>{
-    if(!q('bossView')||q('bossView').classList.contains('hidden'))return;
-    await loadAdmins();
-    await refreshCalendar();
-    await refreshAudit();
-    enforce();
-  },1800);
   const mo=new MutationObserver(()=>{
     clearTimeout(STATE.timer);
     STATE.timer=setTimeout(enforce,0);
@@ -2435,6 +2426,193 @@ function install(){
   // One lightweight count request, delayed so normal office data gets priority.
   setTimeout(loadCreatedOfferCount,4500);
   document.documentElement.dataset.dgUi23=V;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+})();
+
+
+/* DG Zeiterfassung 8.0 - UI Hotfix 24
+   Performance-Modus: automatische Leseabfragen maximal 1x pro Stunde.
+   Jeder datenabhaengige Buerobereich kann gezielt manuell synchronisiert werden. */
+(function(){
+'use strict';
+const V='8.0-ui24';
+const q=id=>document.getElementById(id);
+const S=window.DG80_UI24=window.DG80_UI24||{busy:false,timer:null,last:{}};
+const STORE='dg80_manual_sync_times_v1';
+
+const NO_SYNC_TITLES=new Set(['Einkaufsliste']);
+function norm(v){return String(v||'').trim().toLowerCase();}
+function readTimes(){try{return JSON.parse(localStorage.getItem(STORE)||'{}')||{};}catch(_e){return {};}}
+function saveTimes(x){try{localStorage.setItem(STORE,JSON.stringify(x));}catch(_e){}}
+function currentTitle(){
+  const a=q('dg80OfficeTitle');
+  if(a&&String(a.textContent||'').trim()&&a.offsetParent!==null)return String(a.textContent||'').trim();
+  const g=q('dg80GroupChooser')?.querySelector('.dg80-group-head h2');
+  if(g)return String(g.textContent||'').trim();
+  return '';
+}
+function stampKey(title){return norm(title).replace(/[^a-z0-9äöüß]+/g,'_');}
+function stampText(title){
+  const x=readTimes()[stampKey(title)];
+  if(!x)return 'automatisch max. 1×/Std.';
+  try{return 'zuletzt: '+new Date(x).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});}catch(_e){return 'zuletzt synchronisiert';}
+}
+function clearReadCaches(){
+  try{if(window.DG51&&DG51.readCache&&typeof DG51.readCache.clear==='function')DG51.readCache.clear();}catch(_e){}
+  try{if(window.DG3&&DG3.reads&&typeof DG3.reads.clear==='function')DG3.reads.clear();}catch(_e){}
+}
+function forceFlags(){
+  try{
+    if(window.DG51){DG51.forceDashboard=true;DG51.forceCalendar=true;DG51.forceDay=true;}
+    if(window.DG525)DG525.lastAuto=0;
+  }catch(_e){}
+}
+function setSyncUi(title,busy,msg){
+  document.querySelectorAll('.dg24-sync-btn').forEach(b=>{b.disabled=!!busy;b.textContent=busy?'Synchronisiert …':'Jetzt synchronisieren';});
+  document.querySelectorAll('.dg24-sync-stamp').forEach(s=>{s.textContent=msg||stampText(title);});
+}
+async function runLoaderByTitle(title){
+  const t=norm(title),open=window.DG3&&DG3.open?String(DG3.open):'';
+
+  // Anfragen: manuell bedeutet echter Gmail/AQON-Abgleich.
+  if(t==='offene anfragen'||t==='offene kundenanfragen'||t==='aqon pure anfragen'){
+    if(typeof window.d3Import==='function'){await window.d3Import();return;}
+  }
+  if(t==='anfragenarchiv'){
+    if(typeof window.d3InquiryArchiveList==='function'){await window.d3InquiryArchiveList();return;}
+  }
+
+  // Kalender / Planung
+  if(t==='mitarbeiter kalender'){
+    if(typeof window.dg62Load==='function'){await window.dg62Load(true);return;}
+    if(typeof window.loadCalendarEvents==='function'){await window.loadCalendarEvents(true);return;}
+  }
+
+  // Regieberichte / Auftraege
+  if(t==='rechnung zu erstellen'){
+    if(typeof window.loadRegieReports==='function'){await window.loadRegieReports('Abgeschlossen');return;}
+  }
+  if(t.startsWith('abgerechnete aufträge')){
+    if(typeof window.loadRegieReports==='function'){await window.loadRegieReports('Abgerechnet');return;}
+  }
+  if(t==='laufende aufträge'){
+    if(typeof window.loadRegieReports==='function'){await window.loadRegieReports('Laufend');return;}
+  }
+
+  // Angebote
+  if(t==='zu erstellende angebote'){
+    if(typeof window.loadOffers==='function'){await window.loadOffers('Zu erstellen');return;}
+  }
+  if(t==='offene angebote'){
+    if(typeof window.loadOffers==='function'){await window.loadOffers('Offen');return;}
+  }
+  if(t==='angebotsarchiv'){
+    if(typeof window.loadOffers==='function'){await window.loadOffers('Archiv');return;}
+  }
+  if(t==='angebotsstatistik'){
+    if(typeof window.loadStats==='function'){await window.loadStats();return;}
+  }
+  if(t.startsWith('erstellte angebote')){
+    if(typeof window.DG80_UI18_openCreatedOffers==='function'){await window.DG80_UI18_openCreatedOffers();return;}
+  }
+
+  // Sonstige datenintensive Bereiche
+  if(t==='reminder'&&typeof window.loadReminders==='function'){await window.loadReminders();return;}
+  if(t==='wartungen'){
+    if(typeof window.d36LoadMaintenance==='function'){await window.d36LoadMaintenance();return;}
+  }
+  if(t==='offene tagesabschlüsse'||t==='übertragene tagesabschlüsse / prüfung'){
+    if(typeof window.DG80_UI12_openDays==='function'){await window.DG80_UI12_openDays();return;}
+    if(typeof window.loadBossDayClosuresV48==='function'){await window.loadBossDayClosuresV48();return;}
+  }
+  if(t==='lohnübergabe'){
+    if(typeof window.dg520RunAudit==='function'){await window.dg520RunAudit();return;}
+  }
+  if(t==='mitarbeiterverwaltung'||t==='urlaub / abwesenheiten / feiertage'){
+    if(typeof window.loadChefAdministration==='function'){await window.loadChefAdministration();return;}
+  }
+  if(t==='krank-fristen'){
+    if(typeof window.loadSicknessAlerts734==='function'){await window.loadSicknessAlerts734();return;}
+  }
+  if(t==='systemcheck'&&typeof window.d3Health==='function'){await window.d3Health();return;}
+
+  // Letzter Fallback: nur den aktuell geoeffneten Loader aufrufen.
+  if(open&&window.DG3&&DG3.loaders&&typeof DG3.loaders[open]==='function'){
+    await DG3.loaders[open]();return;
+  }
+  // Nur wenn kein Bereichsloader existiert: Dashboard gezielt aktualisieren.
+  if(typeof window.d3Dashboard==='function')await window.d3Dashboard(true);
+}
+async function manualSync(){
+  if(S.busy)return;
+  const title=currentTitle()||'Bereich';
+  S.busy=true;setSyncUi(title,true,'Synchronisierung läuft …');
+  try{
+    clearReadCaches();forceFlags();
+    await runLoaderByTitle(title);
+    const times=readTimes();times[stampKey(title)]=Date.now();saveTimes(times);
+    setSyncUi(title,false,stampText(title));
+  }catch(e){
+    setSyncUi(title,false,'Fehler: '+(e&&e.message?e.message:e));
+  }finally{S.busy=false;}
+}
+window.dg80ManualAreaSync=manualSync;
+
+function needSync(title){
+  if(!title||NO_SYNC_TITLES.has(title))return false;
+  return true;
+}
+function makeButton(title){
+  const wrap=document.createElement('div');wrap.className='dg24-sync-wrap';
+  const b=document.createElement('button');b.type='button';b.className='btn danger dg24-sync-btn';b.textContent='Jetzt synchronisieren';b.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();manualSync();});
+  const s=document.createElement('span');s.className='dg24-sync-stamp';s.textContent=stampText(title);
+  wrap.append(b,s);return wrap;
+}
+function installToolbarButton(){
+  const bar=q('dg80OfficeToolbar');if(!bar||!bar.classList.contains('active'))return;
+  const title=q('dg80OfficeTitle')?.textContent?.trim()||'';
+  if(!needSync(title))return;
+  const head=bar.querySelector('.dg80-office-toolbar-head');if(!head)return;
+  let wrap=head.querySelector('.dg24-sync-wrap');
+  if(!wrap){
+    const h=head.querySelector('h2');
+    const titleBox=document.createElement('div');titleBox.className='dg24-title-sync';
+    if(h){h.parentNode.insertBefore(titleBox,h);titleBox.appendChild(h);}
+    wrap=makeButton(title);titleBox.appendChild(wrap);
+  }else{
+    wrap.querySelector('.dg24-sync-stamp').textContent=stampText(title);
+  }
+}
+function installGroupButton(){
+  const box=q('dg80GroupChooser');if(!box||!box.classList.contains('dg80-shell-active'))return;
+  const head=box.querySelector('.dg80-group-head');if(!head)return;
+  const title=head.querySelector('h2')?.textContent?.trim()||'';
+  if(!needSync(title)||head.querySelector('.dg24-sync-wrap'))return;
+  const wrap=makeButton(title);
+  const close=head.querySelector('.dg80-group-close');
+  if(close)head.insertBefore(wrap,close);else head.appendChild(wrap);
+}
+function css(){
+  if(q('dg80Ui24Css'))return;
+  const s=document.createElement('style');s.id='dg80Ui24Css';
+  s.textContent=''
+   +'.dg24-title-sync{display:flex;align-items:center;gap:14px;flex-wrap:wrap;min-width:0}'
+   +'.dg24-sync-wrap{display:flex;align-items:center;gap:8px;flex-wrap:wrap}'
+   +'.dg24-sync-btn{background:#b9382b!important;border-color:#a33126!important;color:#fff!important;font-weight:900!important;min-height:42px!important;padding:9px 15px!important}'
+   +'.dg24-sync-btn:hover{background:#9f2f24!important}'
+   +'.dg24-sync-btn:disabled{opacity:.65!important;cursor:wait!important}'
+   +'.dg24-sync-stamp{font-size:12px;font-weight:800;color:#64748b;white-space:nowrap}'
+   +'.dg80-group-head{gap:12px!important;flex-wrap:wrap!important}'
+   +'@media(max-width:700px){.dg24-title-sync,.dg24-sync-wrap{width:100%}.dg24-sync-btn{flex:1}.dg24-sync-stamp{width:100%}}';
+  document.head.appendChild(s);
+}
+function enforce(){css();installToolbarButton();installGroupButton();}
+function install(){
+  css();enforce();
+  const mo=new MutationObserver(()=>{clearTimeout(S.timer);S.timer=setTimeout(enforce,0);});
+  mo.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class']});
+  document.documentElement.dataset.dgUi24=V;
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
