@@ -1,9 +1,9 @@
 /* DG Zeiterfassung 9.0 FINAL - exact UI28 parity cache */
-const CACHE='dg-zeiterfassung-9.0-final-20260920-3';
+const CACHE='dg-zeiterfassung-9.0-final-20260920-4';
 const STATIC=[
   './index.html',
   './app-5.0.css?v=20260918-800-prod1',
-  './core-9.0-final.js?v=20260920-900-final3',
+  './core-9.0-final.js?v=20260920-900-final4',
   './customerflow-9.0-final.js?v=20260920-900-final1',
   './payroll-9.0-final.js?v=20260920-900-final1',
   './ui-9.0-final.js?v=20260920-900-final1',
