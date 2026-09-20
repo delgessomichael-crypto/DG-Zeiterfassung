@@ -134,6 +134,23 @@ CREATE TABLE IF NOT EXISTS own_reminders_shadow (
   shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS offer_reminders_shadow (
+  id TEXT PRIMARY KEY,
+  offer_id TEXT,
+  customer TEXT,
+  offer_number TEXT,
+  phone TEXT,
+  email TEXT,
+  description TEXT,
+  created_at_text TEXT,
+  due_date_text TEXT,
+  status TEXT,
+  result TEXT,
+  changed_at_text TEXT,
+  changed_by TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
@@ -178,6 +195,7 @@ async function initDb() {
   await loadGooglePingCache();
   await initManualOrdersShadow();
   await initOwnRemindersShadow();
+  await initOfferRemindersShadow();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -884,6 +902,116 @@ async function mirrorOwnReminderWrite(action, body, parsed) {
 
 function normalizeShadowText(v){return String(v==null?'':v).trim();}
 
+
+async function initOfferRemindersShadow() {
+  if (!pool) return;
+  const existing=await pool.query('SELECT COUNT(*)::int AS n FROM offer_reminders_shadow');
+  if ((existing.rows[0]?.n||0)>0) return;
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:AngebotsReminder']
+  );
+  let inserted=0;
+  for (const row of q.rows) {
+    const payload=row.payload||{};
+    if (Number(payload.sourceRow||row.source_key)<=1) continue;
+    const cells=Array.isArray(payload.cells)?payload.cells:[];
+    const id=textCell(cells,0).trim();
+    if(!id) continue;
+    await pool.query(
+      `INSERT INTO offer_reminders_shadow(
+        id,offer_id,customer,offer_number,phone,email,description,created_at_text,
+        due_date_text,status,result,changed_at_text,changed_by
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      ON CONFLICT(id) DO NOTHING`,
+      [id,textCell(cells,1),textCell(cells,2),textCell(cells,3),textCell(cells,4),
+       textCell(cells,5),textCell(cells,6),textCell(cells,7),textCell(cells,8),
+       textCell(cells,9),textCell(cells,10),textCell(cells,11),textCell(cells,12)]
+    );
+    inserted++;
+  }
+  console.log('SHADOW offer_reminders initialized rows='+inserted);
+}
+
+async function mirrorOfferReminderWrite(action, body, parsed) {
+  if (!pool) return;
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if (!data || data.ok===false) return;
+  const now=new Date().toISOString();
+  if (action==='saveOfferCreatedWithReminder') {
+    const item=body.item||{},id=String(data.reminderId||'').trim();
+    if(!id) return;
+    await pool.query(
+      `INSERT INTO offer_reminders_shadow(
+        id,offer_id,customer,offer_number,phone,email,description,created_at_text,
+        due_date_text,status,result,changed_at_text,changed_by,shadow_updated_at
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'Offen','',$8,$10,now())
+      ON CONFLICT(id) DO UPDATE SET
+        offer_id=EXCLUDED.offer_id,customer=EXCLUDED.customer,offer_number=EXCLUDED.offer_number,
+        phone=EXCLUDED.phone,email=EXCLUDED.email,description=EXCLUDED.description,
+        due_date_text=EXCLUDED.due_date_text,status='Offen',result='',
+        changed_at_text=EXCLUDED.changed_at_text,changed_by=EXCLUDED.changed_by,shadow_updated_at=now()`,
+      [id,String(data.offerId||body.offerId||''),String(item.customer||''),String(item.offerNumber||''),
+       String(item.phone||''),String(item.email||''),String(item.description||''),now,
+       String(data.dueDate||''),String(body.employee||'')]
+    );
+  } else if (action==='rescheduleOfferReminder') {
+    await pool.query(
+      `UPDATE offer_reminders_shadow SET due_date_text=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now() WHERE id=$1`,
+      [String(body.reminderId||''),String(data.dueDate||body.dueDate||''),now,String(body.employee||'')]
+    );
+  } else if (action==='declineOfferFromReminder') {
+    await pool.query(
+      `UPDATE offer_reminders_shadow SET status='Erledigt',result='Kein Auftrag',changed_at_text=$2,changed_by=$3,shadow_updated_at=now() WHERE id=$1`,
+      [String(body.reminderId||''),now,String(body.employee||'')]
+    );
+  } else if (action==='acceptOfferFromReminder') {
+    const result=body.asRunning?'Angenommen - Laufender Auftrag':'Angenommen - Archiv';
+    await pool.query(
+      `UPDATE offer_reminders_shadow SET status='Erledigt',result=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now() WHERE id=$1`,
+      [String(body.reminderId||''),result,now,String(body.employee||'')]
+    );
+  } else if (action==='moveOfferBackToCreate') {
+    await pool.query(
+      `UPDATE offer_reminders_shadow SET status='Erledigt',result='Zurück zu Angebote zu erstellen',
+        changed_at_text=$2,changed_by=$3,shadow_updated_at=now()
+        WHERE offer_id=$1 AND status='Offen'`,
+      [String(body.offerId||''),now,String(body.employee||'')]
+    );
+  } else if (action==='acceptOfferAsRunning') {
+    await pool.query(
+      `UPDATE offer_reminders_shadow SET status='Erledigt',result='Angenommen - Laufender Auftrag',
+        changed_at_text=$2,changed_by=$3,shadow_updated_at=now()
+        WHERE offer_id=$1 AND status='Offen'`,
+      [String(body.offerId||''),now,String(body.employee||'')]
+    );
+  }
+}
+
+async function verifyOfferRemindersShadow(rows, includeDone) {
+  if (!pool || !Array.isArray(rows)) return;
+  const q=await pool.query(
+    includeDone
+      ? `SELECT id,offer_id,customer,offer_number,phone,email,description,due_date_text,status,result FROM offer_reminders_shadow`
+      : `SELECT id,offer_id,customer,offer_number,phone,email,description,due_date_text,status,result FROM offer_reminders_shadow WHERE status='Offen'`
+  );
+  const pg=new Map(q.rows.map(r=>[String(r.id),r]));
+  let mismatches=0;const seen=new Set();
+  for(const r of rows){
+    const id=normalizeShadowText(r&&r.id);if(!id){mismatches++;continue;}
+    seen.add(id);const p=pg.get(id);if(!p){mismatches++;continue;}
+    const pairs=[
+      [r.offerId,p.offer_id],[r.customer,p.customer],[r.offerNumber,p.offer_number],
+      [r.phone,p.phone],[r.email,p.email],[r.description,p.description],
+      [r.dueDate,p.due_date_text],[r.status,p.status],[r.result,p.result]
+    ];
+    if(pairs.some(([a,b])=>normalizeShadowText(a)!==normalizeShadowText(b)))mismatches++;
+  }
+  for(const id of pg.keys())if(!seen.has(id))mismatches++;
+  console.log('SHADOW_VERIFY offer_reminders google='+rows.length+' postgres='+pg.size+' mismatches='+mismatches);
+}
+
 async function verifyManualOrdersShadow(rows) {
   if (!pool || !Array.isArray(rows)) return;
   const q=await pool.query(
@@ -1048,6 +1176,7 @@ async function proxyLegacy(req, res, body) {
         const verifyData=parsed.data!==undefined?parsed.data:parsed;
         if (action==='getManualOrders') verifyManualOrdersShadow(verifyData).catch(e=>console.error('manual order shadow verify failed',e.message));
         if (action==='getOwnReminders') verifyOwnRemindersShadow(verifyData).catch(e=>console.error('own reminder shadow verify failed',e.message));
+        if (action==='getOfferReminders') verifyOfferRemindersShadow(verifyData,Boolean(body.includeDone)).catch(e=>console.error('offer reminder shadow verify failed',e.message));
       }
       if (isCacheableAction(action)) {
         writeCachedResponse(action, body, raw, upstream.status).catch(e=>console.error('response cache write failed',e.message));
@@ -1065,6 +1194,10 @@ async function proxyLegacy(req, res, body) {
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['createOwnReminder','saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder'].includes(action)) {
         mirrorOwnReminderWrite(action,body,parsed).catch(e=>console.error('own reminder shadow mirror failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false &&
+          ['saveOfferCreatedWithReminder','rescheduleOfferReminder','declineOfferFromReminder','acceptOfferFromReminder','moveOfferBackToCreate','acceptOfferAsRunning'].includes(action)) {
+        mirrorOfferReminderWrite(action,body,parsed).catch(e=>console.error('offer reminder shadow mirror failed',e.message));
       }
       pool.query(
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
@@ -1152,7 +1285,8 @@ async function health() {
     readCacheTtlSeconds: READ_CACHE_TTL_MS / 1000,
     readCacheRefreshAheadSeconds: READ_CACHE_REFRESH_MS / 1000,
     manualOrdersShadow: pool ? 'enabled' : 'disabled',
-    ownRemindersShadow: pool ? 'enabled' : 'disabled'
+    ownRemindersShadow: pool ? 'enabled' : 'disabled',
+    offerRemindersShadow: pool ? 'enabled' : 'disabled'
   };
 }
 
