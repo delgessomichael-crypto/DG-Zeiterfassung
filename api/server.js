@@ -1025,6 +1025,18 @@ async function markEmployeeSnapshotDirty(action) {
   );
 }
 
+async function clearEmployeeSnapshotDirty(reason) {
+  employeeSnapshotDirtyCache = false;
+  employeeNamesCache = null;
+  if (!pool) return;
+  const value = JSON.stringify({dirty:false,reason:String(reason||''),at:new Date().toISOString()});
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES('employee_snapshot_dirty',$1::jsonb)
+     ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
+    [value]
+  );
+}
+
 
 const SENSITIVE_REQUEST_FIELDS = new Set([
   'pin',
@@ -5700,6 +5712,33 @@ async function verifyEmployeeAdminShadow(rows){
 async function refreshAndVerifyEmployeeAdminShadow(rows){
   await replaceEmployeeAdminShadow(rows);
   await verifyEmployeeAdminShadow(rows);
+  const ready=await shadowReadyForDirectRead('employee_admin');
+  if(ready)await clearEmployeeSnapshotDirty('employee_admin verified');
+}
+async function mirrorEmployeeMutation(action,body,parsed){
+  if(!pool)return;
+  await markEmployeeSnapshotDirty(action);
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if(!data||data.ok===false)return;
+  if(Array.isArray(data.employees)){
+    await replaceEmployeeAdminShadow(data.employees);
+    await verifyEmployeeAdminShadow(data.employees);
+    if(await shadowReadyForDirectRead('employee_admin'))await clearEmployeeSnapshotDirty(action+' mirrored full');
+    return;
+  }
+  if(action==='setEmployeeActive'){
+    const target=String(body.targetName||'').trim();
+    if(!target)return;
+    const q=await pool.query('SELECT payload FROM employee_admin_shadow WHERE employee_name=$1 LIMIT 1',[target]);
+    if(!q.rowCount)return;
+    const payload=Object.assign({},q.rows[0].payload||{},{active:Boolean(body.active)});
+    await pool.query(
+      'UPDATE employee_admin_shadow SET payload=$2::jsonb,shadow_updated_at=now() WHERE employee_name=$1',
+      [target,JSON.stringify(payload)]
+    );
+    await clearEmployeeSnapshotDirty('setEmployeeActive mirrored');
+    await invalidateShadowVerify('employee_admin');
+  }
 }
 async function directEmployeeAdminDataRead(body){
   const session=await localSessionForBody(body,true);
@@ -5874,6 +5913,19 @@ async function tryDirectPostgresRead(action,body){
 async function getEmployeesFromSnapshot() {
   if (Array.isArray(employeeNamesCache) && employeeNamesCache.length) return employeeNamesCache.slice();
   if (!pool) return null;
+  const live = await pool.query(
+    'SELECT employee_name,payload FROM employee_admin_shadow ORDER BY sort_order ASC,employee_name ASC'
+  );
+  if (live.rowCount) {
+    const names = live.rows
+      .filter(r => !r.payload || r.payload.active !== false)
+      .map(r => String(r.employee_name||'').trim())
+      .filter(Boolean);
+    if (names.length) {
+      employeeNamesCache = names.slice();
+      return names;
+    }
+  }
   const q = await pool.query(
     `SELECT source_key,payload
        FROM migration_objects
@@ -6071,8 +6123,7 @@ async function proxyLegacy(req, res, body) {
         }
       }
       if (EMPLOYEE_MUTATION_ACTIONS.has(action) && upstream.status === 200 && parsed && parsed.ok !== false) {
-        markEmployeeSnapshotDirty(action).catch(e=>console.error('employee snapshot dirty flag failed',e.message));
-        invalidateShadowVerify('employee_admin').catch(e=>console.error('employee admin readiness invalidate failed',e.message));
+        mirrorEmployeeMutation(action,body,parsed).catch(e=>console.error('employee mutation shadow mirror failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'day_data:%'")
           .catch(e=>console.error('day data employee readiness invalidate failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'boss_day_closures:%'")
