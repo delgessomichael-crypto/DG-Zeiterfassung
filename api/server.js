@@ -377,6 +377,21 @@ CREATE TABLE IF NOT EXISTS conflict_reviews_shadow (
   shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS day_status_shadow (
+  employee_name TEXT NOT NULL,
+  status_date TEXT NOT NULL,
+  status TEXT NOT NULL,
+  changed_at_text TEXT,
+  source TEXT,
+  reference TEXT,
+  credited_hours NUMERIC(10,2) NOT NULL DEFAULT 0,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY(employee_name,status_date)
+);
+
+CREATE INDEX IF NOT EXISTS day_status_shadow_date_idx
+  ON day_status_shadow(status_date,employee_name);
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
@@ -431,6 +446,7 @@ async function initDb() {
   await initMonthlyAdjustmentsShadow();
   await initClosureShadows();
   await initConflictReviewsShadow();
+  await initDayStatusShadow();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -1039,6 +1055,123 @@ function shadowActive(raw){
 
 
 
+
+
+async function initDayStatusShadow(){
+  if(!pool)return;
+  const existing=await pool.query('SELECT COUNT(*)::int AS n FROM day_status_shadow');
+  if((existing.rows[0]?.n||0)>0)return;
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:Tagesstatus']
+  );
+  let inserted=0;
+  for(const row of q.rows){
+    const payload=row.payload||{};
+    if(Number(payload.sourceRow||row.source_key)<=1)continue;
+    const cells=Array.isArray(payload.cells)?payload.cells:[];
+    const employee=textCell(cells,0).trim(),date=textCell(cells,1).trim();
+    if(!employee||!date)continue;
+    await pool.query(
+      `INSERT INTO day_status_shadow(
+        employee_name,status_date,status,changed_at_text,source,reference,credited_hours
+      ) VALUES($1,$2,$3,$4,$5,$6,$7)
+      ON CONFLICT(employee_name,status_date) DO NOTHING`,
+      [employee,date,textCell(cells,2)||'Arbeiten',textCell(cells,3),textCell(cells,4),
+       textCell(cells,5),Number(textCell(cells,6))||0]
+    );
+    inserted++;
+  }
+  console.log('SHADOW day_status initialized rows='+inserted);
+}
+
+async function upsertDayStatusShadow(employee,date,status,source,creditedHours,reference){
+  if(!pool||!employee||!date)return;
+  status=String(status||'Arbeiten');
+  if(status==='Arbeiten'){
+    await pool.query('DELETE FROM day_status_shadow WHERE employee_name=$1 AND status_date=$2',[String(employee),String(date)]);
+    return;
+  }
+  await pool.query(
+    `INSERT INTO day_status_shadow(
+      employee_name,status_date,status,changed_at_text,source,reference,credited_hours,shadow_updated_at
+    ) VALUES($1,$2,$3,$4,$5,$6,$7,now())
+    ON CONFLICT(employee_name,status_date) DO UPDATE SET
+      status=EXCLUDED.status,changed_at_text=EXCLUDED.changed_at_text,source=EXCLUDED.source,
+      reference=CASE WHEN EXCLUDED.reference<>'' THEN EXCLUDED.reference ELSE day_status_shadow.reference END,
+      credited_hours=EXCLUDED.credited_hours,shadow_updated_at=now()`,
+    [String(employee),String(date),status,new Date().toISOString(),String(source||''),
+     String(reference||''),Number(creditedHours)||0]
+  );
+}
+
+async function syncDayStatusFromDayRead(body,data){
+  if(!data)return;
+  await upsertDayStatusShadow(
+    String(body.employee||''),String(body.date||''),String(data.status||'Arbeiten'),
+    String(data.statusSource||''),Number(data.creditedHours||0),''
+  );
+}
+
+async function syncAndVerifyMonthStatuses(body,data){
+  if(!pool||!data||!Array.isArray(data.statuses))return;
+  const employee=String(body.employee||data.employee||'');
+  if(!employee)return;
+  const statuses=data.statuses||[];
+  let from=String(data.cycleStart||''),to=String(data.cycleEnd||'');
+  if(!from||!to){
+    const dates=statuses.map(x=>String(x.date||'')).filter(Boolean).sort();
+    if(dates.length){from=dates[0];to=dates[dates.length-1];}
+  }
+  if(!from||!to)return;
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    await client.query(
+      'DELETE FROM day_status_shadow WHERE employee_name=$1 AND status_date>=$2 AND status_date<=$3',
+      [employee,from,to]
+    );
+    for(const st of statuses){
+      if(!st||!st.date||String(st.status||'Arbeiten')==='Arbeiten')continue;
+      await client.query(
+        `INSERT INTO day_status_shadow(
+          employee_name,status_date,status,changed_at_text,source,reference,credited_hours,shadow_updated_at
+        ) VALUES($1,$2,$3,$4,$5,'',$6,now())`,
+        [employee,String(st.date),String(st.status||''),new Date().toISOString(),
+         String(st.source||''),Number(st.creditedHours)||0]
+      );
+    }
+    await client.query('COMMIT');
+  }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
+
+  const q=await pool.query(
+    `SELECT status_date,status,source,credited_hours FROM day_status_shadow
+      WHERE employee_name=$1 AND status_date>=$2 AND status_date<=$3`,
+    [employee,from,to]
+  );
+  const pg=new Map(q.rows.map(r=>[String(r.status_date),r]));
+  let mismatches=0;
+  for(const st of statuses){
+    const p=pg.get(String(st.date));if(!p){mismatches++;continue;}
+    if(normalizeShadowText(st.status)!==normalizeShadowText(p.status)||
+       normalizeShadowText(st.source)!==normalizeShadowText(p.source)||
+       Math.abs(Number(st.creditedHours||0)-Number(p.credited_hours||0))>=0.01)mismatches++;
+    pg.delete(String(st.date));
+  }
+  mismatches+=pg.size;
+  console.log('SHADOW_VERIFY day_status google='+statuses.length+' postgres='+q.rows.length+' mismatches='+mismatches);
+  await saveShadowVerifyStat('day_status',statuses.length,q.rows.length,mismatches);
+}
+
+async function mirrorSetDayStatus(body,parsed){
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if(!data||data.ok===false)return;
+  await upsertDayStatusShadow(
+    String(body.employee||''),String(body.date||''),String(data.status||body.status||'Arbeiten'),
+    'Mitarbeiter',0,''
+  );
+}
 
 async function initConflictReviewsShadow(){
   if(!pool)return;
@@ -2480,6 +2613,8 @@ async function proxyLegacy(req, res, body) {
           verifyConflictReviewsShadow(verifyData,body.year,body.month).catch(e=>console.error('conflict review shadow verify failed',e.message));
         }
         if (action==='getMonthPayrollAudit') verifyPayrollProtocols(verifyData,body.year,body.month).catch(e=>console.error('payroll protocol shadow verify failed',e.message));
+        if (action==='getDayData') syncDayStatusFromDayRead(body,verifyData).catch(e=>console.error('day status shadow day refresh failed',e.message));
+        if (action==='getMonthData') syncAndVerifyMonthStatuses(body,verifyData).catch(e=>console.error('day status shadow month refresh failed',e.message));
       }
       if (isCacheableAction(action)) {
         writeCachedResponse(action, body, raw, upstream.status).catch(e=>console.error('response cache write failed',e.message));
@@ -2532,6 +2667,9 @@ async function proxyLegacy(req, res, body) {
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false && action==='markConflictReviewed') {
         mirrorConflictReviewWrite(body,parsed).catch(e=>console.error('conflict review shadow mirror failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false && action==='setDayStatus') {
+        mirrorSetDayStatus(body,parsed).catch(e=>console.error('day status shadow mirror failed',e.message));
       }
       pool.query(
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
@@ -2622,7 +2760,8 @@ async function health() {
         pool.query('SELECT COUNT(*)::int AS n FROM month_closures_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM payroll_reviews_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM payroll_closures_shadow'),
-        pool.query('SELECT COUNT(*)::int AS n FROM conflict_reviews_shadow')
+        pool.query('SELECT COUNT(*)::int AS n FROM conflict_reviews_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM day_status_shadow')
       ]);
       shadowCounts = {
         manualOrders: counts[0].rows[0]?.n||0,
@@ -2642,7 +2781,8 @@ async function health() {
         monthClosures: counts[14].rows[0]?.n||0,
         payrollReviews: counts[15].rows[0]?.n||0,
         payrollClosures: counts[16].rows[0]?.n||0,
-        conflictReviews: counts[17].rows[0]?.n||0
+        conflictReviews: counts[17].rows[0]?.n||0,
+        dayStatus: counts[18].rows[0]?.n||0
       };
       const verifyQ=await pool.query(
         'SELECT shadow_name,google_count,postgres_count,mismatches,checked_at FROM shadow_verify_stats ORDER BY shadow_name'
@@ -2684,6 +2824,7 @@ async function health() {
     monthlyAdjustmentsShadow: pool ? 'enabled' : 'disabled',
     payrollProtocolShadow: pool ? 'enabled' : 'disabled',
     conflictReviewsShadow: pool ? 'enabled' : 'disabled',
+    dayStatusShadow: pool ? 'enabled' : 'disabled',
     shadowCounts,
     shadowVerify,
     writeStats
@@ -2814,7 +2955,7 @@ initDb()
     console.log('MIGRATION VERIFY: sheets='+sheets.length+' sourceRows='+sourceRows+' importedRows='+importedRows+' mismatches='+mismatches.length+(mismatches.length?' ['+mismatches.join(', ')+']':''));
     const h = await health();
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
-    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews);
+    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus);
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
   })
