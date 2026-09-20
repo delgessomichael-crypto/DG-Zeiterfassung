@@ -151,6 +151,14 @@ CREATE TABLE IF NOT EXISTS offer_reminders_shadow (
   shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS shadow_verify_stats (
+  shadow_name TEXT PRIMARY KEY,
+  google_count INTEGER NOT NULL DEFAULT 0,
+  postgres_count INTEGER NOT NULL DEFAULT 0,
+  mismatches INTEGER NOT NULL DEFAULT 0,
+  checked_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
@@ -902,6 +910,20 @@ async function mirrorOwnReminderWrite(action, body, parsed) {
 
 function normalizeShadowText(v){return String(v==null?'':v).trim();}
 
+async function saveShadowVerifyStat(name,googleCount,postgresCount,mismatches){
+  if(!pool)return;
+  await pool.query(
+    `INSERT INTO shadow_verify_stats(shadow_name,google_count,postgres_count,mismatches,checked_at)
+     VALUES($1,$2,$3,$4,now())
+     ON CONFLICT(shadow_name) DO UPDATE SET
+       google_count=EXCLUDED.google_count,
+       postgres_count=EXCLUDED.postgres_count,
+       mismatches=EXCLUDED.mismatches,
+       checked_at=now()`,
+    [String(name),Number(googleCount)||0,Number(postgresCount)||0,Number(mismatches)||0]
+  );
+}
+
 
 async function initOfferRemindersShadow() {
   if (!pool) return;
@@ -1010,6 +1032,7 @@ async function verifyOfferRemindersShadow(rows, includeDone) {
   }
   for(const id of pg.keys())if(!seen.has(id))mismatches++;
   console.log('SHADOW_VERIFY offer_reminders google='+rows.length+' postgres='+pg.size+' mismatches='+mismatches);
+  await saveShadowVerifyStat('offer_reminders',rows.length,pg.size,mismatches);
 }
 
 async function verifyManualOrdersShadow(rows) {
@@ -1033,6 +1056,7 @@ async function verifyManualOrdersShadow(rows) {
   }
   for(const id of pg.keys())if(!seen.has(id))mismatches++;
   console.log('SHADOW_VERIFY manual_orders google='+rows.length+' postgres='+pg.size+' mismatches='+mismatches);
+  await saveShadowVerifyStat('manual_orders',rows.length,pg.size,mismatches);
 }
 
 async function verifyOwnRemindersShadow(rows) {
@@ -1053,6 +1077,7 @@ async function verifyOwnRemindersShadow(rows) {
   }
   for(const id of pg.keys())if(!seen.has(id))mismatches++;
   console.log('SHADOW_VERIFY own_reminders google='+rows.length+' postgres='+pg.size+' mismatches='+mismatches);
+  await saveShadowVerifyStat('own_reminders',rows.length,pg.size,mismatches);
 }
 
 async function mirrorManualOrderWrite(action, body, parsed) {
@@ -1257,6 +1282,8 @@ async function health() {
   let postgresEmployeeSnapshotCount = null;
   let employeeReadSource = 'google-fallback';
   let employeeSnapshotDirty = null;
+  let shadowCounts = null;
+  let shadowVerify = [];
   if (pool) {
     try {
       const q = await pool.query('SELECT 1 AS ok');
@@ -1267,6 +1294,20 @@ async function health() {
         postgresEmployeeSnapshotCount = names.length;
         if (!employeeSnapshotDirty) employeeReadSource = 'postgres';
       }
+      const counts = await Promise.all([
+        pool.query('SELECT COUNT(*)::int AS n FROM manual_orders_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM own_reminders_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM offer_reminders_shadow')
+      ]);
+      shadowCounts = {
+        manualOrders: counts[0].rows[0]?.n||0,
+        ownReminders: counts[1].rows[0]?.n||0,
+        offerReminders: counts[2].rows[0]?.n||0
+      };
+      const verifyQ=await pool.query(
+        'SELECT shadow_name,google_count,postgres_count,mismatches,checked_at FROM shadow_verify_stats ORDER BY shadow_name'
+      );
+      shadowVerify=verifyQ.rows;
     } catch (e) {
       database = 'error';
     }
@@ -1286,7 +1327,9 @@ async function health() {
     readCacheRefreshAheadSeconds: READ_CACHE_REFRESH_MS / 1000,
     manualOrdersShadow: pool ? 'enabled' : 'disabled',
     ownRemindersShadow: pool ? 'enabled' : 'disabled',
-    offerRemindersShadow: pool ? 'enabled' : 'disabled'
+    offerRemindersShadow: pool ? 'enabled' : 'disabled',
+    shadowCounts,
+    shadowVerify
   };
 }
 
@@ -1414,6 +1457,7 @@ initDb()
     console.log('MIGRATION VERIFY: sheets='+sheets.length+' sourceRows='+sourceRows+' importedRows='+importedRows+' mismatches='+mismatches.length+(mismatches.length?' ['+mismatches.join(', ')+']':''));
     const h = await health();
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
+    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders);
     await logLatencySummary();
   })
   .then(() => server.listen(PORT, '0.0.0.0', () => {
