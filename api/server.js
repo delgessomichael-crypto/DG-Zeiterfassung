@@ -140,6 +140,7 @@ async function initDb() {
 
   const latencyTimer = setInterval(() => {
     logLatencySummary().catch(e => console.error('latency summary failed', e.message));
+    logCacheStats();
   }, 5 * 60 * 1000);
   if (typeof latencyTimer.unref === 'function') latencyTimer.unref();
 
@@ -357,6 +358,27 @@ const CACHEABLE_ACTIONS = new Set([
 ]);
 
 const READ_CACHE_TTL_MS = 60 * 60 * 1000;
+const cacheStats = new Map();
+
+function bumpCacheStat(action,kind) {
+  const key = String(action||'unknown');
+  const row = cacheStats.get(key) || {hit:0,miss:0,force:0};
+  if (kind === 'hit') row.hit++;
+  else if (kind === 'force') row.force++;
+  else row.miss++;
+  cacheStats.set(key,row);
+}
+
+function logCacheStats() {
+  if (!cacheStats.size) return;
+  const rows = [...cacheStats.entries()]
+    .map(([action,s]) => ({action,...s,total:s.hit+s.miss+s.force}))
+    .sort((a,b)=>b.total-a.total)
+    .slice(0,15);
+  console.log('CACHE15 ' + rows.map(r =>
+    r.action+'=h'+r.hit+'/m'+r.miss+'/f'+r.force
+  ).join(' | '));
+}
 const GOOGLE_PING_TTL_MS = 60 * 60 * 1000;
 const GOOGLE_PING_REFRESH_MS = 50 * 60 * 1000;
 let googlePingCache = null;
@@ -520,14 +542,22 @@ function shouldBypassReadCache(body) {
 }
 
 async function readCachedResponse(action, body) {
-  if (!pool || !isCacheableAction(action) || shouldBypassReadCache(body)) return null;
+  if (!pool || !isCacheableAction(action)) return null;
+  if (shouldBypassReadCache(body)) {
+    bumpCacheStat(action,'force');
+    return null;
+  }
   const payload = normalizedCachePayload(body);
   const key = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
   const q = await pool.query(
     "SELECT response_text,http_status,created_at FROM response_cache WHERE cache_key=$1 AND created_at > now() - interval '1 hour'",
     [key]
   );
-  if (!q.rowCount) return null;
+  if (!q.rowCount) {
+    bumpCacheStat(action,'miss');
+    return null;
+  }
+  bumpCacheStat(action,'hit');
   return {key,responseText:q.rows[0].response_text,httpStatus:q.rows[0].http_status,createdAt:q.rows[0].created_at};
 }
 
