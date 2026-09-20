@@ -59,14 +59,24 @@ function showEmployee(){const wasBoss=!$('bossView').classList.contains('hidden'
 
 function showBoss(){if(!canAccessBoss()){showEmployee();setMessage('entryStatus','Kein Zugriff auf Buero.','error');return;}$('employeeView').classList.add('hidden');$('bossView').classList.remove('hidden');$('employeeTab').classList.remove('active');$('bossTab').classList.add('active');if(navigator.onLine){d3CheckBackend();d3Dashboard();}}
 
-async function loadEmployeeDirectory(){
-  try{
-    employeeDirectory=await api({action:'getEmployees'});
-    const current=auth().employee;
-    $('loginEmployee').innerHTML='<option value="">Bitte auswählen</option>'+employeeDirectory.map(x=>'<option>'+esc(x)+'</option>').join('');
-    if(current&&employeeDirectory.includes(current))$('loginEmployee').value=current;
-    fillAbsenceEmployees();
-  }catch(e){ if($('loginEmployee'))$('loginEmployee').innerHTML='<option value="">Mitarbeiter konnten nicht geladen werden</option>'; }
+async function loadEmployeeDirectory(force){
+  if(!force&&Array.isArray(employeeDirectory)&&employeeDirectory.length)return employeeDirectory;
+  if(!force&&window.__dgEmployeeDirectoryPromise)return window.__dgEmployeeDirectoryPromise;
+  const run=(async()=>{
+    try{
+      employeeDirectory=await api({action:'getEmployees'});
+      const current=auth().employee;
+      $('loginEmployee').innerHTML='<option value="">Bitte auswählen</option>'+employeeDirectory.map(x=>'<option>'+esc(x)+'</option>').join('');
+      if(current&&employeeDirectory.includes(current))$('loginEmployee').value=current;
+      fillAbsenceEmployees();
+      return employeeDirectory;
+    }catch(e){
+      if($('loginEmployee'))$('loginEmployee').innerHTML='<option value="">Mitarbeiter konnten nicht geladen werden</option>';
+      throw e;
+    }
+  })();
+  window.__dgEmployeeDirectoryPromise=run;
+  try{return await run;}finally{if(window.__dgEmployeeDirectoryPromise===run)window.__dgEmployeeDirectoryPromise=null;}
 }
 
 function fillAbsenceEmployees(){const opts=(employeeDirectory||[]).map(x=>'<option>'+esc(x)+'</option>').join('');if($('absenceEmployee'))$('absenceEmployee').innerHTML=opts;if($('vacationEmployee'))$('vacationEmployee').innerHTML=opts}
@@ -5451,6 +5461,16 @@ async function ensureEmployees742(){
   if(!sel)return;
   if(sel.options&&sel.options.length>1&&!/werden geladen/i.test(sel.options[0]?.textContent||''))return;
   try{
+    if(typeof employeeDirectory!=='undefined'&&Array.isArray(employeeDirectory)&&employeeDirectory.length){
+      if(render742(employeeDirectory))return;
+    }
+    if(window.__dgEmployeeDirectoryPromise){
+      try{await window.__dgEmployeeDirectoryPromise;}catch(_e){}
+      if(sel.options&&sel.options.length>1&&!/werden geladen/i.test(sel.options[0]?.textContent||''))return;
+      if(typeof employeeDirectory!=='undefined'&&Array.isArray(employeeDirectory)&&employeeDirectory.length){
+        if(render742(employeeDirectory))return;
+      }
+    }
     const rows=await raw742({action:'getEmployees'});
     if(!render742(rows))throw new Error('Keine aktiven Mitarbeiter erhalten.');
     const st=document.getElementById('loginStatus');if(st&&/nicht initialisiert|Start fehlgeschlagen/i.test(st.textContent||'')){st.className='';st.textContent='';}
