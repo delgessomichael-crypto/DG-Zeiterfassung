@@ -119,6 +119,21 @@ CREATE TABLE IF NOT EXISTS manual_orders_shadow (
   shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS own_reminders_shadow (
+  id TEXT PRIMARY KEY,
+  reminder_text TEXT,
+  due_date_text TEXT,
+  status TEXT,
+  result TEXT,
+  created_at_text TEXT,
+  created_by TEXT,
+  changed_at_text TEXT,
+  changed_by TEXT,
+  attachments_json TEXT,
+  internal_note TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
@@ -162,6 +177,7 @@ async function initDb() {
   await cleanupInternalData();
   await loadGooglePingCache();
   await initManualOrdersShadow();
+  await initOwnRemindersShadow();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -789,6 +805,82 @@ async function initManualOrdersShadow() {
   console.log('SHADOW manual_orders initialized rows='+inserted);
 }
 
+
+async function initOwnRemindersShadow() {
+  if (!pool) return;
+  const existing=await pool.query('SELECT COUNT(*)::int AS n FROM own_reminders_shadow');
+  if ((existing.rows[0]?.n||0)>0) return;
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:EigeneReminder']
+  );
+  let inserted=0;
+  for (const row of q.rows) {
+    const payload=row.payload||{};
+    if (Number(payload.sourceRow||row.source_key)<=1) continue;
+    const cells=Array.isArray(payload.cells)?payload.cells:[];
+    const id=textCell(cells,0).trim();
+    if(!id) continue;
+    await pool.query(
+      `INSERT INTO own_reminders_shadow(
+        id,reminder_text,due_date_text,status,result,created_at_text,created_by,
+        changed_at_text,changed_by,attachments_json,internal_note
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      ON CONFLICT(id) DO NOTHING`,
+      [id,textCell(cells,1),textCell(cells,2),textCell(cells,3),textCell(cells,4),
+       textCell(cells,5),textCell(cells,6),textCell(cells,7),textCell(cells,8),
+       textCell(cells,9),textCell(cells,10)]
+    );
+    inserted++;
+  }
+  console.log('SHADOW own_reminders initialized rows='+inserted);
+}
+
+async function mirrorOwnReminderWrite(action, body, parsed) {
+  if (!pool) return;
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if (!data || data.ok===false) return;
+  const now=new Date().toISOString();
+  if (action==='createOwnReminder') {
+    const item=body.item||{};
+    const id=String(data.id||'').trim();
+    if(!id) return;
+    await pool.query(
+      `INSERT INTO own_reminders_shadow(
+        id,reminder_text,due_date_text,status,result,created_at_text,created_by,
+        changed_at_text,changed_by,attachments_json,internal_note,shadow_updated_at
+      ) VALUES($1,$2,$3,'Offen','',$4,$5,$4,$5,$6,'',now())
+      ON CONFLICT(id) DO UPDATE SET
+        reminder_text=EXCLUDED.reminder_text,due_date_text=EXCLUDED.due_date_text,
+        status='Offen',changed_at_text=EXCLUDED.changed_at_text,changed_by=EXCLUDED.changed_by,
+        shadow_updated_at=now()`,
+      [id,String(item.text||''),String(data.dueDate||item.dueDate||''),now,
+       String(body.employee||''),JSON.stringify({count:Number(data.attachmentCount||0)})]
+    );
+  } else if (action==='saveOwnReminderInternalNote') {
+    await pool.query(
+      `UPDATE own_reminders_shadow SET internal_note=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now() WHERE id=$1`,
+      [String(body.reminderId||''),String(data.internalNote!==undefined?data.internalNote:body.note||''),now,String(body.employee||'')]
+    );
+  } else if (action==='rescheduleOwnReminder') {
+    await pool.query(
+      `UPDATE own_reminders_shadow SET due_date_text=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now() WHERE id=$1`,
+      [String(body.reminderId||''),String(data.dueDate||body.dueDate||''),now,String(body.employee||'')]
+    );
+  } else if (action==='completeOwnReminder') {
+    await pool.query(
+      `UPDATE own_reminders_shadow SET status='Erledigt',result='Erledigt',changed_at_text=$2,changed_by=$3,shadow_updated_at=now() WHERE id=$1`,
+      [String(body.reminderId||''),now,String(body.employee||'')]
+    );
+  } else if (action==='deleteOwnReminder') {
+    await pool.query(
+      `UPDATE own_reminders_shadow SET status='Gelöscht',result='Gelöscht',changed_at_text=$2,changed_by=$3,shadow_updated_at=now() WHERE id=$1`,
+      [String(body.reminderId||''),now,String(body.employee||'')]
+    );
+  }
+}
+
 async function mirrorManualOrderWrite(action, body, parsed) {
   if (!pool) return;
   const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
@@ -919,6 +1011,10 @@ async function proxyLegacy(req, res, body) {
           ['saveManualOrder','saveManualOrderNote','setManualOrderStatus','deleteManualOrder'].includes(action)) {
         mirrorManualOrderWrite(action,body,parsed).catch(e=>console.error('manual order shadow mirror failed',e.message));
       }
+      if (upstream.status === 200 && parsed && parsed.ok !== false &&
+          ['createOwnReminder','saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder'].includes(action)) {
+        mirrorOwnReminderWrite(action,body,parsed).catch(e=>console.error('own reminder shadow mirror failed',e.message));
+      }
       pool.query(
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
          VALUES($1,$2::jsonb,$3,$4::jsonb,$5,$6)`,
@@ -1004,7 +1100,8 @@ async function health() {
     postgresEmployeeSnapshotCount,
     readCacheTtlSeconds: READ_CACHE_TTL_MS / 1000,
     readCacheRefreshAheadSeconds: READ_CACHE_REFRESH_MS / 1000,
-    manualOrdersShadow: pool ? 'enabled' : 'disabled'
+    manualOrdersShadow: pool ? 'enabled' : 'disabled',
+    ownRemindersShadow: pool ? 'enabled' : 'disabled'
   };
 }
 
