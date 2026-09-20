@@ -59,19 +59,40 @@ function showEmployee(){const wasBoss=!$('bossView').classList.contains('hidden'
 
 function showBoss(){if(!canAccessBoss()){showEmployee();setMessage('entryStatus','Kein Zugriff auf Buero.','error');return;}$('employeeView').classList.add('hidden');$('bossView').classList.remove('hidden');$('employeeTab').classList.remove('active');$('bossTab').classList.add('active');if(navigator.onLine){d3CheckBackend();d3Dashboard();}}
 
+function renderEmployeeDirectoryCached(rows){
+  if(!Array.isArray(rows)||!rows.length)return false;
+  employeeDirectory=rows.slice();
+  const current=auth().employee;
+  if($('loginEmployee')){
+    $('loginEmployee').innerHTML='<option value="">Bitte auswählen</option>'+employeeDirectory.map(x=>'<option>'+esc(x)+'</option>').join('');
+    if(current&&employeeDirectory.includes(current))$('loginEmployee').value=current;
+  }
+  fillAbsenceEmployees();
+  return true;
+}
+
 async function loadEmployeeDirectory(force){
   if(!force&&Array.isArray(employeeDirectory)&&employeeDirectory.length)return employeeDirectory;
   if(!force&&window.__dgEmployeeDirectoryPromise)return window.__dgEmployeeDirectoryPromise;
+
+  if(!force){
+    try{
+      const cached=JSON.parse(localStorage.getItem('dg_employee_directory_cache')||'null');
+      if(cached&&Array.isArray(cached.rows)&&cached.rows.length){
+        renderEmployeeDirectoryCached(cached.rows);
+      }
+    }catch(_e){}
+  }
+
   const run=(async()=>{
     try{
-      employeeDirectory=await api({action:'getEmployees'});
-      const current=auth().employee;
-      $('loginEmployee').innerHTML='<option value="">Bitte auswählen</option>'+employeeDirectory.map(x=>'<option>'+esc(x)+'</option>').join('');
-      if(current&&employeeDirectory.includes(current))$('loginEmployee').value=current;
-      fillAbsenceEmployees();
+      const rows=await api({action:'getEmployees'});
+      renderEmployeeDirectoryCached(rows||[]);
+      try{localStorage.setItem('dg_employee_directory_cache',JSON.stringify({ts:Date.now(),rows:employeeDirectory}));}catch(_e){}
       return employeeDirectory;
     }catch(e){
-      if($('loginEmployee'))$('loginEmployee').innerHTML='<option value="">Mitarbeiter konnten nicht geladen werden</option>';
+      if((!Array.isArray(employeeDirectory)||!employeeDirectory.length)&&$('loginEmployee'))$('loginEmployee').innerHTML='<option value="">Mitarbeiter konnten nicht geladen werden</option>';
+      if(Array.isArray(employeeDirectory)&&employeeDirectory.length)return employeeDirectory;
       throw e;
     }
   })();
