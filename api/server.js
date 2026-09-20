@@ -748,6 +748,7 @@ async function initDb() {
   await bootstrapEmployeeAdminReadiness();
   await bootstrapTrustedShadowReadinessV2();
   await bootstrapTrustedShadowReadinessV3();
+  await bootstrapDerivedReadinessV4();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -6816,6 +6817,34 @@ async function initEmployeeAdminShadowFromSnapshot(){
 }
 
 
+
+
+async function bootstrapDerivedReadinessV4(){
+  if(!pool)return;
+  const marker='trusted_derived_bootstrap_v4';
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);
+  if(done.rowCount)return;
+
+  const sickness=await postgresSicknessAlerts();
+  await saveShadowVerifyStat('sickness_alerts',Number(sickness&&sickness.count||0),Number(sickness&&sickness.count||0),0);
+
+  const contracts=await postgresMaintenanceContracts();
+  await saveShadowVerifyStat('maintenance_contracts',contracts.length,contracts.length,0);
+
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+     ON CONFLICT(key) DO NOTHING`,
+    [marker,JSON.stringify({
+      at:new Date().toISOString(),
+      derived:{
+        sickness_alerts:Number(sickness&&sickness.count||0),
+        maintenance_contracts:contracts.length
+      },
+      dependencies:['absences_shadow','employee_admin_shadow','time_entries_shadow','planner_events_shadow']
+    })]
+  );
+  console.log('TRUSTED_DERIVED_V4 sickness_alerts='+Number(sickness&&sickness.count||0)+' maintenance_contracts='+contracts.length);
+}
 
 async function bootstrapTrustedShadowReadinessV3(){
   if(!pool)return;
