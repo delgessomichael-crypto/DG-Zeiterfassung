@@ -335,7 +335,9 @@ const CACHEABLE_ACTIONS = new Set([
   'getBossMonthData',
   'getBossDayClosures',
   'getEmployeeAdminData',
+  'getAbsenceOverview',
   'getAbsences',
+  'getSicknessAlerts',
   'getVacationAccount',
   'getVacationAccounts',
   'getTimeBankAccount',
@@ -352,10 +354,20 @@ const CACHEABLE_ACTIONS = new Set([
   'getMaintenanceContracts',
   'getMaintenanceArchive',
   'getMaintenanceCustomer',
+  'getMaintenanceAttachment',
+  'searchMaintenanceCustomers',
+  'findMaintenanceDeviceByInternalId',
   'getPlannerWorkers',
   'getPlannerAvailability',
   'getPlannerEvents',
   'getObjectReports',
+  'getObjectInternalNote',
+  'getObjectInternalNotes',
+  'getRegieAttachments',
+  'getWeekData',
+  'getMinimumWage',
+  'getMonthPayrollAudit',
+  'getPayrollCycleState',
   'checkRegieBillingRisk'
 ]);
 
@@ -628,15 +640,15 @@ async function refreshReadCacheInBackground(action, body, cacheKey) {
 }
 
 const CACHE_GROUPS = {
-  employee: ['getEmployees','getEmployeeAdminData','getVacationAccount','getVacationAccounts','getTimeBankAccount','getAbsences','getAbsenceOverview','getPlannerWorkers','getDashboardSummary51'],
-  time: ['getDayData','getMonthData','getBossMonthData','getBossDayClosures','getRegieReports','getAbsences','getAbsenceOverview','getVacationAccount','getVacationAccounts','getTimeBankAccount','getDashboardSummary51'],
+  employee: ['getEmployees','getEmployeeAdminData','getVacationAccount','getVacationAccounts','getTimeBankAccount','getAbsences','getAbsenceOverview','getSicknessAlerts','getMonthPayrollAudit','getPayrollCycleState','getPlannerWorkers','getDashboardSummary51'],
+  time: ['getDayData','getWeekData','getMonthData','getBossMonthData','getBossDayClosures','getRegieReports','getRegieAttachments','getAbsences','getAbsenceOverview','getSicknessAlerts','getVacationAccount','getVacationAccounts','getTimeBankAccount','getMonthPayrollAudit','getPayrollCycleState','getDashboardSummary51'],
   offers: ['getOfferReports','getOfferReminders','getOfferStatistics','getOwnReminders','getDashboardSummary51'],
   inquiries: ['getCustomerInquiries','getInquiryReminders','getOwnReminders','getDashboardSummary51'],
-  maintenance: ['getMaintenanceOverview','getMaintenanceContracts','getMaintenanceArchive','getMaintenanceCustomer','getDashboardSummary51'],
+  maintenance: ['getMaintenanceOverview','getMaintenanceContracts','getMaintenanceArchive','getMaintenanceCustomer','getMaintenanceAttachment','searchMaintenanceCustomers','findMaintenanceDeviceByInternalId','getDashboardSummary51'],
   planner: ['getPlannerWorkers','getPlannerAvailability','getPlannerEvents'],
   calendar: ['getEmployeeCalendarEvents'],
   manualOrders: ['getManualOrders','getDashboardSummary51'],
-  objects: ['getObjectReports','checkRegieBillingRisk','getRegieReports','getDashboardSummary51']
+  objects: ['getObjectReports','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getRegieReports','getRegieAttachments','getDashboardSummary51']
 };
 
 function cacheActionsForWrite(action) {
