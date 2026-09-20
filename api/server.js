@@ -315,6 +315,21 @@ CREATE TABLE IF NOT EXISTS time_bank_shadow (
 CREATE INDEX IF NOT EXISTS time_bank_shadow_employee_idx
   ON time_bank_shadow(employee_name);
 
+CREATE TABLE IF NOT EXISTS monthly_adjustments_shadow (
+  id TEXT PRIMARY KEY,
+  employee_name TEXT NOT NULL,
+  adjustment_year INTEGER NOT NULL,
+  adjustment_month INTEGER NOT NULL,
+  hours NUMERIC(10,2) NOT NULL DEFAULT 0,
+  reason TEXT,
+  created_at_text TEXT,
+  created_by TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS monthly_adjustments_shadow_period_idx
+  ON monthly_adjustments_shadow(adjustment_year,adjustment_month,employee_name);
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
@@ -366,6 +381,7 @@ async function initDb() {
   await initAbsencesShadow();
   await initVacationEntitlementsShadow();
   await initTimeBankShadow();
+  await initMonthlyAdjustmentsShadow();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -971,6 +987,88 @@ function shadowActive(raw){
 
 
 
+
+
+async function initMonthlyAdjustmentsShadow(){
+  if(!pool)return;
+  const existing=await pool.query('SELECT COUNT(*)::int AS n FROM monthly_adjustments_shadow');
+  if((existing.rows[0]?.n||0)>0)return;
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:Stundenkorrekturen']
+  );
+  let inserted=0;
+  for(const row of q.rows){
+    const payload=row.payload||{};
+    if(Number(payload.sourceRow||row.source_key)<=1)continue;
+    const cells=Array.isArray(payload.cells)?payload.cells:[];
+    const id=textCell(cells,0).trim();if(!id)continue;
+    await pool.query(
+      `INSERT INTO monthly_adjustments_shadow(
+        id,employee_name,adjustment_year,adjustment_month,hours,reason,created_at_text,created_by
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+      ON CONFLICT(id) DO NOTHING`,
+      [id,textCell(cells,1),Number(textCell(cells,2))||0,Number(textCell(cells,3))||0,
+       Number(textCell(cells,4))||0,textCell(cells,5),textCell(cells,6),textCell(cells,7)]
+    );
+    inserted++;
+  }
+  console.log('SHADOW monthly_adjustments initialized rows='+inserted);
+}
+
+async function mirrorMonthlyAdjustmentWrite(action,body,parsed){
+  if(!pool)return;
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if(!data||data.ok===false)return;
+  if(action==='saveMonthlyAdjustment'){
+    const id=String(data.id||'').trim();if(!id)return;
+    await pool.query(
+      `INSERT INTO monthly_adjustments_shadow(
+        id,employee_name,adjustment_year,adjustment_month,hours,reason,created_at_text,created_by,shadow_updated_at
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,now())
+      ON CONFLICT(id) DO UPDATE SET
+        employee_name=EXCLUDED.employee_name,adjustment_year=EXCLUDED.adjustment_year,
+        adjustment_month=EXCLUDED.adjustment_month,hours=EXCLUDED.hours,reason=EXCLUDED.reason,
+        created_at_text=EXCLUDED.created_at_text,created_by=EXCLUDED.created_by,shadow_updated_at=now()`,
+      [id,String(body.targetEmployee||''),Number(body.year)||0,Number(body.month)||0,
+       Number(data.hours!==undefined?data.hours:body.hours)||0,String(body.reason||''),
+       new Date().toISOString(),String(body.employee||'')]
+    );
+  }else if(action==='deleteMonthlyAdjustment'){
+    await pool.query('DELETE FROM monthly_adjustments_shadow WHERE id=$1',[String(body.adjustmentId||'')]);
+  }
+}
+
+async function verifyMonthlyAdjustmentsShadow(rows,year,month){
+  if(!pool||!Array.isArray(rows))return;
+  year=Number(year)||0;month=Number(month)||0;
+  if(!year||!month)return;
+  const q=await pool.query(
+    `SELECT id,employee_name,hours,reason,created_by
+       FROM monthly_adjustments_shadow
+      WHERE adjustment_year=$1 AND adjustment_month=$2`,
+    [year,month]
+  );
+  const pg=new Map(q.rows.map(r=>[String(r.id),r]));
+  let mismatches=0;const seen=new Set();let googleCount=0;
+  for(const row of rows){
+    for(const a of (Array.isArray(row.adjustments)?row.adjustments:[])){
+      googleCount++;
+      const id=normalizeShadowText(a&&a.id);if(!id){mismatches++;continue;}
+      seen.add(id);const p=pg.get(id);if(!p){mismatches++;continue;}
+      const same=
+        normalizeShadowText(row.employee)===normalizeShadowText(p.employee_name) &&
+        Math.abs(Number(a.hours||0)-Number(p.hours||0))<0.01 &&
+        normalizeShadowText(a.reason)===normalizeShadowText(p.reason) &&
+        normalizeShadowText(a.createdBy)===normalizeShadowText(p.created_by);
+      if(!same)mismatches++;
+    }
+  }
+  for(const id of pg.keys())if(!seen.has(id))mismatches++;
+  console.log('SHADOW_VERIFY monthly_adjustments google='+googleCount+' postgres='+pg.size+' mismatches='+mismatches);
+  await saveShadowVerifyStat('monthly_adjustments',googleCount,pg.size,mismatches);
+}
 
 async function initTimeBankShadow(){
   if(!pool)return;
@@ -2076,6 +2174,7 @@ async function proxyLegacy(req, res, body) {
             .then(()=>verifyTimeBankShadow(verifyData))
             .catch(e=>console.error('time bank shadow refresh failed',e.message));
         }
+        if (action==='getBossMonthData') verifyMonthlyAdjustmentsShadow(verifyData,body.year,body.month).catch(e=>console.error('monthly adjustment shadow verify failed',e.message));
       }
       if (isCacheableAction(action)) {
         writeCachedResponse(action, body, raw, upstream.status).catch(e=>console.error('response cache write failed',e.message));
@@ -2117,6 +2216,10 @@ async function proxyLegacy(req, res, body) {
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false && action==='saveVacationEntitlement') {
         mirrorVacationEntitlementWrite(body,parsed).catch(e=>console.error('vacation entitlement shadow mirror failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false &&
+          ['saveMonthlyAdjustment','deleteMonthlyAdjustment'].includes(action)) {
+        mirrorMonthlyAdjustmentWrite(action,body,parsed).catch(e=>console.error('monthly adjustment shadow mirror failed',e.message));
       }
       pool.query(
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
@@ -2202,7 +2305,8 @@ async function health() {
         pool.query('SELECT COUNT(*)::int AS n FROM maintenance_manual_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM absences_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM vacation_entitlements_shadow'),
-        pool.query('SELECT COUNT(*)::int AS n FROM time_bank_shadow')
+        pool.query('SELECT COUNT(*)::int AS n FROM time_bank_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM monthly_adjustments_shadow')
       ]);
       shadowCounts = {
         manualOrders: counts[0].rows[0]?.n||0,
@@ -2217,7 +2321,8 @@ async function health() {
         maintenanceManual: counts[9].rows[0]?.n||0,
         absences: counts[10].rows[0]?.n||0,
         vacationEntitlements: counts[11].rows[0]?.n||0,
-        timeBank: counts[12].rows[0]?.n||0
+        timeBank: counts[12].rows[0]?.n||0,
+        monthlyAdjustments: counts[13].rows[0]?.n||0
       };
       const verifyQ=await pool.query(
         'SELECT shadow_name,google_count,postgres_count,mismatches,checked_at FROM shadow_verify_stats ORDER BY shadow_name'
@@ -2256,6 +2361,7 @@ async function health() {
     absencesShadow: pool ? 'enabled' : 'disabled',
     vacationEntitlementsShadow: pool ? 'enabled' : 'disabled',
     timeBankShadow: pool ? 'enabled' : 'disabled',
+    monthlyAdjustmentsShadow: pool ? 'enabled' : 'disabled',
     shadowCounts,
     shadowVerify,
     writeStats
@@ -2386,7 +2492,7 @@ initDb()
     console.log('MIGRATION VERIFY: sheets='+sheets.length+' sourceRows='+sourceRows+' importedRows='+importedRows+' mismatches='+mismatches.length+(mismatches.length?' ['+mismatches.join(', ')+']':''));
     const h = await health();
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
-    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank);
+    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments);
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
   })
