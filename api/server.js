@@ -3679,6 +3679,169 @@ async function directTimeBankAccountRead(body){
 }
 
 
+
+async function postgresMaintenanceCustomerFull(id){
+  id=String(id||'').trim();if(!id)return null;
+  const cq=await pool.query(
+    `SELECT id,name,billing_street,billing_zip,billing_city,email,phone
+       FROM maintenance_customers_shadow WHERE id=$1 AND active=true`,
+    [id]
+  );
+  if(!cq.rowCount)return null;
+  const cst=cq.rows[0];
+  const [oq,dq,rq,aq,hq]=await Promise.all([
+    pool.query(
+      `SELECT id,name,street,zip,city,notes
+         FROM maintenance_objects_shadow WHERE customer_id=$1 AND active=true`,
+      [id]
+    ),
+    pool.query(
+      `SELECT id,object_id,customer_id,device_type,other_description,manufacturer,model,
+              serial_number,year_text,tenant_name,tenant_phone,tenant_email,
+              spare_part_manufacturer,spare_part_serial_number,internal_notes,
+              next_maintenance_due,active,created_at_text,updated_at_text,updated_by,internal_device_id
+         FROM maintenance_devices_shadow WHERE customer_id=$1 AND active=true`,
+      [id]
+    ),
+    pool.query(
+      `SELECT id,device_id,customer_id,object_id,repair_date,description,created_at_text,created_by
+         FROM maintenance_repairs_shadow WHERE customer_id=$1`,
+      [id]
+    ),
+    pool.query(
+      `SELECT id,device_id,customer_id,object_id,kind,name,mime,file_size,url,
+              created_at_text,created_by
+         FROM maintenance_attachments_shadow WHERE customer_id=$1 AND active=true`,
+      [id]
+    ),
+    pool.query(
+      `SELECT id,employee_name,entry_date,activity,hours,next_maintenance_due,maintenance_device_id
+         FROM time_entries_shadow
+        WHERE maintenance=true AND maintenance_customer_id=$1 AND COALESCE(maintenance_device_id,'')<>''`,
+      [id]
+    )
+  ]);
+  const repairsByDevice=new Map(),attachmentsByDevice=new Map(),historyByDevice=new Map(),devicesByObject=new Map();
+  for(const r of rq.rows){
+    const k=String(r.device_id||'');
+    if(!repairsByDevice.has(k))repairsByDevice.set(k,[]);
+    repairsByDevice.get(k).push({
+      id:String(r.id||''),deviceId:k,customerId:String(r.customer_id||''),
+      objectId:String(r.object_id||''),date:berlinDateOnly(r.repair_date),
+      description:String(r.description||''),createdAt:berlinDateTime(r.created_at_text),
+      createdBy:String(r.created_by||'')
+    });
+  }
+  for(const a of aq.rows){
+    const k=String(a.device_id||'');
+    if(!attachmentsByDevice.has(k))attachmentsByDevice.set(k,[]);
+    attachmentsByDevice.get(k).push({
+      id:String(a.id||''),kind:String(a.kind||''),name:String(a.name||''),
+      mime:String(a.mime||''),size:Number(a.file_size||0),url:String(a.url||''),
+      createdAt:berlinDateTime(a.created_at_text),createdBy:String(a.created_by||'')
+    });
+  }
+  for(const h of hq.rows){
+    const k=String(h.maintenance_device_id||'');
+    if(!historyByDevice.has(k))historyByDevice.set(k,[]);
+    historyByDevice.get(k).push({
+      id:String(h.id||''),date:berlinDateOnly(h.entry_date),employee:String(h.employee_name||''),
+      description:String(h.activity||''),hours:Number(h.hours||0),
+      nextMaintenanceDue:String(h.next_maintenance_due||'')
+    });
+  }
+  for(const arr of repairsByDevice.values())arr.sort((a,b)=>b.date.localeCompare(a.date));
+  for(const arr of historyByDevice.values())arr.sort((a,b)=>b.date.localeCompare(a.date));
+
+  for(const d of dq.rows){
+    const obj=String(d.object_id||'');
+    if(!devicesByObject.has(obj))devicesByObject.set(obj,[]);
+    devicesByObject.get(obj).push({
+      id:String(d.id||''),objectId:obj,customerId:String(d.customer_id||''),
+      deviceType:String(d.device_type||''),otherDescription:String(d.other_description||''),
+      manufacturer:String(d.manufacturer||''),model:String(d.model||''),
+      serialNumber:String(d.serial_number||''),year:String(d.year_text||''),
+      tenantName:String(d.tenant_name||''),tenantPhone:String(d.tenant_phone||''),
+      tenantEmail:String(d.tenant_email||''),sparePartManufacturer:String(d.spare_part_manufacturer||''),
+      sparePartSerialNumber:String(d.spare_part_serial_number||''),internalNotes:String(d.internal_notes||''),
+      nextMaintenanceDue:String(d.next_maintenance_due||''),active:Boolean(d.active),
+      createdAt:berlinDateTime(d.created_at_text),updatedAt:berlinDateTime(d.updated_at_text),
+      updatedBy:String(d.updated_by||''),internalDeviceId:String(d.internal_device_id||''),
+      repairs:repairsByDevice.get(String(d.id))||[],
+      history:historyByDevice.get(String(d.id))||[],
+      attachments:attachmentsByDevice.get(String(d.id))||[]
+    });
+  }
+
+  return {
+    id:String(cst.id||''),name:String(cst.name||''),billingStreet:String(cst.billing_street||''),
+    billingZip:String(cst.billing_zip||''),billingCity:String(cst.billing_city||''),
+    email:String(cst.email||''),phone:String(cst.phone||''),
+    objects:oq.rows.map(o=>({
+      id:String(o.id||''),name:String(o.name||''),street:String(o.street||''),
+      zip:String(o.zip||''),city:String(o.city||''),notes:String(o.notes||''),
+      devices:devicesByObject.get(String(o.id))||[]
+    }))
+  };
+}
+
+function canonicalMaintenanceCustomer(data){
+  if(!data)return null;
+  return {
+    id:String(data.id||''),name:String(data.name||''),billingStreet:String(data.billingStreet||''),
+    billingZip:String(data.billingZip||''),billingCity:String(data.billingCity||''),
+    email:String(data.email||''),phone:String(data.phone||''),
+    objects:(Array.isArray(data.objects)?data.objects:[]).map(o=>({
+      id:String(o.id||''),name:String(o.name||''),street:String(o.street||''),
+      zip:String(o.zip||''),city:String(o.city||''),notes:String(o.notes||''),
+      devices:(Array.isArray(o.devices)?o.devices:[]).map(d=>({
+        id:String(d.id||''),objectId:String(d.objectId||''),customerId:String(d.customerId||''),
+        deviceType:String(d.deviceType||''),otherDescription:String(d.otherDescription||''),
+        manufacturer:String(d.manufacturer||''),model:String(d.model||''),
+        serialNumber:String(d.serialNumber||''),year:String(d.year||''),
+        tenantName:String(d.tenantName||''),tenantPhone:String(d.tenantPhone||''),
+        tenantEmail:String(d.tenantEmail||''),sparePartManufacturer:String(d.sparePartManufacturer||''),
+        sparePartSerialNumber:String(d.sparePartSerialNumber||''),internalNotes:String(d.internalNotes||''),
+        nextMaintenanceDue:String(d.nextMaintenanceDue||''),active:Boolean(d.active!==false),
+        updatedBy:String(d.updatedBy||''),internalDeviceId:String(d.internalDeviceId||''),
+        repairs:(Array.isArray(d.repairs)?d.repairs:[]).map(r=>({
+          id:String(r.id||''),deviceId:String(r.deviceId||''),customerId:String(r.customerId||''),
+          objectId:String(r.objectId||''),date:berlinDateOnly(r.date),
+          description:String(r.description||''),createdBy:String(r.createdBy||'')
+        })).sort((a,b)=>b.date.localeCompare(a.date)||a.id.localeCompare(b.id)),
+        history:(Array.isArray(d.history)?d.history:[]).map(h=>({
+          id:String(h.id||''),date:berlinDateOnly(h.date),employee:String(h.employee||''),
+          description:String(h.description||''),hours:Number(h.hours||0),
+          nextMaintenanceDue:String(h.nextMaintenanceDue||'')
+        })).sort((a,b)=>b.date.localeCompare(a.date)||a.id.localeCompare(b.id)),
+        attachments:(Array.isArray(d.attachments)?d.attachments:[]).map(a=>({
+          id:String(a.id||''),kind:String(a.kind||''),name:String(a.name||''),
+          mime:String(a.mime||''),size:Number(a.size||0),url:String(a.url||''),
+          createdBy:String(a.createdBy||'')
+        })).sort((a,b)=>a.id.localeCompare(b.id))
+      })).sort((a,b)=>a.id.localeCompare(b.id))
+    })).sort((a,b)=>a.id.localeCompare(b.id))
+  };
+}
+
+async function verifyMaintenanceCustomerFullShadow(data){
+  if(!pool||!data||!data.id)return;
+  const pg=await postgresMaintenanceCustomerFull(data.id);
+  const a=canonicalMaintenanceCustomer(data),b=canonicalMaintenanceCustomer(pg);
+  const mismatches=JSON.stringify(a)===JSON.stringify(b)?0:1;
+  const deviceCount=(a?.objects||[]).reduce((s,o)=>s+(o.devices||[]).length,0);
+  console.log('SHADOW_VERIFY maintenance_customer_full id='+String(data.id)+' mismatches='+mismatches);
+  await saveShadowVerifyStat('maintenance_customer_full:'+String(data.id),deviceCount,deviceCount,mismatches);
+}
+
+async function directMaintenanceCustomerRead(body){
+  const session=await localSessionForBody(body,true);
+  if(!session)return null;
+  const id=String(body.id||'').trim();if(!id)return null;
+  if(!(await shadowReadyForDirectRead('maintenance_customer_full:'+id)))return null;
+  return postgresMaintenanceCustomerFull(id);
+}
+
 function maintenanceSearchKey(q){
   return 'maintenance_search:'+crypto.createHash('sha256').update(String(q||'').trim().toLowerCase()).digest('hex').slice(0,16);
 }
@@ -3861,6 +4024,7 @@ async function tryDirectPostgresRead(action,body){
   if(action==='getPlannerWorkers')return directPlannerWorkersRead(body);
   if(action==='getAbsences')return directAbsencesRead(body);
   if(action==='searchMaintenanceCustomers')return directMaintenanceSearchRead(body);
+  if(action==='getMaintenanceCustomer')return directMaintenanceCustomerRead(body);
   if(action==='getTimeBankAccount')return directTimeBankAccountRead(body);
   if(action==='getMyTimeBank')return directMyTimeBankRead(body);
   if(action==='getVacationAccount')return directVacationAccountRead(body);
@@ -3909,7 +4073,7 @@ async function proxyLegacy(req, res, body) {
       console.error('Postgres employee read failed; falling back to Google:', e.message);
     }
   }
-  if (['getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getAbsences','searchMaintenanceCustomers','getTimeBankAccount','getMyTimeBank','getVacationAccount','getVacationAccounts'].includes(action)) {
+  if (['getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getAbsences','searchMaintenanceCustomers','getMaintenanceCustomer','getTimeBankAccount','getMyTimeBank','getVacationAccount','getVacationAccounts'].includes(action)) {
     try {
       const direct=await tryDirectPostgresRead(action,body);
       if (direct!==null) {
@@ -3962,6 +4126,7 @@ async function proxyLegacy(req, res, body) {
             .then(()=>verifyMaintenanceAttachmentsFromCustomer(verifyData))
             .catch(e=>console.error('maintenance attachment shadow refresh failed',e.message));
           verifyMaintenanceCustomerShadow(verifyData).catch(e=>console.error('maintenance customer shadow verify failed',e.message));
+          verifyMaintenanceCustomerFullShadow(verifyData).catch(e=>console.error('maintenance customer full shadow verify failed',e.message));
         }
         if (action==='searchMaintenanceCustomers') verifyMaintenanceSearchShadow(verifyData,body.q).catch(e=>console.error('maintenance search shadow verify failed',e.message));
         if (action==='getAbsences') verifyAbsencesShadow(verifyData).catch(e=>console.error('absence shadow verify failed',e.message));
@@ -4236,6 +4401,9 @@ async function health() {
         maintenanceSearchVerifiedQueries:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'maintenance_search:%' AND mismatches=0"
         )).rows[0]?.n||0,
+        maintenanceCustomersVerified:(await pool.query(
+          "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'maintenance_customer_full:%' AND mismatches=0"
+        )).rows[0]?.n||0,
         vacationVerifiedKeys:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'vacation_full:%' AND mismatches=0"
         )).rows[0]?.n||0,
@@ -4415,7 +4583,7 @@ initDb()
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
     if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' maintenance_attachments='+h.shadowCounts.maintenanceAttachments+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus+' day_closures='+h.shadowCounts.dayClosures+' time_entries='+h.shadowCounts.timeEntries+' objects='+h.shadowCounts.objects+' regie_merges='+h.shadowCounts.regieMerges+' object_notes='+h.shadowCounts.objectNotes);
     console.log('RAILWAY_SESSIONS active='+Number(h.activeRailwaySessions||0));
-    if(h.directReadReady)console.log('DIRECT_READ_READY manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders)+' offer_reminders='+Boolean(h.directReadReady.offerReminders)+' planner_workers='+Boolean(h.directReadReady.plannerWorkers)+' absences='+Boolean(h.directReadReady.absences)+' maintenance_search_queries='+Number(h.directReadReady.maintenanceSearchVerifiedQueries||0)+' vacation_keys='+Number(h.directReadReady.vacationVerifiedKeys||0)+' timebank_employees='+Number(h.directReadReady.timeBankVerifiedEmployees||0)+' my_timebank_employees='+Number(h.directReadReady.myTimeBankVerifiedEmployees||0));
+    if(h.directReadReady)console.log('DIRECT_READ_READY manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders)+' offer_reminders='+Boolean(h.directReadReady.offerReminders)+' planner_workers='+Boolean(h.directReadReady.plannerWorkers)+' absences='+Boolean(h.directReadReady.absences)+' maintenance_search_queries='+Number(h.directReadReady.maintenanceSearchVerifiedQueries||0)+' maintenance_customers='+Number(h.directReadReady.maintenanceCustomersVerified||0)+' vacation_keys='+Number(h.directReadReady.vacationVerifiedKeys||0)+' timebank_employees='+Number(h.directReadReady.timeBankVerifiedEmployees||0)+' my_timebank_employees='+Number(h.directReadReady.myTimeBankVerifiedEmployees||0));
     if(Array.isArray(h.shadowReadiness)&&h.shadowReadiness.length)console.log('SHADOW_READINESS '+h.shadowReadiness.map(x=>x.shadowName+'='+x.status+'('+x.mismatches+')').join(' | '));
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
