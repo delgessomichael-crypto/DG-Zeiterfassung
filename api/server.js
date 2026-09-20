@@ -5404,7 +5404,7 @@ async function mirrorInquiryOfferWrite(action,body,parsed){
       [id,String(body.id||''),String(body.customer||''),String(body.phone||''),String(body.employee||'')]
     );
   }else if(['setRegieReportsOfferStatus','saveOfferCreatedWithReminder','moveOfferBackToCreate',
-             'declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning'].includes(action)){
+             'declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently'].includes(action)){
     const offerId=String(data.offerId||body.offerId||'').trim();if(!offerId)return;
     let status='';
     if(action==='setRegieReportsOfferStatus'){
@@ -5415,6 +5415,7 @@ async function mirrorInquiryOfferWrite(action,body,parsed){
     else if(action==='moveOfferBackToCreate')status='Zu erstellen';
     else if(action==='declineOfferFromReminder')status='Abgelehnt';
     else if(action==='acceptOfferFromReminder'||action==='acceptOfferAsRunning')status='Laufend';
+    else if(action==='discardOfferPermanently')status='Verworfen';
     if(status){
       await pool.query(
         `UPDATE inquiry_offers_shadow SET status=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now()
@@ -7142,7 +7143,8 @@ async function proxyLegacy(req, res, body) {
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['createInspectionOffer','inquiryToOffer','setRegieReportsOfferStatus','saveOfferCreatedWithReminder',
-           'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning'].includes(action)) {
+           'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning',
+           'discardOfferPermanently'].includes(action)) {
         mirrorInquiryOfferWrite(action,body,parsed).catch(e=>console.error('inquiry offer shadow mirror failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false && action==='createInspectionOffer') {
