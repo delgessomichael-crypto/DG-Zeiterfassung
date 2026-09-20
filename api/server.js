@@ -1324,22 +1324,153 @@ async function mirrorTimeEntryWrite(action,body,parsed){
   if(!pool)return;
   const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
   if(!data||data.ok===false)return;
+
   if(['saveEntry','deleteEntry','updateEmployeeEntry'].includes(action) && Array.isArray(data.entries)){
     await syncTimeEntriesFromDayRead(body,data);
-  }else if(action==='updateBossDayEntry'){
+    return;
+  }
+
+  if(action==='updateBossDayEntry'){
     await pool.query(
       `UPDATE time_entries_shadow SET start_time=$2,end_time=$3,hours=$4,shadow_updated_at=now() WHERE id=$1`,
       [String(data.entryId||body.entryId||''),String(data.start||body.start||''),
        String(data.end||body.end||''),Number(data.hours||0)]
     );
-  }else if(action==='deleteBossDayEntry'){
+    return;
+  }
+
+  if(action==='deleteBossDayEntry'){
     const id=String(body.entryId||'');
     if(id && !id.startsWith('assigned:'))await pool.query('DELETE FROM time_entries_shadow WHERE id=$1',[id]);
-  }else if(action==='markRegieReportBilled'){
+    return;
+  }
+
+  if(action==='markRegieReportBilled'){
     await pool.query(
       `UPDATE time_entries_shadow SET billing_status='Abgerechnet',billed_at_text=$2,billed_by=$3,shadow_updated_at=now() WHERE id=$1`,
       [String(data.id||body.entryId||''),String(data.billedAt||''),String(data.billedBy||body.employee||'')]
     );
+    return;
+  }
+
+  if(action==='updateRegieReport'){
+    const item=body.item||{};
+    await pool.query(
+      `UPDATE time_entries_shadow SET
+        entry_date=$2,customer=$3,start_time=$4,end_time=$5,hours=$6,activity=$7,
+        material_used=$8,material=$9,object_id=$10,job_status=$11,shadow_updated_at=now()
+        WHERE id=$1`,
+      [String(data.id||body.entryId||''),String(item.date||''),String(item.customer||''),
+       String(item.start||''),String(item.end||''),Number(data.hours||0),String(item.activity||''),
+       Boolean(item.materialUsed),String(item.materialUsed?item.material||'':''),
+       String(data.objectId||''),String(data.jobStatus||item.jobStatus||'Abgeschlossen')]
+    );
+    return;
+  }
+
+  if(action==='markRegieObjectsBilled'){
+    const ids=Array.isArray(data.objectIds)?data.objectIds.map(String):[];
+    if(ids.length){
+      await pool.query(
+        `UPDATE time_entries_shadow SET
+          billing_status='Abgerechnet',billed_at_text=$2,billed_by=$3,shadow_updated_at=now()
+          WHERE object_id = ANY($1::text[]) AND COALESCE(billing_status,'Offen')='Offen'`,
+        [ids,String(data.billedAt||''),String(data.billedBy||body.employee||'')]
+      );
+    }
+    return;
+  }
+
+  if(action==='setRegieObjectJobStatus'){
+    const ids=Array.isArray(data.objectIds)?data.objectIds.map(String):
+      [String(data.objectId||body.objectId||'')].filter(Boolean);
+    if(ids.length){
+      await pool.query(
+        `UPDATE time_entries_shadow SET job_status=$2,shadow_updated_at=now()
+          WHERE object_id = ANY($1::text[]) AND COALESCE(billing_status,'Offen')='Offen'`,
+        [ids,String(data.jobStatus||body.jobStatus||'Abgeschlossen')]
+      );
+    }
+    return;
+  }
+
+  if(action==='setRegieReportsOfferStatus'){
+    const status=String(data.status||body.offerStatus||'');
+    const offerId=String(data.offerId||body.offerId||'');
+    const by=String(data.changedBy||body.employee||'');
+    const at=String(data.changedAt||'');
+    const entryIds=Array.isArray(body.entryIds)?body.entryIds.map(String).filter(Boolean):[];
+    if(entryIds.length){
+      await pool.query(
+        `UPDATE time_entries_shadow SET
+          job_status=$2,offer_id=$3,offer_changed_at_text=$4,offer_changed_by=$5,shadow_updated_at=now()
+          WHERE id = ANY($1::text[]) AND COALESCE(billing_status,'Offen')='Offen'`,
+        [entryIds,status,offerId,at,by]
+      );
+    }else if(body.offerId){
+      await pool.query(
+        `UPDATE time_entries_shadow SET
+          job_status=$2,offer_id=$1,offer_changed_at_text=$3,offer_changed_by=$4,shadow_updated_at=now()
+          WHERE offer_id=$1 AND COALESCE(billing_status,'Offen')='Offen'`,
+        [String(body.offerId),status,at,by]
+      );
+    }
+    return;
+  }
+
+  if(action==='moveOfferBackToCreate'){
+    const offerId=String(body.offerId||data.offerId||'');
+    if(offerId){
+      await pool.query(
+        `UPDATE time_entries_shadow SET
+          job_status='Angebot zu erstellen',offer_changed_at_text=now()::text,
+          offer_changed_by=$2,shadow_updated_at=now()
+          WHERE offer_id=$1 AND COALESCE(billing_status,'Offen')='Offen'`,
+        [offerId,String(body.employee||'')]
+      );
+    }
+    return;
+  }
+
+  if(action==='saveOfferCreatedWithReminder'){
+    const offerId=String(body.offerId||data.offerId||'');
+    if(offerId){
+      await pool.query(
+        `UPDATE time_entries_shadow SET
+          job_status='Offenes Angebot',offer_id=$1,offer_changed_at_text=now()::text,
+          offer_changed_by=$2,shadow_updated_at=now()
+          WHERE offer_id=$1 AND COALESCE(billing_status,'Offen')='Offen'`,
+        [offerId,String(body.employee||'')]
+      );
+    }
+    return;
+  }
+
+  if(action==='acceptOfferAsRunning'){
+    const offerId=String(body.offerId||'');
+    if(offerId){
+      await pool.query(
+        `UPDATE time_entries_shadow SET
+          job_status='Laufend',offer_id='',offer_changed_at_text='',offer_changed_by='',
+          shadow_updated_at=now()
+          WHERE offer_id=$1 AND COALESCE(billing_status,'Offen')='Offen'`,
+        [offerId]
+      );
+    }
+    return;
+  }
+
+  if(action==='discardOfferPermanently'){
+    const offerId=String(body.offerId||'');
+    if(offerId){
+      await pool.query(
+        `UPDATE time_entries_shadow SET
+          job_status='Verworfen',offer_id='',offer_changed_at_text='',offer_changed_by='',
+          shadow_updated_at=now()
+          WHERE offer_id=$1`,
+        [offerId]
+      );
+    }
   }
 }
 
@@ -3083,7 +3214,9 @@ async function proxyLegacy(req, res, body) {
         mirrorDayClosureWrite(action,body,parsed).catch(e=>console.error('day closure shadow mirror failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
-          ['saveEntry','deleteEntry','updateEmployeeEntry','updateBossDayEntry','deleteBossDayEntry','markRegieReportBilled'].includes(action)) {
+          ['saveEntry','deleteEntry','updateEmployeeEntry','updateBossDayEntry','deleteBossDayEntry','markRegieReportBilled',
+           'updateRegieReport','markRegieObjectsBilled','setRegieObjectJobStatus','setRegieReportsOfferStatus',
+           'moveOfferBackToCreate','saveOfferCreatedWithReminder','acceptOfferAsRunning','discardOfferPermanently'].includes(action)) {
         mirrorTimeEntryWrite(action,body,parsed).catch(e=>console.error('time entries shadow mirror failed',e.message));
       }
       pool.query(
