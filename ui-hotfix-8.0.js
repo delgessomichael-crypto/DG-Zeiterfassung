@@ -2744,3 +2744,162 @@ function install(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
+
+
+/* DG Zeiterfassung 8.0 - UI Hotfix 26
+   Manuell ausgefuehrte Wartung: Kundendaten, Geraetestandort und naechste Wartung
+   werden in einem Arbeitsgang angelegt. */
+(function(){
+'use strict';
+const V='8.0-ui26';
+const q=id=>document.getElementById(id);
+function val(v){return String(v==null?'':v).trim();}
+function addSection(fieldId,title,text){
+  const input=q(fieldId);if(!input)return;
+  const label=input.previousElementSibling;
+  const h=document.createElement('div');h.className='dg26-form-section';
+  h.innerHTML='<strong>'+title+'</strong>'+(text?'<small>'+text+'</small>':'');
+  (label||input).parentNode.insertBefore(h,label||input);
+}
+function enhance(){
+  const modal=q('d3FormModal');if(!modal)return;
+  modal.classList.add('dg26-maint-modal');
+  addSection('d3Field-date','1. Ausgeführte Wartung','Diese Wartung wird als eine ausgeführte Wartung gezählt.');
+  addSection('d3Field-customer','2. Kundendaten','Der Kunde wird gleichzeitig als Wartungskunde angelegt.');
+  addSection('d3Field-locationName','3. Standort des Gerätes','Hier den tatsächlichen Standort der gewarteten Anlage eintragen.');
+  addSection('d3Field-nextMaintenance','4. Nächste Wartung','Die nächste Fälligkeit erscheint anschließend automatisch in der Wartungsübersicht.');
+  const loc=q('d3Field-locationStreet');
+  if(loc&&!q('dg26CopyAddress')){
+    const b=document.createElement('button');b.type='button';b.id='dg26CopyAddress';b.className='btn secondary dg26-copy';
+    b.textContent='Rechnungsadresse als Gerätestandort übernehmen';
+    b.addEventListener('click',()=>{
+      [['customerStreet','locationStreet'],['customerZip','locationZip'],['customerCity','locationCity']].forEach(([a,z])=>{
+        const s=q('d3Field-'+a),d=q('d3Field-'+z);if(s&&d)d.value=s.value;
+      });
+    });
+    const lab=loc.previousElementSibling;(lab||loc).parentNode.insertBefore(b,lab||loc);
+  }
+}
+function clearCaches(){
+  try{if(window.DG51&&DG51.readCache&&typeof DG51.readCache.clear==='function')DG51.readCache.clear();}catch(_e){}
+  try{if(window.DG3&&DG3.reads&&typeof DG3.reads.clear==='function')DG3.reads.clear();}catch(_e){}
+  try{if(window.DG38){DG38.loaded=false;DG38.overview=null;}}catch(_e){}
+  try{if(window.DG37)DG37.overview=null;}catch(_e){}
+}
+async function refresh(){
+  clearCaches();
+  if(typeof window.d38RefreshMaintenance==='function'){await window.d38RefreshMaintenance();return;}
+  if(typeof window.d37LoadMaintenanceOverview==='function')await window.d37LoadMaintenanceOverview();
+}
+window.d505AddManualMaintenance=function(){
+  const today=typeof window.localDate==='function'?window.localDate():new Date().toISOString().slice(0,10);
+  const n=new Date();n.setFullYear(n.getFullYear()+1);const due=n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0');
+  if(typeof window.d3Form!=='function')return false;
+  window.d3Form('Ausgeführte Wartung erfassen & nächste Wartung anlegen',[
+    {name:'date',label:'Datum der ausgeführten Wartung',type:'date',required:true},
+    {name:'note',label:'Vermerk zur ausgeführten Wartung (optional)',type:'textarea'},
+    {name:'customer',label:'Kunde / Firma',required:true},
+    {name:'customerStreet',label:'Straße / Hausnummer',required:true},
+    {name:'customerZip',label:'PLZ',required:true},
+    {name:'customerCity',label:'Ort',required:true},
+    {name:'phone',label:'Telefon (optional)'},
+    {name:'email',label:'E-Mail (optional)',type:'email'},
+    {name:'locationName',label:'Standort / Objektbezeichnung (optional)'},
+    {name:'locationStreet',label:'Straße / Hausnummer',required:true},
+    {name:'locationZip',label:'PLZ',required:true},
+    {name:'locationCity',label:'Ort',required:true},
+    {name:'device',label:'Gerät / Anlage (optional)'},
+    {name:'nextMaintenance',label:'Nächste Wartung – Monat / Jahr',type:'month',required:true}
+  ],{date:today,note:'',customer:'',customerStreet:'',customerZip:'',customerCity:'',phone:'',email:'',locationName:'',locationStreet:'',locationZip:'',locationCity:'',device:'',nextMaintenance:due},async v=>{
+    const customer=val(v.customer),street=val(v.customerStreet),zip=val(v.customerZip),city=val(v.customerCity);
+    const ls=val(v.locationStreet),lz=val(v.locationZip),lc=val(v.locationCity),next=val(v.nextMaintenance);
+    if(!customer||!street||!zip||!city)throw new Error('Bitte die Kundendaten vollständig eintragen.');
+    if(!ls||!lz||!lc)throw new Error('Bitte den Standort des Gerätes vollständig eintragen.');
+    if(!/^\d{4}-\d{2}$/.test(next))throw new Error('Bitte Monat und Jahr der nächsten Wartung auswählen.');
+    const item={
+      id:'',name:customer,billingStreet:street,billingZip:zip,billingCity:city,email:val(v.email),phone:val(v.phone),
+      objects:[{id:'',name:val(v.locationName)||'Gerätestandort',street:ls,zip:lz,city:lc,notes:'',
+        devices:[{id:'',deviceType:'Sonstiges',otherDescription:val(v.device)||'Wartungsgerät',manufacturer:'',model:'',serialNumber:'',year:'',
+          tenantName:'',tenantPhone:'',tenantEmail:'',sparePartManufacturer:'',sparePartSerialNumber:'',internalNotes:val(v.note),nextMaintenanceDue:next,repairs:[]}]}]
+    };
+    await window.api(window.chefPayload({action:'saveMaintenanceCustomer',item}));
+    await window.api(window.chefPayload({action:'addManualMaintenanceCount',date:val(v.date),count:1,note:val(v.note)||('Wartung '+customer)}));
+    await refresh();
+  });
+  setTimeout(enhance,0);
+  return false;
+};
+function css(){
+  if(q('dg26Css'))return;
+  const s=document.createElement('style');s.id='dg26Css';
+  s.textContent='.dg26-maint-modal .d3-form{max-width:860px!important;max-height:92vh!important;overflow:auto!important}'
+    +'.dg26-maint-modal .d3-fields{display:grid!important;grid-template-columns:1fr 1fr!important;gap:10px 16px!important}'
+    +'.dg26-maint-modal .d3-fields>label{align-self:end!important;margin:0!important}.dg26-maint-modal .d3-fields>input,.dg26-maint-modal .d3-fields>textarea{margin:0!important}'
+    +'.dg26-form-section{grid-column:1/-1!important;margin:12px 0 0!important;padding:10px 12px!important;background:#eef4ff!important;border-radius:10px!important;color:#31589e!important}'
+    +'.dg26-form-section strong{display:block!important;font-size:17px!important}.dg26-form-section small{display:block!important;color:#64748b!important;margin-top:2px!important}'
+    +'.dg26-copy{grid-column:1/-1!important;width:auto!important;justify-self:start!important}'
+    +'@media(max-width:700px){.dg26-maint-modal .d3-fields{grid-template-columns:1fr!important}.dg26-form-section,.dg26-copy{grid-column:1!important}}';
+  document.head.appendChild(s);
+}
+function install(){css();document.documentElement.dataset.dgUi26=V;}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+})();
+
+/* DG Zeiterfassung 8.0 - UI Hotfix 27
+   Wartungsvertrag: Ausfuehrungsort kann mit einem Haken vollstaendig
+   aus dem Rechnungsempfaenger uebernommen werden. */
+(function(){
+'use strict';
+const V='8.0-ui27';
+function field(root,key){return root?root.querySelector('[data-d37="'+key+'"]'):null;}
+function copy(form,obj){
+  [['customerName','objectName'],['billingStreet','street'],['billingZip','zip'],['billingCity','city']].forEach(([a,b])=>{
+    const s=field(form,a),d=field(obj,b);if(s&&d)d.value=s.value||'';
+  });
+  const sum=obj.querySelector('.d504-address-summary');
+  if(sum){
+    const name=field(form,'customerName')?.value||'',street=field(form,'billingStreet')?.value||'',zip=field(form,'billingZip')?.value||'',city=field(form,'billingCity')?.value||'';
+    sum.textContent=[name,street,[zip,city].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
+  }
+}
+function apply(form,obj,on){
+  const cb=obj.querySelector('.d504-address-check');if(cb)cb.checked=!!on;
+  ['objectName','street','zip','city'].forEach(k=>{
+    const e=field(obj,k),box=e&&e.parentElement;
+    if(e)e.required=!on;
+    if(box)box.classList.toggle('hidden',!!on);
+  });
+  const sum=obj.querySelector('.d504-address-summary');if(sum)sum.classList.toggle('hidden',!on);
+  if(on)copy(form,obj);
+}
+function enhanceForm(form){
+  if(!form)return;
+  [...form.querySelectorAll('.d37-object')].forEach(obj=>{
+    let row=obj.querySelector('.d504-address-toggle');
+    if(!row){
+      row=document.createElement('div');row.className='d504-address-toggle';
+      row.innerHTML='<label class="d504-address-label"><input type="checkbox" class="d504-address-check" style="width:auto"> <strong>Identisch mit Rechnungsempfänger</strong></label><div class="d504-address-summary status ok hidden"></div>';
+      const head=obj.querySelector('.d37-subhead');if(head)head.insertAdjacentElement('afterend',row);else obj.prepend(row);
+    }else{
+      const strong=row.querySelector('strong');if(strong)strong.textContent='Identisch mit Rechnungsempfänger';
+    }
+    const cb=row.querySelector('.d504-address-check');
+    if(cb&&cb.dataset.dg27!=='1'){
+      cb.dataset.dg27='1';cb.addEventListener('change',()=>apply(form,obj,cb.checked));
+    }
+    apply(form,obj,!!cb?.checked);
+  });
+  ['customerName','billingStreet','billingZip','billingCity'].forEach(k=>{
+    const e=field(form,k);if(!e||e.dataset.dg27==='1')return;
+    e.dataset.dg27='1';e.addEventListener('input',()=>form.querySelectorAll('.d37-object').forEach(obj=>{if(obj.querySelector('.d504-address-check')?.checked)copy(form,obj);}));
+  });
+}
+function scan(){document.querySelectorAll('.d37-customer-form').forEach(enhanceForm);}
+function install(){
+  scan();
+  const mo=new MutationObserver(()=>setTimeout(scan,0));
+  mo.observe(document.body,{subtree:true,childList:true});
+  document.documentElement.dataset.dgUi27=V;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+})();
