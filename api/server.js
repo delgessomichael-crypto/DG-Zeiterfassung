@@ -392,6 +392,24 @@ CREATE TABLE IF NOT EXISTS day_status_shadow (
 CREATE INDEX IF NOT EXISTS day_status_shadow_date_idx
   ON day_status_shadow(status_date,employee_name);
 
+CREATE TABLE IF NOT EXISTS day_closures_shadow (
+  employee_name TEXT NOT NULL,
+  closure_date TEXT NOT NULL,
+  closed_at_text TEXT,
+  gross_total NUMERIC(10,2) NOT NULL DEFAULT 0,
+  legacy_col5 TEXT,
+  legacy_col6 TEXT,
+  pause_minutes INTEGER NOT NULL DEFAULT 0,
+  net_total NUMERIC(10,2) NOT NULL DEFAULT 0,
+  updated_at_text TEXT,
+  update_reason TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY(employee_name,closure_date)
+);
+
+CREATE INDEX IF NOT EXISTS day_closures_shadow_date_idx
+  ON day_closures_shadow(closure_date,employee_name);
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
@@ -447,6 +465,7 @@ async function initDb() {
   await initClosureShadows();
   await initConflictReviewsShadow();
   await initDayStatusShadow();
+  await initDayClosuresShadow();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -1056,6 +1075,122 @@ function shadowActive(raw){
 
 
 
+
+
+async function initDayClosuresShadow(){
+  if(!pool)return;
+  const existing=await pool.query('SELECT COUNT(*)::int AS n FROM day_closures_shadow');
+  if((existing.rows[0]?.n||0)>0)return;
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:Tagesabschluesse']
+  );
+  let inserted=0;
+  for(const row of q.rows){
+    const payload=row.payload||{};
+    if(Number(payload.sourceRow||row.source_key)<=1)continue;
+    const cells=Array.isArray(payload.cells)?payload.cells:[];
+    const employee=textCell(cells,0).trim(),date=textCell(cells,1).trim();
+    if(!employee||!date)continue;
+    await pool.query(
+      `INSERT INTO day_closures_shadow(
+        employee_name,closure_date,closed_at_text,gross_total,legacy_col5,legacy_col6,
+        pause_minutes,net_total,updated_at_text,update_reason
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      ON CONFLICT(employee_name,closure_date) DO NOTHING`,
+      [employee,date,textCell(cells,2),Number(textCell(cells,3))||0,textCell(cells,4),
+       textCell(cells,5),Math.max(0,Number(textCell(cells,6))||0),
+       Number(textCell(cells,7))||0,textCell(cells,8),textCell(cells,9)]
+    );
+    inserted++;
+  }
+  console.log('SHADOW day_closures initialized rows='+inserted);
+}
+
+async function upsertDayClosureShadow(employee,date,data,reason){
+  if(!pool||!employee||!date||!data)return;
+  if(data.closed===false){
+    await pool.query('DELETE FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2',[String(employee),String(date)]);
+    return;
+  }
+  const gross=Number(data.grossTotal!==undefined?data.grossTotal:data.grossHours)||0;
+  const pauseMinutes=Number(data.pauseMinutes!==undefined?data.pauseMinutes:
+    data.pauseHours!==undefined?Number(data.pauseHours)*60:0)||0;
+  const net=Number(data.netTotal!==undefined?data.netTotal:
+    data.total!==undefined?data.total:data.hours)||0;
+  await pool.query(
+    `INSERT INTO day_closures_shadow(
+      employee_name,closure_date,closed_at_text,gross_total,pause_minutes,net_total,
+      updated_at_text,update_reason,shadow_updated_at
+    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,now())
+    ON CONFLICT(employee_name,closure_date) DO UPDATE SET
+      gross_total=EXCLUDED.gross_total,pause_minutes=EXCLUDED.pause_minutes,
+      net_total=EXCLUDED.net_total,
+      updated_at_text=CASE WHEN $7<>'' THEN $7 ELSE day_closures_shadow.updated_at_text END,
+      update_reason=CASE WHEN $8<>'' THEN $8 ELSE day_closures_shadow.update_reason END,
+      shadow_updated_at=now()`,
+    [String(employee),String(date),new Date().toISOString(),gross,Math.round(pauseMinutes),net,
+     String(data.closureRefreshedAt||new Date().toISOString()),String(reason||'')]
+  );
+}
+
+async function syncDayClosureFromDayRead(body,data){
+  if(!data||!body.employee||!body.date)return;
+  if(data.closed){
+    await upsertDayClosureShadow(body.employee,body.date,data,
+      data.closureRefreshed?'Nachtrag / Tagesabschluss aktualisiert':'');
+  }else{
+    await pool.query('DELETE FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2',
+      [String(body.employee),String(body.date)]);
+  }
+}
+
+async function syncAndVerifyBossDayClosures(rows,year,month){
+  if(!pool||!Array.isArray(rows))return;
+  year=Number(year)||0;month=Number(month)||0;if(!year||!month)return;
+  const prefix=String(year)+'-'+String(month).padStart(2,'0')+'-';
+  const seen=new Set();
+  for(const emp of rows){
+    const employee=String(emp&&emp.employee||'');if(!employee)continue;
+    for(const day of (Array.isArray(emp.days)?emp.days:[])){
+      const date=String(day&&day.date||'');if(!date.startsWith(prefix))continue;
+      const key=employee+'|'+date;
+      if(day.closed){
+        seen.add(key);
+        await upsertDayClosureShadow(employee,date,{
+          closed:true,grossTotal:day.grossHours,pauseHours:day.pauseHours,netTotal:day.hours
+        },'Chef-Tagesübersicht synchronisiert');
+      }else{
+        await pool.query('DELETE FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2',[employee,date]);
+      }
+    }
+  }
+  const q=await pool.query(
+    `SELECT employee_name,closure_date FROM day_closures_shadow
+      WHERE closure_date LIKE $1`,
+    [prefix+'%']
+  );
+  const pg=new Set(q.rows.map(r=>String(r.employee_name)+'|'+String(r.closure_date)));
+  let mismatches=0;
+  for(const key of seen)if(!pg.has(key))mismatches++;
+  for(const key of pg)if(!seen.has(key))mismatches++;
+  console.log('SHADOW_VERIFY day_closures google='+seen.size+' postgres='+pg.size+' mismatches='+mismatches);
+  await saveShadowVerifyStat('day_closures',seen.size,pg.size,mismatches);
+}
+
+async function mirrorDayClosureWrite(action,body,parsed){
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if(!data||data.ok===false)return;
+  if(action==='closeDay'){
+    if(data.alreadyClosed)return;
+    await upsertDayClosureShadow(body.employee,body.date,{
+      closed:true,grossTotal:data.total,pauseMinutes:data.pauseMinutes,netTotal:data.netTotal!==undefined?data.netTotal:data.total
+    },'Tagesabschluss');
+  }else if(action==='refreshClosedDay'){
+    await upsertDayClosureShadow(body.employee,body.date,data,'Nachtrag / Tagesabschluss aktualisiert');
+  }
+}
 
 async function initDayStatusShadow(){
   if(!pool)return;
@@ -2613,7 +2748,11 @@ async function proxyLegacy(req, res, body) {
           verifyConflictReviewsShadow(verifyData,body.year,body.month).catch(e=>console.error('conflict review shadow verify failed',e.message));
         }
         if (action==='getMonthPayrollAudit') verifyPayrollProtocols(verifyData,body.year,body.month).catch(e=>console.error('payroll protocol shadow verify failed',e.message));
-        if (action==='getDayData') syncDayStatusFromDayRead(body,verifyData).catch(e=>console.error('day status shadow day refresh failed',e.message));
+        if (action==='getDayData') {
+          syncDayStatusFromDayRead(body,verifyData).catch(e=>console.error('day status shadow day refresh failed',e.message));
+          syncDayClosureFromDayRead(body,verifyData).catch(e=>console.error('day closure shadow day refresh failed',e.message));
+        }
+        if (action==='getBossDayClosures') syncAndVerifyBossDayClosures(verifyData,body.year,body.month).catch(e=>console.error('day closure shadow verify failed',e.message));
         if (action==='getMonthData') syncAndVerifyMonthStatuses(body,verifyData).catch(e=>console.error('day status shadow month refresh failed',e.message));
       }
       if (isCacheableAction(action)) {
@@ -2670,6 +2809,10 @@ async function proxyLegacy(req, res, body) {
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false && action==='setDayStatus') {
         mirrorSetDayStatus(body,parsed).catch(e=>console.error('day status shadow mirror failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false &&
+          ['closeDay','refreshClosedDay'].includes(action)) {
+        mirrorDayClosureWrite(action,body,parsed).catch(e=>console.error('day closure shadow mirror failed',e.message));
       }
       pool.query(
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
@@ -2761,7 +2904,8 @@ async function health() {
         pool.query('SELECT COUNT(*)::int AS n FROM payroll_reviews_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM payroll_closures_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM conflict_reviews_shadow'),
-        pool.query('SELECT COUNT(*)::int AS n FROM day_status_shadow')
+        pool.query('SELECT COUNT(*)::int AS n FROM day_status_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM day_closures_shadow')
       ]);
       shadowCounts = {
         manualOrders: counts[0].rows[0]?.n||0,
@@ -2782,7 +2926,8 @@ async function health() {
         payrollReviews: counts[15].rows[0]?.n||0,
         payrollClosures: counts[16].rows[0]?.n||0,
         conflictReviews: counts[17].rows[0]?.n||0,
-        dayStatus: counts[18].rows[0]?.n||0
+        dayStatus: counts[18].rows[0]?.n||0,
+        dayClosures: counts[19].rows[0]?.n||0
       };
       const verifyQ=await pool.query(
         'SELECT shadow_name,google_count,postgres_count,mismatches,checked_at FROM shadow_verify_stats ORDER BY shadow_name'
@@ -2825,6 +2970,7 @@ async function health() {
     payrollProtocolShadow: pool ? 'enabled' : 'disabled',
     conflictReviewsShadow: pool ? 'enabled' : 'disabled',
     dayStatusShadow: pool ? 'enabled' : 'disabled',
+    dayClosuresShadow: pool ? 'enabled' : 'disabled',
     shadowCounts,
     shadowVerify,
     writeStats
@@ -2955,7 +3101,7 @@ initDb()
     console.log('MIGRATION VERIFY: sheets='+sheets.length+' sourceRows='+sourceRows+' importedRows='+importedRows+' mismatches='+mismatches.length+(mismatches.length?' ['+mismatches.join(', ')+']':''));
     const h = await health();
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
-    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus);
+    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus+' day_closures='+h.shadowCounts.dayClosures);
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
   })
