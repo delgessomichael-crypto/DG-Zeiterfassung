@@ -1284,6 +1284,7 @@ async function health() {
   let employeeSnapshotDirty = null;
   let shadowCounts = null;
   let shadowVerify = [];
+  let writeStats = [];
   if (pool) {
     try {
       const q = await pool.query('SELECT 1 AS ok');
@@ -1308,6 +1309,13 @@ async function health() {
         'SELECT shadow_name,google_count,postgres_count,mismatches,checked_at FROM shadow_verify_stats ORDER BY shadow_name'
       );
       shadowVerify=verifyQ.rows;
+      const writeQ=await pool.query(
+        `SELECT action,success_count,failure_count,last_success_at,last_failure_at
+           FROM write_action_stats
+          ORDER BY (success_count+failure_count) DESC, action
+          LIMIT 20`
+      );
+      writeStats=writeQ.rows;
     } catch (e) {
       database = 'error';
     }
@@ -1329,7 +1337,8 @@ async function health() {
     ownRemindersShadow: pool ? 'enabled' : 'disabled',
     offerRemindersShadow: pool ? 'enabled' : 'disabled',
     shadowCounts,
-    shadowVerify
+    shadowVerify,
+    writeStats
   };
 }
 
@@ -1458,6 +1467,7 @@ initDb()
     const h = await health();
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
     if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders);
+    if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
   })
   .then(() => server.listen(PORT, '0.0.0.0', () => {
