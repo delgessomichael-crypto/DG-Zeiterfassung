@@ -1,0 +1,249 @@
+
+<!DOCTYPE html>
+
+<html lang="de">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width,initial-scale=1,viewport-fit=cover" name="viewport"/>
+<meta content="#111827" name="theme-color"/>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+<meta http-equiv="Pragma" content="no-cache"/>
+<meta http-equiv="Expires" content="0"/>
+<meta content="DG Zeiterfassung" name="application-name"/>
+<meta content="yes" name="mobile-web-app-capable"/>
+<link rel="preconnect" href="https://script.google.com"/>
+<link rel="dns-prefetch" href="//script.google.com"/>
+<link rel="preload" href="./app-5.0.css?v=20260918-800-prod1" as="style"/>
+<link rel="preload" href="./app-9.0.js?v=20260920-900-prod1" as="script"/>
+<link rel="manifest" href="manifest.json"/>
+<link href="dg_icon_192.png" rel="icon"/>
+<link href="dg_icon_192.png" rel="apple-touch-icon"/>
+<title>DG Zeiterfassung 9.0</title>
+<link href="./app-5.0.css?v=20260918-800-prod1" rel="stylesheet"/></head>
+<body>
+<div class="screen" id="loginScreen">
+<div class="login-wrap">
+<div class="login-card">
+<img alt="Del Gesso Gebäudetechnik" class="logo" src="dg_icon_512.png"/>
+<h2 class="center">Mitarbeiter-Anmeldung</h2><div class="center muted small" style="margin-top:-8px;margin-bottom:10px">Version 9.0</div>
+<div class="status" id="loginNet"></div>
+<label for="loginEmployee">Mitarbeiter</label>
+<select id="loginEmployee" onkeydown="loginEnter(event)"><option value="">Mitarbeiter werden geladen ...</option></select>
+<label for="loginPin">PIN</label>
+<input id="loginPin" inputmode="numeric" maxlength="10" onkeydown="loginEnter(event)" placeholder="PIN" type="password"/>
+<button class="btn primary" data-enter-default="" onclick="loginEmployee()" style="width:100%;margin-top:16px">Anmelden</button>
+<div id="loginStatus"></div>
+</div>
+</div>
+</div>
+<div class="screen hidden" id="mainScreen">
+<div class="app">
+<div class="status offlinebar" id="connectionBar"></div>
+<div class="status warn queue hidden" id="queueBar">
+<div style="display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap">
+<strong id="queueText"></strong>
+<div class="button-row" style="margin:0">
+<button class="btn secondary" onclick="toggleQueueDetails()" type="button">Details</button>
+<button class="btn primary" onclick="syncQueue(true)" type="button">Alle jetzt übertragen</button>
+</div>
+</div>
+<div class="hidden" id="queueDetails" style="margin-top:10px"></div>
+</div>
+<div class="hero">
+<img alt="Del Gesso Gebäudetechnik" class="logo" src="dg_icon_512.png"/>
+<div class="head-row"><div><strong>Zeiterfassung - 8.0</strong><br/><span id="employeeLabel"></span></div><button class="btn danger" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
+</div>
+<div class="tabs"><button class="tab active" id="employeeTab" onclick="showEmployee()">Mitarbeiter</button><button class="tab boss-tab" id="bossTab" onclick="showBoss()">Büro</button></div>
+<section id="employeeView">
+<div class="card">
+<div class="head-row">
+<div>
+<h2 style="margin-bottom:4px">Meine Termine</h2>
+<div class="muted small">Heute, morgen und übermorgen aus deinem zugeordneten DG-Kalender.</div>
+</div>
+<button class="btn secondary" onclick="loadCalendarEvents()">Aktualisieren</button>
+</div>
+<div id="calendarStatus"></div>
+<div class="muted" id="calendarEvents">Termine werden geladen ...</div>
+</div>
+<div id="dayStatusMessage"></div><div class="card" id="workEntryCard">
+<h2>Arbeitszeit erfassen</h2>
+<div class="grid2"><div><label for="date">Datum</label><input id="date" onchange="loadDay()" type="date"/></div><div><label for="customer">Kunde / Baustelle</label><input id="customer" placeholder="z.B. Müller, Fürth"/></div></div>
+<div class="grid2"><div><label for="start">Von</label><input id="start" onchange="calculateHours()" type="time"/></div><div><label for="end">Bis</label><input id="end" onchange="calculateHours()" type="time"/></div></div>
+<label for="hours">Stunden</label><input id="hours" placeholder="Wird automatisch berechnet" readonly=""/>
+<label for="activity">Ausgeführte Tätigkeit</label><textarea id="activity" placeholder="Ausgeführte Arbeiten eintragen"></textarea>
+<div class="radio-row"><strong>Bilder hinzufügen?</strong><label><input checked="" name="photosUsed" onchange="togglePhotos()" type="radio" value="no"/>Nein</label><label><input name="photosUsed" onchange="togglePhotos()" type="radio" value="yes"/>Ja</label></div>
+<div class="hidden" id="photoBox">
+<div class="button-row"><button class="btn primary" onclick="startCamera()" type="button">📷 Kamera starten</button><button class="btn secondary" onclick="$('galleryPhotos').click()" type="button">🖼️ Vorhandene Bilder</button></div>
+<div class="camera-live hidden" id="cameraLive"><video autoplay="" id="cameraVideo" muted="" playsinline=""></video><div class="button-row" style="margin-top:8px"><button class="btn success" onclick="captureCameraPhoto()" type="button">📸 Foto aufnehmen</button><button class="btn secondary" onclick="stopCamera()" type="button">Kamera schließen</button></div></div>
+<input accept="image/*" capture="environment" class="hidden" id="cameraPhoto" onchange="addPhotos(this.files,'cameraPhoto')" type="file"/>
+<input accept="image/*" class="hidden" id="galleryPhotos" multiple="" onchange="addPhotos(this.files,'galleryPhotos')" type="file"/>
+<div class="muted small" id="photoStatus">Noch keine Bilder hinzugefügt.</div><div class="photo-preview-grid" id="photoPreview"></div><button class="btn secondary hidden" id="clearPhotosBtn" onclick="clearPhotos()" style="width:100%;margin-top:8px" type="button">Bilder entfernen</button>
+</div>
+<div class="radio-row"><strong>Material verbaut?</strong><label><input checked="" name="materialUsed" onchange="toggleMaterial()" type="radio" value="no"/>Nein</label><label><input name="materialUsed" onchange="toggleMaterial()" type="radio" value="yes"/>Ja</label></div>
+<div class="hidden" id="materialBox"><label for="material">Verbautes Material</label><textarea id="material" placeholder="Menge und Bezeichnung"></textarea></div>
+<div class="radio-row"><strong>Auftrag abgeschlossen?</strong><label><input name="jobCompleted" type="radio" value="no"/>Nein</label><label><input checked="" name="jobCompleted" type="radio" value="yes"/>Ja</label></div>
+<h3 style="margin-top:20px">Kundenunterschrift</h3><div class="muted small">Bei vorhandener Unterschrift wird der Auftrag nach der Übertragung automatisch ans Büro gesendet.</div>
+<div class="signature-wrap" id="customerSignatureWrap"><canvas id="customerSignature"></canvas><div class="signature-lock">Zum Unterschreiben zweimal tippen</div></div><div class="signature-hint">Beim Scrollen bleibt das Feld gesperrt.</div>
+<div class="button-row"><button class="btn danger" onclick="clearCustomerSignature()">Unterschrift löschen</button><button class="btn success" onclick="markNoCustomer()">Kein Kunde vor Ort</button></div>
+<button class="btn primary" data-enter-default="" onclick="saveEntry()" style="width:100%;margin-top:14px">Eintrag speichern</button><div id="entryStatus"></div>
+</div>
+<div class="card"><h2>Einträge des Tages</h2><div class="muted" id="entries">Noch keine Tagesdaten geladen.</div><div class="day-balance bad" id="dayTotal">Heute: 0,00 Std.</div><div class="timebank-box" id="employeeTimeBank">Zeitguthaben: 0,00 Std.</div><button class="btn secondary" onclick="loadDay()" style="width:100%">Tag aktualisieren</button></div>
+<div class="card" id="dayCloseCard">
+<h2>Tagesabschluss</h2>
+<label for="pauseHours">Pause gesamt</label>
+<select id="pauseHours" onchange="updateNetTotal()">
+<option value="0">Keine Pause</option><option value="0.25">0,25 Std. (15 Min.)</option><option value="0.50">0,50 Std. (30 Min.)</option><option value="0.75">0,75 Std. (45 Min.)</option>
+<option value="1.00">1,00 Std. (60 Min.)</option><option value="1.25">1,25 Std.</option><option value="1.50">1,50 Std.</option><option value="1.75">1,75 Std.</option>
+<option value="2.00">2,00 Std.</option><option value="2.25">2,25 Std.</option><option value="2.50">2,50 Std.</option><option value="2.75">2,75 Std.</option><option value="3.00">3,00 Std.</option>
+</select>
+<div class="total" id="netTotal">Arbeitszeit netto: 0,00 Std.</div>
+<button class="btn success" onclick="closeDay()" style="width:100%;margin-top:14px">Tag abschließen</button><div id="closeStatus"></div>
+</div>
+<div class="card">
+<h2>Monatsübersicht</h2>
+<div class="grid2"><div><label for="empYear">Jahr</label><input id="empYear" type="number"/></div><div><label for="empMonth">Monat</label><select id="empMonth"></select></div></div>
+<button class="btn secondary" data-enter-default="" onclick="loadMonth()" style="width:100%">Monat anzeigen</button><div id="monthStatus"></div><div id="monthResult"></div>
+</div>
+</section>
+<section class="hidden" id="bossView">
+<div class="card">
+<h2>Regieberichte</h2>
+<div class="muted small">Laufende Aufträge sind getrennt von offenen Regieberichten. Im Büro kann ein falsch gemeldeter Auftragsstatus jederzeit korrigiert werden. Abgeschlossene Aufträge wechseln zu „Rechnungen zu erstellen“ und stehen dort zur Prüfung und Abrechnung bereit.</div>
+<div class="admin-grid hidden" id="regieDateFilter"><div><label>Jahr</label><input id="regieYear" type="number"/></div><div><label>Monat</label><select id="regieMonth"><option value="0">Alle Monate</option></select></div></div>
+<div class="button-row"><button class="btn success" onclick="loadRegieReports('Abgeschlossen')">🟢 Rechnungen zu erstellen</button></div>
+<button class="btn primary" onclick="loadRegieReports('Abgerechnet')" style="width:100%;margin-top:8px">Abgerechnete Aufträge</button>
+<div class="hidden" id="regieMergeToolbar" style="margin-top:10px;position:sticky;top:8px;z-index:20;background:#fff;padding:8px 0"><button class="btn success" disabled="" id="regieMergeBtn" onclick="requestMergeSelectedRegieReports()" style="width:100%">Markierte Regieberichte jetzt zusammenführen</button><div class="muted small" id="regieMergeHint" style="margin-top:6px">Bitte mindestens zwei offene Regieberichte markieren.</div></div>
+<div id="regieStatus"></div><div id="regieResult"></div>
+</div>
+<div class="card">
+<h2>Monatsübersicht aller Mitarbeiter</h2><div class="muted small">Zugriff über deine Mitarbeiter-Anmeldung mit Chefberechtigung.</div>
+<div class="grid2"><div><label for="bossYear">Jahr</label><input id="bossYear" type="number"/></div><div><label for="bossMonth">Monat</label><select id="bossMonth"></select></div></div>
+<div class="button-row"><button class="btn primary" data-enter-default="" onclick="loadBossMonth()">Monatsübersicht laden</button><button class="btn danger" onclick="downloadTaxAdvisorPdf()">PDF Steuerberater</button></div><div class="filter-row"><button class="btn secondary active" id="bossFilterAll" onclick="setBossFilter('all')">Alle</button><button class="btn secondary" id="bossFilterAlerts" onclick="setBossFilter('alerts')">Auffälligkeiten</button><button class="btn secondary" id="bossFilterOpen" onclick="setBossFilter('open')">Noch zu prüfen</button></div><div id="bossStatus"></div><div id="bossResult"></div>
+</div>
+<div class="card">
+<h2>Mitarbeiterverwaltung</h2>
+<div class="muted small">Bestehenden Mitarbeiter auswählen und Daten laden – oder „Neuer Mitarbeiter“ wählen. Änderungen werden erst mit „Mitarbeiter speichern“ übernommen.</div>
+<div class="admin-section">
+<h3>1. Mitarbeiter auswählen</h3>
+<div class="admin-grid"><div><label>Mitarbeiter suchen</label><input id="adminEmployeeSearch" oninput="filterEmployeeAdminOptions()" placeholder="Name, Vorname oder Personalnummer"/></div><div><label>Bestandsmitarbeiter auswählen</label><select id="adminEmployeeSelect" onchange="loadSelectedEmployeeAdmin()"><option value="">Bitte Mitarbeiter wählen</option></select></div></div>
+<button class="btn success" onclick="clearEmployeeAdminForm()" style="width:100%;margin-top:10px" type="button">+ Neuer Mitarbeiter</button>
+</div>
+<input id="adminOriginalName" type="hidden"/>
+<input id="adminOriginalActive" type="hidden" value="1"/>
+<div class="admin-section">
+<h3>2. Persönliche Stammdaten</h3>
+<div class="admin-grid"><div><label>Anzeigename / Loginname</label><input id="adminName" placeholder="Vorname Nachname"/><div class="field-hint">Bei bestehenden Mitarbeitern nicht ändern, damit historische Daten zugeordnet bleiben.</div></div><div><label>Personalnummer</label><input id="adminPersonnelNumber" placeholder="z. B. 1001"/></div></div>
+<div class="admin-grid"><div><label>Nachname</label><input id="adminLastName"/></div><div><label>Vorname</label><input id="adminFirstName"/></div></div>
+<div class="admin-grid"><div><label>Geburtsdatum</label><input id="adminBirthDate" type="date"/></div><div><label>PIN</label><input id="adminPin" inputmode="numeric" placeholder="bei bestehendem Mitarbeiter leer lassen"/></div></div>
+<div class="admin-grid"><div><label>Eintrittsdatum</label><input id="adminEntryDate" type="date"/></div><div><label>Austrittsdatum</label><input id="adminExitDate" type="date"/></div></div>
+</div>
+<div class="admin-section">
+<h3>3. Adresse &amp; Kontakt</h3>
+<label>Straße / Hausnummer</label><input id="adminStreet"/>
+<div class="admin-grid"><div><label>PLZ</label><input id="adminPostalCode" inputmode="numeric"/></div><div><label>Ort</label><input id="adminCity"/></div></div>
+<div class="admin-grid"><div><label>Telefon</label><input id="adminPhone" type="tel"/></div><div><label>Mobil</label><input id="adminMobile" type="tel"/></div></div>
+<label>E-Mail</label><input id="adminEmail" type="email"/>
+</div>
+<div class="admin-section">
+<h3>4. Beschäftigung &amp; Zugang</h3>
+<div class="admin-grid"><div><label>Google Kalender-ID</label><input id="adminCalendarId" placeholder="…@group.calendar.google.com"/><div class="field-hint">Kann leer bleiben, wenn noch kein Kalender zugeordnet ist.</div></div><div><label>Beschäftigungsart</label><select id="adminEmploymentType" onchange="employmentTypeChanged()"><option>Vollzeit</option><option>Teilzeit</option><option>Aushilfe</option><option>Minijob</option><option>Azubi</option></select></div></div>
+<div class="check-row"><label><input checked="" id="adminHolidayCredit" type="checkbox"/>Feiertagsstunden gutschreiben</label><label><input id="adminChefAccess" type="checkbox"/>Chefzugang</label></div>
+<div class="status info" id="adminActiveState">Neuer Mitarbeiter</div>
+<div class="admin-three-actions"><button class="btn danger hidden" id="adminDeactivateBtn" onclick="setSelectedEmployeeActiveUi(false)" type="button">Deaktivieren</button><button class="btn success hidden" id="adminActivateBtn" onclick="setSelectedEmployeeActiveUi(true)" type="button">Aktivieren</button><button class="btn danger hidden" id="adminDeleteBtn" onclick="deleteSelectedEmployeeUi()" type="button">Löschen</button></div>
+</div>
+<div class="admin-section">
+<h3>5. Sozialversicherung &amp; Steuer</h3>
+<div class="admin-grid"><div><label>Krankenkasse</label><input id="adminHealthInsurance"/></div><div><label>KV-Versichertennummer</label><input id="adminHealthInsuranceNumber"/></div></div>
+<div class="admin-grid"><div><label>Sozialversicherungsnummer</label><input id="adminSocialSecurityNumber"/></div><div><label>Steuer-ID</label><input id="adminTaxId"/></div></div>
+</div>
+<div class="admin-section">
+<h3>6. Auszahlung</h3>
+<label>Auszahlungsart</label><select id="adminPaymentMethod" onchange="paymentMethodChanged()"><option>Überweisung</option><option>Bar</option></select>
+<div id="adminBankFields"><div class="admin-grid"><div><label>Bank</label><input id="adminBank"/></div><div><label>IBAN</label><input autocomplete="off" id="adminIban"/></div></div></div>
+</div>
+<div class="admin-section">
+<h3>7. Weitere Angaben</h3>
+<div class="admin-grid"><div><label>Notfallkontakt Name</label><input id="adminEmergencyContactName"/></div><div><label>Notfallkontakt Telefon</label><input id="adminEmergencyContactPhone" type="tel"/></div></div>
+<label>Führerscheinklasse</label><input id="adminDrivingLicence" placeholder="z. B. B, BE, C1"/>
+<label>Bemerkungen</label><textarea id="adminNotes" placeholder="Interne Hinweise"></textarea>
+</div>
+<div class="admin-section">
+<h3>8. Sollstunden</h3>
+<label>Wochenstunden Montag–Freitag</label>
+<div class="admin-grid"><div><input id="adminWeeklyHours" inputmode="decimal" placeholder="z. B. 40 oder 20" type="text"/><div class="field-hint">Komma und Punkt sind erlaubt.</div></div><div style="display:flex;align-items:start"><button class="btn secondary" onclick="distributeWeeklyHours()" style="width:100%" type="button">Gleichmäßig auf Mo–Fr verteilen</button></div></div>
+<div class="weekday-grid">
+<div><label>Montag</label><input id="adminMon" inputmode="decimal" oninput="updateWeeklyHoursFromDays()" type="text"/></div><div><label>Dienstag</label><input id="adminTue" inputmode="decimal" oninput="updateWeeklyHoursFromDays()" type="text"/></div><div><label>Mittwoch</label><input id="adminWed" inputmode="decimal" oninput="updateWeeklyHoursFromDays()" type="text"/></div><div><label>Donnerstag</label><input id="adminThu" inputmode="decimal" oninput="updateWeeklyHoursFromDays()" type="text"/></div><div><label>Freitag</label><input id="adminFri" inputmode="decimal" oninput="updateWeeklyHoursFromDays()" type="text"/></div>
+</div>
+<div class="sum-box" id="adminHoursSum">Summe Mo–Fr: 0,00 Std.</div>
+<div class="field-hint">Die Tageswerte sind entscheidend für Urlaub, Krankheit und Feiertage. Die Wochenstunden werden daraus automatisch kontrolliert.</div>
+</div>
+<div class="admin-section">
+<h3>9. Zeitkorrekturen</h3>
+<div class="admin-grid"><div><label>Mitarbeiter</label><select id="adminTimeBankEmployee" onchange="loadSelectedTimeBankEmployee()"><option value="">Bitte Mitarbeiter wählen</option></select></div><div><label>Aktuelles Zeitkonto</label><div class="timebank-box" id="adminTimeBankBalance" style="margin:0">Zeitguthaben: 0,00 Std.</div></div></div>
+<div class="muted small">Die Buchung gilt immer für den hier ausgewählten Mitarbeiter. Gutschriften erhöhen sein Zeitkonto, Abzüge vermindern es dauerhaft.</div>
+<div class="admin-grid"><div><label>Stunden</label><input id="adminTimeBankHours" inputmode="decimal" placeholder="z. B. 2,5" type="text"/></div><div><label>Grund</label><input id="adminTimeBankReason" placeholder="Grund ist Pflicht"/></div></div>
+<div class="button-row"><button class="btn success" onclick="saveTimeBankManualUi('Stunden Gutschreiben')" type="button">Stunden Gutschreiben</button><button class="btn danger" onclick="saveTimeBankManualUi('Stunden abziehen')" type="button">Stunden abziehen</button></div>
+<div id="timeBankAdminStatus"></div><div id="timeBankHistory"></div>
+</div>
+<div class="save-bar"><button class="btn primary" data-enter-default="" onclick="saveEmployeeAdminUi()" style="width:100%">✓ Mitarbeiter speichern</button></div>
+<div id="employeeAdminStatus"></div>
+</div>
+<div class="card">
+<h2>Urlaub / Krankheit / Abwesenheiten eintragen</h2>
+<div class="admin-grid"><div><label>Mitarbeiter</label><select id="absenceEmployee"></select></div><div><label>Art</label><select id="absenceType"><option>Urlaub</option><option>Krank</option><option>Freizeitausgleich</option></select></div></div>
+<div class="grid2"><div><label>Von</label><input id="absenceStart" type="date"/></div><div><label>Bis</label><input id="absenceEnd" type="date"/></div></div><div class="field-hint">Bei Freizeitausgleich berechnet die App automatisch die Sollstunden des Zeitraums, zieht sie vom Zeitguthaben ab und schreibt sie dem Monat als bezahlte Stunden gut.</div>
+<button class="btn primary" data-enter-default="" onclick="saveAbsenceUi()" style="width:100%;margin-top:12px">Zeitraum eintragen</button>
+<div id="absenceStatus"></div><div id="absenceList"></div>
+</div>
+<div class="card">
+<h2>Urlaubskonto</h2>
+<div class="muted small">Urlaub zustehend wird von dir manuell pro Kalenderjahr eingetragen. Beansprucht und Resturlaub berechnet die App automatisch aus den erfassten Urlaubstagen.</div>
+<div class="admin-grid"><div><label>Mitarbeiter</label><select id="vacationEmployee" onchange="loadVacationAccountUi()"></select></div><div><label>Jahr</label><input id="vacationYear" onchange="loadVacationAccountUi()" type="number"/></div></div>
+<label>Urlaub zustehend (Tage)</label><input id="vacationEntitlement" max="100" min="0" placeholder="manuell eintragen" step="0.5" type="number"/>
+<div class="button-row"><button class="btn primary" data-enter-default="" onclick="saveVacationEntitlementUi()">Urlaubsanspruch speichern</button><button class="btn secondary" onclick="loadVacationAccountsUi()">Jahresübersicht laden</button></div>
+<div id="vacationStatus"></div><div id="vacationAccountResult"></div><div id="vacationAccountsList"></div>
+</div>
+<div class="card">
+<h2>Feiertage Bayern / Nürnberg</h2>
+<div class="muted small">Gesetzliche Feiertage werden automatisch berücksichtigt. Eine Stundengutschrift erfolgt nur anhand der von dir hinterlegten Sollstunden. Bei Aushilfe ist die Feiertagsgutschrift standardmäßig aus.</div>
+<div class="grid2"><div><label>Jahr</label><input id="holidayYear" type="number"/></div><div style="display:flex;align-items:end"><button class="btn secondary" data-enter-default="" onclick="syncHolidaysUi()" style="width:100%">Feiertage aktualisieren</button></div></div>
+<div id="holidayStatus"></div>
+</div>
+</section>
+</div>
+</div>
+<div class="hidden" id="closeDayConfirmModal" style="position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px">
+<div style="background:#fff;border-radius:18px;max-width:520px;width:100%;padding:24px;box-shadow:0 18px 60px rgba(0,0,0,.28)">
+<h2 style="margin-top:0">Tag abschließen</h2>
+<div style="font-size:20px;line-height:1.45;margin:12px 0 20px;font-weight:700">Tag wirklich abschließen?</div>
+<div class="button-row">
+<button class="btn success" onclick="confirmCloseDay()" style="flex:1">Ja</button>
+<button class="btn secondary" onclick="cancelCloseDay()" style="flex:1">Nein</button>
+</div>
+</div>
+</div>
+<div class="hidden" id="regieMergeConfirmModal" style="position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px">
+<div style="background:#fff;border-radius:18px;max-width:560px;width:100%;padding:24px;box-shadow:0 18px 60px rgba(0,0,0,.28)">
+<h2 style="margin-top:0">Regieberichte zusammenführen</h2>
+<div id="regieMergeConfirmText" style="font-size:18px;line-height:1.45;margin:12px 0 20px">Möchtest du die ausgewählten Regieberichte wirklich zusammenführen?</div>
+<div class="button-row">
+<button class="btn success" onclick="confirmMergeSelectedRegieReports()" style="flex:1">Ja, zusammenführen</button>
+<button class="btn secondary" onclick="closeRegieMergeConfirm()" style="flex:1">Nein</button>
+</div>
+</div>
+</div>
+<script>
+(function(){
+  if(!('serviceWorker' in navigator))return;
+  window.addEventListener('load',function(){
+    navigator.serviceWorker.register('./sw-9.0-prod.js?v=20260920-900-prod2',{updateViaCache:'none'})
+      .then(function(r){return r.update();})
+      .catch(function(e){console.warn('DG Offline-Cache nicht bereit',e);});
+  },{once:true});
+})();
+</script>
+
+<script defer src="./app-9.0.js?v=20260920-900-prod1"></script>
+</body>
+</html>
