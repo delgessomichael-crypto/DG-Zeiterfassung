@@ -84,6 +84,9 @@ CREATE TABLE IF NOT EXISTS legacy_action_log (
 CREATE INDEX IF NOT EXISTS legacy_action_log_action_idx
   ON legacy_action_log(action, created_at DESC);
 
+ALTER TABLE legacy_action_log
+  ADD COLUMN IF NOT EXISTS duration_ms INTEGER;
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
@@ -444,6 +447,7 @@ async function proxyLegacy(req, res, body) {
     return res.end(cached.responseText);
   }
   let upstream, raw, parsed = null;
+  const upstreamStartedAt = Date.now();
   try {
     upstream = await fetch(GOOGLE_BACKEND_URL, {
       method:'POST',
@@ -463,10 +467,10 @@ async function proxyLegacy(req, res, body) {
         markEmployeeSnapshotDirty(action).catch(e=>console.error('employee snapshot dirty flag failed',e.message));
       }
       pool.query(
-        `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status)
-         VALUES($1,$2::jsonb,$3,$4::jsonb,$5)`,
+        `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
+         VALUES($1,$2::jsonb,$3,$4::jsonb,$5,$6)`,
         [action,JSON.stringify(sanitizedLogPayload(body)),Boolean(parsed && parsed.ok !== false),
-         parsed ? JSON.stringify(parsed) : null,upstream.status]
+         parsed ? JSON.stringify(parsed) : null,upstream.status,Math.max(0,Date.now()-upstreamStartedAt)]
       ).catch(e=>console.error('legacy action log failed',e.message));
     }
     cors(req,res);
@@ -479,9 +483,9 @@ async function proxyLegacy(req, res, body) {
   } catch (e) {
     if (pool) {
       pool.query(
-        `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status)
-         VALUES($1,$2::jsonb,false,$3::jsonb,502)`,
-        [action,JSON.stringify(sanitizedLogPayload(body)),JSON.stringify({error:e.message})]
+        `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
+         VALUES($1,$2::jsonb,false,$3::jsonb,502,$4)`,
+        [action,JSON.stringify(sanitizedLogPayload(body)),JSON.stringify({error:e.message}),Math.max(0,Date.now()-upstreamStartedAt)]
       ).catch(()=>{});
     }
     return json(res,502,{ok:false,error:'Google backend unavailable: '+e.message},req);
