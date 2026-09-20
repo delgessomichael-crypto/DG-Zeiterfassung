@@ -5512,7 +5512,7 @@ async function mirrorOfferReminderWrite(action, body, parsed) {
       [String(body.reminderId||''),now,String(body.employee||'')]
     );
   } else if (action==='acceptOfferFromReminder') {
-    const result=body.asRunning?'Angenommen - Laufender Auftrag':'Angenommen - Archiv';
+    const result='Angenommen - Laufender Auftrag';
     await pool.query(
       `UPDATE offer_reminders_shadow SET status='Erledigt',result=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now() WHERE id=$1`,
       [String(body.reminderId||''),result,now,String(body.employee||'')]
@@ -5525,12 +5525,29 @@ async function mirrorOfferReminderWrite(action, body, parsed) {
       [String(body.offerId||''),now,String(body.employee||'')]
     );
   } else if (action==='acceptOfferAsRunning') {
-    await pool.query(
+    const offerId=String(data.offerId||body.offerId||'').trim();if(!offerId)return;
+    const changed=await pool.query(
       `UPDATE offer_reminders_shadow SET status='Erledigt',result='Angenommen - Laufender Auftrag',
         changed_at_text=$2,changed_by=$3,shadow_updated_at=now()
-        WHERE offer_id=$1 AND status='Offen'`,
-      [String(body.offerId||''),now,String(body.employee||'')]
+        WHERE offer_id=$1 AND status='Offen'
+        RETURNING id`,
+      [offerId,now,String(body.employee||'')]
     );
+    if(!changed.rowCount){
+      const q=await pool.query(
+        `SELECT customer,phone,email,description FROM inquiry_offers_shadow WHERE offer_id=$1 LIMIT 1`,
+        [offerId]
+      );
+      const x=q.rows[0]||{};
+      await pool.query(
+        `INSERT INTO offer_reminders_shadow(
+          id,offer_id,customer,offer_number,phone,email,description,created_at_text,
+          due_date_text,status,result,changed_at_text,changed_by,shadow_updated_at
+        ) VALUES($1,$2,$3,'',$4,$5,$6,$7,$7,'Erledigt','Angenommen - Laufender Auftrag',$7,$8,now())`,
+        ['REM-PG-'+crypto.randomUUID(),offerId,String(x.customer||''),String(x.phone||''),
+         String(x.email||''),String(x.description||''),now,String(body.employee||'')]
+      );
+    }
   }
 }
 
