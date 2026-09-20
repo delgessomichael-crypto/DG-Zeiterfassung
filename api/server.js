@@ -346,12 +346,16 @@ function sanitizedLogPayload(body) {
   return clone;
 }
 
-function isCacheableAction(action, body) {
-  return CACHEABLE_ACTIONS.has(action) && !(body && body.force);
+function isCacheableAction(action) {
+  return CACHEABLE_ACTIONS.has(action);
+}
+
+function shouldBypassReadCache(body) {
+  return Boolean(body && body.force);
 }
 
 async function readCachedResponse(action, body) {
-  if (!pool || !isCacheableAction(action, body)) return null;
+  if (!pool || !isCacheableAction(action) || shouldBypassReadCache(body)) return null;
   const payload = normalizedCachePayload(body);
   const key = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
   const q = await pool.query(
@@ -363,7 +367,7 @@ async function readCachedResponse(action, body) {
 }
 
 async function writeCachedResponse(action, body, responseText, httpStatus) {
-  if (!pool || !isCacheableAction(action, body) || Number(httpStatus)!==200) return;
+  if (!pool || !isCacheableAction(action) || Number(httpStatus)!==200) return;
   let parsed = null;
   try { parsed = JSON.parse(responseText); } catch (_e) { return; }
   if (!parsed || parsed.ok === false) return;
@@ -450,7 +454,7 @@ async function proxyLegacy(req, res, body) {
     raw = await upstream.text();
     try { parsed = JSON.parse(raw); } catch (_e) {}
     if (pool) {
-      if (isCacheableAction(action, body)) {
+      if (isCacheableAction(action)) {
         writeCachedResponse(action, body, raw, upstream.status).catch(e=>console.error('response cache write failed',e.message));
       } else if (action && action !== 'ping' && action !== 'employeeLogin') {
         invalidateReadCache().catch(e=>console.error('response cache invalidation failed',e.message));
