@@ -14,7 +14,7 @@
 <link rel="preconnect" href="https://script.google.com"/>
 <link rel="dns-prefetch" href="//script.google.com"/>
 <link rel="preload" href="./app-5.0.css?v=20260918-800-prod1" as="style"/>
-<link rel="preload" href="./app-9.0.js?v=20260920-900-prod2" as="script"/>
+<link rel="preload" href="./app-9.0.js?v=20260920-900-prod3" as="script"/>
 <link rel="manifest" href="manifest.json"/>
 <link href="dg_icon_192.png" rel="icon"/>
 <link href="dg_icon_192.png" rel="apple-touch-icon"/>
@@ -237,14 +237,14 @@
 (function(){
   if(!('serviceWorker' in navigator))return;
   window.addEventListener('load',function(){
-    navigator.serviceWorker.register('./sw-9.0-prod.js?v=20260920-900-prod3',{updateViaCache:'none'})
+    navigator.serviceWorker.register('./sw-9.0-prod.js?v=20260920-900-prod5',{updateViaCache:'none'})
       .then(function(r){return r.update();})
       .catch(function(e){console.warn('DG Offline-Cache nicht bereit',e);});
   },{once:true});
 })();
 </script>
 
-<script defer src="./launcher-9.0.js?v=20260920-900-launch1"></script>
-<script defer src="./app-9.0.js?v=20260920-900-prod2"></script>
+<script defer src="./launcher-9.0.js?v=20260920-900-launch2"></script>
+<script defer src="./app-9.0.js?v=20260920-900-prod3"></script>
 </body>
 </html>
