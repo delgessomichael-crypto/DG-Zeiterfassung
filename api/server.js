@@ -1568,6 +1568,122 @@ async function directObjectReportsRead(body){
   return postgresObjectReports(body);
 }
 
+
+function regieReportsVerifyKey(body){
+  const status=String(body&&body.status||'Offen');
+  const year=Number(body&&body.year)||0,month=Number(body&&body.month)||0;
+  return 'regie_reports:'+status+':'+year+':'+month;
+}
+async function postgresRegieReports(body){
+  const status=String(body&&body.status||'Offen')||'Offen';
+  const year=Number(body&&body.year)||0,month=Number(body&&body.month)||0;
+  if(!['Offen','Abgerechnet'].includes(status))return null;
+  const [mq,tq]=await Promise.all([
+    pool.query('SELECT object_id,merge_id FROM regie_merges_shadow'),
+    pool.query(`SELECT id,object_id,employee_name,entry_date,customer,start_time,end_time,hours,activity,
+      transmitted_at_text,material_used,material,customer_signature_url,photo_count,photo_file_ids,photo_urls,
+      billing_status,billed_at_text,billed_by,job_status,is_supplement,supplement_created_at_text,
+      maintenance,next_maintenance_due,source_payload,shadow_updated_at
+      FROM time_entries_shadow
+      ORDER BY CASE WHEN COALESCE(source_payload->>'sourceRow','') ~ '^[0-9]+$'
+        THEN (source_payload->>'sourceRow')::int ELSE 2147483647 END,shadow_updated_at ASC,id ASC`)
+  ]);
+  const mergeMap=new Map(mq.rows.map(r=>[String(r.object_id||''),String(r.merge_id||'')]));
+  const baseKey=id=>{const m=mergeMap.get(String(id||''))||'';return m?('MERGE|'+m):('OBJECT|'+String(id||''));};
+  const excluded=new Set(['Angebot zu erstellen','Offenes Angebot','Angebot Angenommen','Angebot Abgelehnt','Verworfen']);
+  const rows=tq.rows.filter(r=>{
+    const d=berlinDateOnly(r.entry_date);if(!d)return false;
+    if(year&&Number(d.slice(0,4))!==year)return false;
+    if(month&&Number(d.slice(5,7))!==month)return false;
+    return true;
+  });
+  const active=new Map();
+  if(status==='Offen'){
+    rows.forEach((r,i)=>{
+      if(String(r.billing_status||'Offen')!=='Offen')return;
+      const js=String(r.job_status||'Abgeschlossen');if(excluded.has(js))return;
+      const oid=String(r.object_id||'');if(!oid)return;
+      const sk=berlinDateOnly(r.entry_date)+' '+String(r.start_time||'')+' '+String(i).padStart(6,'0');
+      const k=baseKey(oid),old=active.get(k);if(!old||sk>=old.sortKey)active.set(k,{jobStatus:js,sortKey:sk});
+    });
+  }
+  const groups=new Map();
+  for(const r of rows){
+    const date=berlinDateOnly(r.entry_date),rowStatus=String(r.billing_status||'Offen');
+    const oid=String(r.object_id||'');if(!date||!oid)continue;
+    const rowJobStatus=String(r.job_status||'Abgeschlossen');if(excluded.has(rowJobStatus))continue;
+    const bk=baseKey(oid),mergeId=mergeMap.get(oid)||'';
+    let groupJobStatus=rowJobStatus;
+    if(status==='Offen'){const a=active.get(bk);if(!a)continue;groupJobStatus=a.jobStatus;}
+    else if(rowStatus!=='Abgerechnet')continue;
+    const key=bk+'|JOB|'+groupJobStatus;
+    let g=groups.get(key);
+    if(!g){
+      g={objectId:oid,customer:String(r.customer||''),status,jobStatus:groupJobStatus,totalHours:0,reportCount:0,
+        employeesMap:new Set(),objectIdsMap:new Set(),reports:[],firstDate:date,lastDate:date,
+        billedAt:'',billedBy:'',mergeId,customerNamesMap:new Set()};
+      groups.set(key,g);
+    }
+    if(r.customer)g.customerNamesMap.add(String(r.customer));
+    g.totalHours+=Number(r.hours)||0;g.reportCount++;
+    if(r.employee_name)g.employeesMap.add(String(r.employee_name));g.objectIdsMap.add(oid);
+    if(date<g.firstDate)g.firstDate=date;if(date>g.lastDate)g.lastDate=date;
+    if(r.billed_at_text)g.billedAt=berlinDateTime(r.billed_at_text);if(r.billed_by)g.billedBy=String(r.billed_by);
+    g.reports.push({
+      id:String(r.id||''),employee:String(r.employee_name||''),date,customer:String(r.customer||''),
+      start:String(r.start_time||''),end:String(r.end_time||''),hours:Number(r.hours||0),activity:String(r.activity||''),
+      transmittedAt:berlinDateTime(r.transmitted_at_text||''),materialUsed:Boolean(r.material_used),material:String(r.material||''),
+      customerSignatureUrl:String(r.customer_signature_url||''),photoCount:Number(r.photo_count||0),
+      photoFileIds:String(r.photo_file_ids||''),photoUrls:String(r.photo_urls||''),status:rowStatus,objectId:oid,
+      jobStatus:rowJobStatus,isSupplement:Boolean(r.is_supplement),
+      supplementCreatedAt:berlinDateTime(r.supplement_created_at_text||''),maintenance:Boolean(r.maintenance),
+      nextMaintenanceDue:String(r.next_maintenance_due||''),billedAt:berlinDateTime(r.billed_at_text||''),
+      billedBy:String(r.billed_by||'')
+    });
+  }
+  const out=[...groups.values()].map(g=>{
+    g.totalHours=Math.round(g.totalHours*100)/100;g.employees=[...g.employeesMap].filter(Boolean).sort();
+    g.objectIds=[...g.objectIdsMap].filter(Boolean);const names=[...g.customerNamesMap].filter(Boolean);
+    if(names.length>1)g.customer=names.join(' / ');
+    delete g.customerNamesMap;delete g.employeesMap;delete g.objectIdsMap;
+    g.reports.sort((a,b)=>(a.date+' '+a.start).localeCompare(b.date+' '+b.start));return g;
+  });
+  out.sort((a,b)=>status==='Offen'?a.firstDate.localeCompare(b.firstDate):b.lastDate.localeCompare(a.lastDate));
+  return out;
+}
+function canonicalRegieReports(rows){
+  return (Array.isArray(rows)?rows:[]).map(g=>({
+    objectId:String(g.objectId||''),customer:String(g.customer||''),status:String(g.status||''),jobStatus:String(g.jobStatus||''),
+    totalHours:Number(g.totalHours||0),reportCount:Number(g.reportCount||0),
+    employees:(Array.isArray(g.employees)?g.employees:[]).map(String).sort(),
+    objectIds:(Array.isArray(g.objectIds)?g.objectIds:[]).map(String).sort(),firstDate:String(g.firstDate||''),
+    lastDate:String(g.lastDate||''),billedAt:String(g.billedAt||''),billedBy:String(g.billedBy||''),mergeId:String(g.mergeId||''),
+    reports:(Array.isArray(g.reports)?g.reports:[]).map(r=>({
+      id:String(r.id||''),employee:String(r.employee||''),date:String(r.date||''),customer:String(r.customer||''),
+      start:String(r.start||''),end:String(r.end||''),hours:Number(r.hours||0),activity:String(r.activity||''),
+      transmittedAt:String(r.transmittedAt||''),materialUsed:Boolean(r.materialUsed),material:String(r.material||''),
+      customerSignatureUrl:String(r.customerSignatureUrl||''),photoCount:Number(r.photoCount||0),
+      photoFileIds:String(r.photoFileIds||''),photoUrls:String(r.photoUrls||''),status:String(r.status||'Offen'),
+      objectId:String(r.objectId||''),jobStatus:String(r.jobStatus||'Abgeschlossen'),isSupplement:Boolean(r.isSupplement),
+      supplementCreatedAt:String(r.supplementCreatedAt||''),maintenance:Boolean(r.maintenance),
+      nextMaintenanceDue:String(r.nextMaintenanceDue||''),billedAt:String(r.billedAt||''),billedBy:String(r.billedBy||'')
+    }))
+  }));
+}
+async function verifyRegieReportsShadow(data,body){
+  if(!pool||!Array.isArray(data))return;
+  const pg=await postgresRegieReports(body);if(!Array.isArray(pg))return;
+  const a=canonicalRegieReports(data),b=canonicalRegieReports(pg),mismatches=JSON.stringify(a)===JSON.stringify(b)?0:1;
+  const key=regieReportsVerifyKey(body);
+  console.log('SHADOW_VERIFY '+key+' google='+a.length+' postgres='+b.length+' mismatches='+mismatches);
+  await saveShadowVerifyStat(key,a.length,b.length,mismatches);
+}
+async function directRegieReportsRead(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const key=regieReportsVerifyKey(body);if(!(await shadowReadyForDirectRead(key)))return null;
+  return postgresRegieReports(body);
+}
+
 async function initTimeEntriesShadow(){
   if(!pool)return;
   const existing=await pool.query('SELECT COUNT(*)::int AS n FROM time_entries_shadow');
@@ -4434,6 +4550,7 @@ async function tryDirectPostgresRead(action,body){
   if(action==='getObjectInternalNote')return directObjectInternalNoteRead(body);
   if(action==='getObjectInternalNotes')return directObjectInternalNotesRead(body);
   if(action==='getObjectReports')return directObjectReportsRead(body);
+  if(action==='getRegieReports')return directRegieReportsRead(body);
   if(action==='getTimeBankAccount')return directTimeBankAccountRead(body);
   if(action==='getMyTimeBank')return directMyTimeBankRead(body);
   if(action==='getVacationAccount')return directVacationAccountRead(body);
@@ -4482,7 +4599,7 @@ async function proxyLegacy(req, res, body) {
       console.error('Postgres employee read failed; falling back to Google:', e.message);
     }
   }
-  if (['getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getAbsences','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','getObjectReports','getTimeBankAccount','getMyTimeBank','getVacationAccount','getVacationAccounts'].includes(action)) {
+  if (['getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getAbsences','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','getObjectReports','getRegieReports','getTimeBankAccount','getMyTimeBank','getVacationAccount','getVacationAccounts'].includes(action)) {
     try {
       const direct=await tryDirectPostgresRead(action,body);
       if (direct!==null) {
@@ -4576,6 +4693,10 @@ async function proxyLegacy(req, res, body) {
           if(action==='getObjectReports'){
             regieSync.then(()=>verifyObjectReportsShadow(verifyData,body))
               .catch(e=>console.error('object reports shadow verify failed',e.message));
+          }
+          if(action==='getRegieReports'){
+            regieSync.then(()=>verifyRegieReportsShadow(verifyData,body))
+              .catch(e=>console.error('regie reports shadow verify failed',e.message));
           }
         }
         if (action==='getObjectInternalNote'||action==='getObjectInternalNotes') verifyObjectNotesShadow(verifyData,body).catch(e=>console.error('object notes shadow verify failed',e.message));
@@ -4836,6 +4957,9 @@ async function health() {
         objectReportsVerified:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'object_reports%' AND mismatches=0"
         )).rows[0]?.n||0,
+        regieReportsVerified:(await pool.query(
+          "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'regie_reports:%' AND mismatches=0"
+        )).rows[0]?.n||0,
         vacationVerifiedKeys:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'vacation_full:%' AND mismatches=0"
         )).rows[0]?.n||0,
@@ -5015,7 +5139,7 @@ initDb()
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
     if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' maintenance_attachments='+h.shadowCounts.maintenanceAttachments+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus+' day_closures='+h.shadowCounts.dayClosures+' time_entries='+h.shadowCounts.timeEntries+' objects='+h.shadowCounts.objects+' regie_merges='+h.shadowCounts.regieMerges+' object_notes='+h.shadowCounts.objectNotes);
     console.log('RAILWAY_SESSIONS active='+Number(h.activeRailwaySessions||0));
-    if(h.directReadReady)console.log('DIRECT_READ_READY manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders)+' offer_reminders='+Boolean(h.directReadReady.offerReminders)+' planner_workers='+Boolean(h.directReadReady.plannerWorkers)+' absences='+Boolean(h.directReadReady.absences)+' maintenance_search_queries='+Number(h.directReadReady.maintenanceSearchVerifiedQueries||0)+' maintenance_customers='+Number(h.directReadReady.maintenanceCustomersVerified||0)+' maintenance_overview='+Boolean(h.directReadReady.maintenanceOverview)+' maintenance_archive_queries='+Number(h.directReadReady.maintenanceArchiveVerifiedQueries||0)+' maintenance_device_ids='+Number(h.directReadReady.maintenanceDeviceIdsVerified||0)+' object_note_reads='+Number(h.directReadReady.objectNoteReadsVerified||0)+' object_reports='+Number(h.directReadReady.objectReportsVerified||0)+' vacation_keys='+Number(h.directReadReady.vacationVerifiedKeys||0)+' timebank_employees='+Number(h.directReadReady.timeBankVerifiedEmployees||0)+' my_timebank_employees='+Number(h.directReadReady.myTimeBankVerifiedEmployees||0));
+    if(h.directReadReady)console.log('DIRECT_READ_READY manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders)+' offer_reminders='+Boolean(h.directReadReady.offerReminders)+' planner_workers='+Boolean(h.directReadReady.plannerWorkers)+' absences='+Boolean(h.directReadReady.absences)+' maintenance_search_queries='+Number(h.directReadReady.maintenanceSearchVerifiedQueries||0)+' maintenance_customers='+Number(h.directReadReady.maintenanceCustomersVerified||0)+' maintenance_overview='+Boolean(h.directReadReady.maintenanceOverview)+' maintenance_archive_queries='+Number(h.directReadReady.maintenanceArchiveVerifiedQueries||0)+' maintenance_device_ids='+Number(h.directReadReady.maintenanceDeviceIdsVerified||0)+' object_note_reads='+Number(h.directReadReady.objectNoteReadsVerified||0)+' object_reports='+Number(h.directReadReady.objectReportsVerified||0)+' regie_reports='+Number(h.directReadReady.regieReportsVerified||0)+' vacation_keys='+Number(h.directReadReady.vacationVerifiedKeys||0)+' timebank_employees='+Number(h.directReadReady.timeBankVerifiedEmployees||0)+' my_timebank_employees='+Number(h.directReadReady.myTimeBankVerifiedEmployees||0));
     if(Array.isArray(h.shadowReadiness)&&h.shadowReadiness.length)console.log('SHADOW_READINESS '+h.shadowReadiness.map(x=>x.shadowName+'='+x.status+'('+x.mismatches+')').join(' | '));
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
