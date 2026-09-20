@@ -22,7 +22,26 @@ function stamp(){
   if(lv)lv.textContent='Version '+VERSION;
   const hv=document.querySelector('#mainScreen .hero .head-row strong');
   if(hv)hv.textContent='Zeiterfassung - '+VERSION;
-  try{window.DG_APP_VERSION=VERSION;window.DG_RELEASE=VERSION;}catch(_e){}
+  try{window.DG_APP_VERSION=VERSION;window.DG_RELEASE=VERSION;if(window.DG3)DG3.version=VERSION;}catch(_e){}
+}
+function installVersionGuard(){
+  if(window.__DG90_VERSION_GUARD)return;
+  window.__DG90_VERSION_GUARD=true;
+  const targets=[];
+  const title=document.querySelector('title');if(title)targets.push(title);
+  const login=document.querySelector('#loginScreen .center.muted.small');if(login)targets.push(login);
+  const hero=document.querySelector('#mainScreen .hero .head-row strong');if(hero)targets.push(hero);
+  if(!targets.length)return;
+  const mo=new MutationObserver(function(){
+    const wantedTitle='DG Zeiterfassung '+VERSION;
+    const wantedLogin='Version '+VERSION;
+    const wantedHero='Zeiterfassung - '+VERSION;
+    if(document.title!==wantedTitle)document.title=wantedTitle;
+    if(login&&login.textContent!==wantedLogin)login.textContent=wantedLogin;
+    if(hero&&hero.textContent!==wantedHero)hero.textContent=wantedHero;
+    try{window.DG_APP_VERSION=VERSION;window.DG_RELEASE=VERSION;if(window.DG3)DG3.version=VERSION;}catch(_e){}
+  });
+  targets.forEach(t=>mo.observe(t,{subtree:true,childList:true,characterData:true}));
 }
 async function direct(payload,timeoutMs){
   const ctl=new AbortController();
@@ -148,6 +167,7 @@ async function boot(){
   if(window[START_FLAG])return;
   window[START_FLAG]=true;
   stamp();
+  installVersionGuard();
   bind();
   startCoreOnce();
   try{await loadEmployees();}catch(_e){}
