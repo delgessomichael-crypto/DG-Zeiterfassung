@@ -6435,6 +6435,7 @@ async function health() {
         pool.query('SELECT COUNT(*)::int AS n FROM manual_orders_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM own_reminders_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM offer_reminders_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM inquiry_offers_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM planner_workers_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM planner_events_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM maintenance_customers_shadow'),
