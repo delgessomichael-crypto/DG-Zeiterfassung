@@ -1,9 +1,9 @@
 {
   "id": "/DG-Zeiterfassung/",
-  "name": "DG Zeiterfassung 8.0",
-  "short_name": "DG 8.0",
-  "description": "DG Zeiterfassung 8.0 - Del Gesso Gebäudetechnik",
-  "start_url": "./version8.html",
+  "name": "DG Zeiterfassung 9.0",
+  "short_name": "DG 9.0",
+  "description": "DG Zeiterfassung 9.0 - Del Gesso Gebäudetechnik",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "display_override": [
