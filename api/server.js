@@ -154,6 +154,61 @@ CREATE TABLE IF NOT EXISTS own_reminders_shadow (
   shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS customer_inquiries_shadow (
+  id TEXT PRIMARY KEY,
+  source TEXT,
+  gmail_ids TEXT,
+  customer TEXT,
+  email TEXT,
+  phone TEXT,
+  postal_code TEXT,
+  city TEXT,
+  subject TEXT,
+  description TEXT,
+  received_at_text TEXT,
+  status TEXT,
+  read_flag BOOLEAN NOT NULL DEFAULT false,
+  created_at_text TEXT,
+  changed_at_text TEXT,
+  changed_by TEXT,
+  internal_note TEXT,
+  done_reason TEXT,
+  contact_at_text TEXT,
+  contact_person TEXT,
+  contact_note TEXT,
+  offer_id TEXT,
+  external_url TEXT,
+  phone_url TEXT,
+  dropbox_url TEXT,
+  aqon_appointment_url TEXT,
+  aqon_details TEXT,
+  aqon_replied_at_text TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS customer_inquiries_shadow_status_idx
+  ON customer_inquiries_shadow(status,received_at_text);
+
+CREATE TABLE IF NOT EXISTS inquiry_reminders_shadow (
+  id TEXT PRIMARY KEY,
+  inquiry_id TEXT,
+  customer TEXT,
+  phone TEXT,
+  email TEXT,
+  description TEXT,
+  source TEXT,
+  created_at_text TEXT,
+  due_date_text TEXT,
+  status TEXT,
+  result TEXT,
+  changed_at_text TEXT,
+  changed_by TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS inquiry_reminders_shadow_status_idx
+  ON inquiry_reminders_shadow(status,due_date_text);
+
 CREATE TABLE IF NOT EXISTS inquiry_offers_shadow (
   offer_id TEXT PRIMARY KEY,
   inquiry_id TEXT,
@@ -638,6 +693,8 @@ async function initDb() {
   await initOwnRemindersShadow();
   await initOfferRemindersShadow();
   await initInquiryOffersShadow();
+  await initCustomerInquiriesShadow();
+  await initInquiryRemindersShadow();
   await initPlannerWorkersShadow();
   await initPlannerEventsShadow();
   await initMaintenanceShadows();
@@ -4551,6 +4608,240 @@ async function saveShadowVerifyStat(name,googleCount,postgresCount,mismatches){
 
 
 
+
+async function initCustomerInquiriesShadow(){
+  if(!pool)return;
+  const existing=await pool.query('SELECT COUNT(*)::int AS n FROM customer_inquiries_shadow');
+  if((existing.rows[0]?.n||0)>0)return;
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:Anfragen']
+  );
+  let inserted=0;
+  for(const row of q.rows){
+    const payload=row.payload||{};if(Number(payload.sourceRow||row.source_key)<=1)continue;
+    const x=Array.isArray(payload.cells)?payload.cells:[],id=textCell(x,0).trim();if(!id)continue;
+    await pool.query(
+      `INSERT INTO customer_inquiries_shadow(
+        id,source,gmail_ids,customer,email,phone,postal_code,city,subject,description,
+        received_at_text,status,read_flag,created_at_text,changed_at_text,changed_by,
+        internal_note,done_reason,contact_at_text,contact_person,contact_note,offer_id,
+        external_url,phone_url,dropbox_url,aqon_appointment_url,aqon_details,aqon_replied_at_text
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
+      ON CONFLICT(id) DO NOTHING`,
+      [id,textCell(x,1),textCell(x,2),textCell(x,3),textCell(x,4),textCell(x,5),
+       textCell(x,6),textCell(x,7),textCell(x,8),textCell(x,9),textCell(x,10),
+       textCell(x,11)||'Neu',String(textCell(x,12)).toLowerCase()==='ja',textCell(x,13),
+       textCell(x,14),textCell(x,15),textCell(x,16),textCell(x,17),textCell(x,18),
+       textCell(x,19),textCell(x,20),textCell(x,21),textCell(x,22),textCell(x,23),
+       textCell(x,24),textCell(x,25),textCell(x,26),textCell(x,27)]
+    );
+    inserted++;
+  }
+  console.log('SHADOW customer_inquiries initialized rows='+inserted);
+}
+
+async function initInquiryRemindersShadow(){
+  if(!pool)return;
+  const existing=await pool.query('SELECT COUNT(*)::int AS n FROM inquiry_reminders_shadow');
+  if((existing.rows[0]?.n||0)>0)return;
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:AnfragenReminder']
+  );
+  let inserted=0;
+  for(const row of q.rows){
+    const payload=row.payload||{};if(Number(payload.sourceRow||row.source_key)<=1)continue;
+    const x=Array.isArray(payload.cells)?payload.cells:[],id=textCell(x,0).trim();if(!id)continue;
+    await pool.query(
+      `INSERT INTO inquiry_reminders_shadow(
+        id,inquiry_id,customer,phone,email,description,source,created_at_text,due_date_text,
+        status,result,changed_at_text,changed_by
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      ON CONFLICT(id) DO NOTHING`,
+      [id,textCell(x,1),textCell(x,2),textCell(x,3),textCell(x,4),textCell(x,5),
+       textCell(x,6),textCell(x,7),textCell(x,8),textCell(x,9)||'Offen',
+       textCell(x,10),textCell(x,11),textCell(x,12)]
+    );
+    inserted++;
+  }
+  console.log('SHADOW inquiry_reminders initialized rows='+inserted);
+}
+
+async function upsertInquiryFromView(row){
+  if(!row||!row.id)return;
+  await pool.query(
+    `INSERT INTO customer_inquiries_shadow(
+      id,source,customer,email,phone,postal_code,city,subject,description,received_at_text,
+      status,read_flag,internal_note,done_reason,contact_at_text,contact_person,contact_note,
+      offer_id,external_url,phone_url,dropbox_url,aqon_appointment_url,aqon_details,aqon_replied_at_text,shadow_updated_at
+    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,now())
+    ON CONFLICT(id) DO UPDATE SET
+      source=EXCLUDED.source,customer=EXCLUDED.customer,email=EXCLUDED.email,phone=EXCLUDED.phone,
+      postal_code=EXCLUDED.postal_code,city=EXCLUDED.city,subject=EXCLUDED.subject,
+      description=EXCLUDED.description,received_at_text=EXCLUDED.received_at_text,status=EXCLUDED.status,
+      read_flag=EXCLUDED.read_flag,internal_note=EXCLUDED.internal_note,done_reason=EXCLUDED.done_reason,
+      contact_at_text=EXCLUDED.contact_at_text,contact_person=EXCLUDED.contact_person,
+      contact_note=EXCLUDED.contact_note,offer_id=EXCLUDED.offer_id,external_url=EXCLUDED.external_url,
+      phone_url=EXCLUDED.phone_url,dropbox_url=EXCLUDED.dropbox_url,
+      aqon_appointment_url=EXCLUDED.aqon_appointment_url,aqon_details=EXCLUDED.aqon_details,
+      aqon_replied_at_text=EXCLUDED.aqon_replied_at_text,shadow_updated_at=now()`,
+    [String(row.id),String(row.source||''),String(row.customer||''),String(row.email||''),
+     String(row.phone||''),String(row.postalCode||''),String(row.city||''),String(row.subject||''),
+     String(row.description||''),String(row.receivedAt||''),String(row.status||'Neu'),
+     Boolean(row.read),String(row.internalNote||''),String(row.doneReason||''),
+     String(row.contactAt||''),String(row.contactPerson||''),String(row.contactNote||''),
+     String(row.offerId||''),String(row.externalUrl||''),String(row.phoneUrl||''),
+     String(row.dropboxUrl||''),String(row.aqonAppointmentUrl||''),String(row.aqonDetails||''),
+     String(row.aqonRepliedAt||'')]
+  );
+}
+
+async function syncInquiryViewShadow(rows,status){
+  if(!pool||!Array.isArray(rows))return;
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    if(String(status||'')==='Alle')await client.query('TRUNCATE customer_inquiries_shadow');
+    await client.query('COMMIT');
+  }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
+  for(const row of rows)await upsertInquiryFromView(row);
+  const q=await pool.query('SELECT COUNT(*)::int AS n FROM customer_inquiries_shadow');
+  console.log('SHADOW customer_inquiries refreshed visible='+rows.length+' total='+Number(q.rows[0]?.n||0));
+}
+
+async function syncInquiryReminderViewShadow(rows,includeDone){
+  if(!pool||!Array.isArray(rows))return;
+  if(includeDone)await pool.query('TRUNCATE inquiry_reminders_shadow');
+  for(const r of rows){
+    if(!r||!r.id)continue;
+    await pool.query(
+      `INSERT INTO inquiry_reminders_shadow(
+        id,inquiry_id,customer,phone,email,description,source,created_at_text,due_date_text,
+        status,result,changed_at_text,changed_by,shadow_updated_at
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'','',now())
+      ON CONFLICT(id) DO UPDATE SET
+        inquiry_id=EXCLUDED.inquiry_id,customer=EXCLUDED.customer,phone=EXCLUDED.phone,
+        email=EXCLUDED.email,description=EXCLUDED.description,source=EXCLUDED.source,
+        created_at_text=EXCLUDED.created_at_text,due_date_text=EXCLUDED.due_date_text,
+        status=EXCLUDED.status,result=EXCLUDED.result,shadow_updated_at=now()`,
+      [String(r.id),String(r.inquiryId||''),String(r.customer||''),String(r.phone||''),
+       String(r.email||''),String(r.description||''),String(r.source||''),String(r.createdAt||''),
+       String(r.dueDate||''),String(r.status||'Offen'),String(r.result||'')]
+    );
+  }
+}
+
+async function mirrorInquiryWrite(action,body,parsed){
+  if(!pool)return;
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if(!data||data.ok===false)return;
+  const id=String(body.id||'').trim(),by=String(body.employee||''),now=new Date().toISOString();
+
+  if(action==='updateCustomerInquiry'||action==='deleteCustomerInquiry'){
+    if(!id)return;
+    const status=action==='deleteCustomerInquiry'?'Gelöscht':String(body.status||'');
+    const sets=[],args=[id];let n=2;
+    if(status){sets.push('status=$'+n++);args.push(status);}
+    if(body.markRead!==false||action==='deleteCustomerInquiry')sets.push('read_flag=true');
+    sets.push('changed_at_text=$'+n++);args.push(now);
+    sets.push('changed_by=$'+n++);args.push(by);
+    await pool.query('UPDATE customer_inquiries_shadow SET '+sets.join(',')+',shadow_updated_at=now() WHERE id=$1',args);
+  }else if(action==='saveCustomerInquiryNote'){
+    await pool.query(
+      'UPDATE customer_inquiries_shadow SET internal_note=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now() WHERE id=$1',
+      [id,String(body.note||''),now,by]
+    );
+  }else if(action==='completeCustomerInquiry'){
+    await pool.query(
+      `UPDATE customer_inquiries_shadow SET status='Erledigt',read_flag=true,done_reason=$2,
+        internal_note=CASE WHEN $3::boolean THEN $4 ELSE internal_note END,
+        changed_at_text=$5,changed_by=$6,shadow_updated_at=now() WHERE id=$1`,
+      [id,String(body.reason||''),body.note!==undefined,String(body.note||''),now,by]
+    );
+  }else if(action==='saveCustomerInquiryContact'){
+    let contact=now;
+    if(body.date)contact=String(body.date)+' '+String(body.time||'12:00')+':00';
+    await pool.query(
+      `UPDATE customer_inquiries_shadow SET status='Kontaktiert',read_flag=true,contact_at_text=$2,
+        contact_person=$3,contact_note=$4,changed_at_text=$5,changed_by=$6,shadow_updated_at=now() WHERE id=$1`,
+      [id,contact,String(body.person||''),String(body.note||''),now,by]
+    );
+  }else if(action==='archiveCustomerInquiry'||action==='rejectCustomerInquiry'){
+    await pool.query(
+      `UPDATE customer_inquiries_shadow SET status=$2,read_flag=true,done_reason=$3,
+        changed_at_text=$4,changed_by=$5,shadow_updated_at=now() WHERE id=$1`,
+      [id,action==='archiveCustomerInquiry'?'Archiviert':'Gelöscht',
+       action==='archiveCustomerInquiry'?'Termin vereinbart':'Abgelehnt',now,by]
+    );
+  }else if(action==='inquiryToOffer'){
+    if(data.existing)return;
+    await pool.query(
+      `UPDATE customer_inquiries_shadow SET customer=$2,phone=$3,status='Angebot erstellt',
+        read_flag=true,offer_id=$4,changed_at_text=$5,changed_by=$6,shadow_updated_at=now() WHERE id=$1`,
+      [id,String(body.customer||''),String(body.phone||''),String(data.offerId||''),now,by]
+    );
+  }
+}
+
+async function mirrorInquiryReminderWrite(action,body,parsed){
+  if(!pool)return;
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if(!data||data.ok===false)return;
+  const by=String(body.employee||''),now=new Date().toISOString();
+  if(action==='createInquiryReminder'){
+    const inquiryId=String(body.id||''),rid=String(data.reminderId||'');if(!inquiryId||!rid)return;
+    const q=await pool.query(
+      'SELECT customer,phone,email,description,subject,source FROM customer_inquiries_shadow WHERE id=$1',
+      [inquiryId]
+    );
+    const x=q.rows[0]||{};
+    await pool.query(
+      `INSERT INTO inquiry_reminders_shadow(
+        id,inquiry_id,customer,phone,email,description,source,created_at_text,due_date_text,
+        status,result,changed_at_text,changed_by,shadow_updated_at
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'Offen','',$8,$10,now())
+      ON CONFLICT(id) DO UPDATE SET
+        inquiry_id=EXCLUDED.inquiry_id,customer=EXCLUDED.customer,phone=EXCLUDED.phone,
+        email=EXCLUDED.email,description=EXCLUDED.description,source=EXCLUDED.source,
+        due_date_text=EXCLUDED.due_date_text,status='Offen',result='',changed_at_text=EXCLUDED.changed_at_text,
+        changed_by=EXCLUDED.changed_by,shadow_updated_at=now()`,
+      [rid,inquiryId,String(x.customer||''),String(x.phone||''),String(x.email||''),
+       String(x.description||x.subject||''),String(x.source||''),now,String(data.dueDate||''),by]
+    );
+    await pool.query(
+      `UPDATE customer_inquiries_shadow SET status='Reminder',read_flag=true,
+        changed_at_text=$2,changed_by=$3,shadow_updated_at=now() WHERE id=$1`,
+      [inquiryId,now,by]
+    );
+    return;
+  }
+  const rid=String(body.reminderId||'');if(!rid)return;
+  let result='',newStatus='';
+  if(action==='reopenInquiryReminder'){result='Zurück zu offenen Anfragen';newStatus='Neu';}
+  else if(action==='archiveInquiryReminder'){result='Termin vereinbart';newStatus='Archiviert';}
+  else if(action==='rejectInquiryReminder'){result='Abgelehnt';newStatus='Gelöscht';}
+  else return;
+  const q=await pool.query('SELECT inquiry_id FROM inquiry_reminders_shadow WHERE id=$1',[rid]);
+  const inquiryId=String(q.rows[0]?.inquiry_id||data.inquiryId||'');
+  await pool.query(
+    `UPDATE inquiry_reminders_shadow SET status='Erledigt',result=$2,
+      changed_at_text=$3,changed_by=$4,shadow_updated_at=now() WHERE id=$1`,
+    [rid,result,now,by]
+  );
+  if(inquiryId){
+    await pool.query(
+      `UPDATE customer_inquiries_shadow SET status=$2,read_flag=true,
+        done_reason=CASE WHEN $2='Archiviert' THEN 'Termin vereinbart'
+                         WHEN $2='Gelöscht' THEN 'Abgelehnt' ELSE done_reason END,
+        changed_at_text=$3,changed_by=$4,shadow_updated_at=now() WHERE id=$1`,
+      [inquiryId,newStatus,now,by]
+    );
+  }
+}
+
 async function initInquiryOffersShadow(){
   if(!pool)return;
   const existing=await pool.query('SELECT COUNT(*)::int AS n FROM inquiry_offers_shadow');
@@ -6110,6 +6401,8 @@ async function proxyLegacy(req, res, body) {
         if (action==='getEmployeeAdminData') refreshAndVerifyEmployeeAdminShadow(verifyData).catch(e=>console.error('employee admin shadow refresh failed',e.message));
         if (action==='getManualOrders') verifyManualOrdersShadow(verifyData).catch(e=>console.error('manual order shadow verify failed',e.message));
         if (action==='getOwnReminders') verifyOwnRemindersShadow(verifyData).catch(e=>console.error('own reminder shadow verify failed',e.message));
+        if (action==='getCustomerInquiries') syncInquiryViewShadow(verifyData,body.status).catch(e=>console.error('customer inquiries shadow refresh failed',e.message));
+        if (action==='getInquiryReminders') syncInquiryReminderViewShadow(verifyData,Boolean(body.includeDone)).catch(e=>console.error('inquiry reminders shadow refresh failed',e.message));
         if (action==='getOfferReminders') verifyOfferRemindersShadow(verifyData,Boolean(body.includeDone)).catch(e=>console.error('offer reminder shadow verify failed',e.message));
         if (action==='getOfferReports') saveExactViewShadow('getOfferReports',offerReportsViewKey(body),verifyData).catch(e=>console.error('offer reports exact view save failed',e.message));
         if (action==='getOfferStatistics') saveExactViewShadow('getOfferStatistics',offerStatisticsViewKey(),verifyData).catch(e=>console.error('offer statistics exact view save failed',e.message));
@@ -6247,6 +6540,15 @@ async function proxyLegacy(req, res, body) {
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['saveManualOrder','saveManualOrderNote','setManualOrderStatus','deleteManualOrder'].includes(action)) {
         mirrorManualOrderWrite(action,body,parsed).catch(e=>console.error('manual order shadow mirror failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false &&
+          ['updateCustomerInquiry','saveCustomerInquiryNote','completeCustomerInquiry','deleteCustomerInquiry',
+           'saveCustomerInquiryContact','archiveCustomerInquiry','rejectCustomerInquiry','inquiryToOffer'].includes(action)) {
+        mirrorInquiryWrite(action,body,parsed).catch(e=>console.error('customer inquiry shadow mirror failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false &&
+          ['createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder'].includes(action)) {
+        mirrorInquiryReminderWrite(action,body,parsed).catch(e=>console.error('inquiry reminder shadow mirror failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['createOwnReminder','saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder'].includes(action)) {
