@@ -594,6 +594,37 @@ async function counts() {
   return { ok: true, counts: q.rows };
 }
 
+async function latencySummary() {
+  if (!pool) throw new Error('Database not configured');
+  const [summary,recent,total] = await Promise.all([
+    pool.query(
+      `SELECT action, COUNT(*)::int AS count,
+              ROUND(AVG(duration_ms)::numeric,1) AS avg_duration_ms,
+              MAX(duration_ms)::int AS max_duration_ms
+         FROM legacy_action_log
+        WHERE created_at > now() - interval '2 hours'
+          AND duration_ms IS NOT NULL
+        GROUP BY action
+        ORDER BY AVG(duration_ms) DESC`
+    ),
+    pool.query(
+      `SELECT action,duration_ms,created_at
+         FROM legacy_action_log
+        WHERE created_at > now() - interval '2 hours'
+          AND duration_ms IS NOT NULL
+        ORDER BY created_at DESC
+        LIMIT 10`
+    ),
+    pool.query(
+      `SELECT COUNT(*)::int AS total
+         FROM legacy_action_log
+        WHERE created_at > now() - interval '2 hours'
+          AND duration_ms IS NOT NULL`
+    )
+  ]);
+  return {ok:true,total:total.rows[0]?.total||0,summary:summary.rows,recent:recent.rows};
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
@@ -619,6 +650,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/v1/migration/counts') {
       if (!authorized(req)) return json(res, 401, { ok:false, error:'Unauthorized' }, req);
       return json(res, 200, await counts(), req);
+    }
+
+    if (req.method === 'GET' && url.pathname === '/v1/internal/latency') {
+      if (!authorized(req)) return json(res, 401, { ok:false, error:'Unauthorized' }, req);
+      return json(res, 200, await latencySummary(), req);
     }
 
     if (req.method === 'POST' && url.pathname === '/v1/migration/shadow') {
