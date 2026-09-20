@@ -342,6 +342,24 @@ CREATE TABLE IF NOT EXISTS time_bank_shadow (
 CREATE INDEX IF NOT EXISTS time_bank_shadow_employee_idx
   ON time_bank_shadow(employee_name);
 
+CREATE TABLE IF NOT EXISTS assignments_shadow (
+  id TEXT PRIMARY KEY,
+  source_entry_id TEXT,
+  employee_name TEXT,
+  hours NUMERIC(10,2) NOT NULL DEFAULT 0,
+  status TEXT,
+  created_at_text TEXT,
+  created_by TEXT,
+  confirmed_at_text TEXT,
+  issue_at_text TEXT,
+  note TEXT,
+  replaced_by_entry_id TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS assignments_shadow_employee_idx
+  ON assignments_shadow(employee_name,status);
+
 CREATE TABLE IF NOT EXISTS monthly_adjustments_shadow (
   id TEXT PRIMARY KEY,
   employee_name TEXT NOT NULL,
@@ -574,6 +592,7 @@ async function initDb() {
   await initAbsencesShadow();
   await initVacationEntitlementsShadow();
   await initTimeBankShadow();
+  await initAssignmentsShadow();
   await initMonthlyAdjustmentsShadow();
   await initClosureShadows();
   await initConflictReviewsShadow();
@@ -2567,6 +2586,66 @@ async function verifyMonthClosures(rows,year,month){
   mismatches+=pg.size;
   console.log('SHADOW_VERIFY month_closures google='+googleCount+' postgres='+q.rows.length+' mismatches='+mismatches);
   await saveShadowVerifyStat('month_closures',googleCount,q.rows.length,mismatches);
+}
+
+
+async function initAssignmentsShadow(){
+  if(!pool)return;
+  const existing=await pool.query('SELECT COUNT(*)::int AS n FROM assignments_shadow');
+  if((existing.rows[0]?.n||0)>0)return;
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:Mitarbeiterzuordnungen']
+  );
+  let inserted=0;
+  for(const row of q.rows){
+    const payload=row.payload||{};
+    if(Number(payload.sourceRow||row.source_key)<=1)continue;
+    const cells=Array.isArray(payload.cells)?payload.cells:[];
+    const id=textCell(cells,0).trim();if(!id)continue;
+    await pool.query(
+      `INSERT INTO assignments_shadow(
+        id,source_entry_id,employee_name,hours,status,created_at_text,created_by,
+        confirmed_at_text,issue_at_text,note,replaced_by_entry_id
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      ON CONFLICT(id) DO NOTHING`,
+      [id,textCell(cells,1),textCell(cells,2),Number(textCell(cells,3))||0,
+       textCell(cells,4)||'Zugeordnet',textCell(cells,5),textCell(cells,6),
+       textCell(cells,7),textCell(cells,8),textCell(cells,9),textCell(cells,10)]
+    );
+    inserted++;
+  }
+  console.log('SHADOW assignments initialized rows='+inserted);
+}
+async function mirrorAssignmentWrite(action,body,parsed){
+  if(!pool)return;
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if(!data||data.ok===false)return;
+  const id=String(body.assignmentId||'').trim();
+  if(action==='confirmEmployeeAssignment'&&id){
+    await pool.query(
+      `UPDATE assignments_shadow SET status='Bestätigt',confirmed_at_text=$2,issue_at_text='',note='',shadow_updated_at=now()
+        WHERE id=$1`,
+      [id,new Date().toISOString()]
+    );
+  }else if(action==='reportEmployeeAssignmentIssue'&&id){
+    await pool.query(
+      `UPDATE assignments_shadow SET status='Abweichung',issue_at_text=$2,note=$3,shadow_updated_at=now()
+        WHERE id=$1`,
+      [id,new Date().toISOString(),String(body.note||'')]
+    );
+  }else if(action==='deleteEntry'){
+    const entryId=String(body.id||'').trim();
+    if(entryId){
+      await pool.query('DELETE FROM assignments_shadow WHERE source_entry_id=$1',[entryId]);
+      await pool.query(
+        `UPDATE assignments_shadow SET status='Zugeordnet',replaced_by_entry_id='',shadow_updated_at=now()
+          WHERE replaced_by_entry_id=$1`,
+        [entryId]
+      );
+    }
+  }
 }
 
 async function initMonthlyAdjustmentsShadow(){
@@ -5215,6 +5294,10 @@ async function proxyLegacy(req, res, body) {
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','saveAbsence','deleteAbsence','endSicknessAbsence'].includes(action)) {
         invalidateShadowVerify('employee_admin').catch(e=>console.error('employee admin balance readiness invalidate failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false &&
+          ['confirmEmployeeAssignment','reportEmployeeAssignmentIssue','deleteEntry'].includes(action)) {
+        mirrorAssignmentWrite(action,body,parsed).catch(e=>console.error('assignment shadow mirror failed',e.message));
       }
       bumpWriteStat(action, upstream.status === 200 && parsed && parsed.ok !== false).catch(()=>{});
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
