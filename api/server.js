@@ -2794,30 +2794,55 @@ async function initAbsencesShadow(){
   console.log('SHADOW absences initialized rows='+inserted);
 }
 
+async function invalidateShadowVerify(name){
+  if(!pool)return;
+  await pool.query('DELETE FROM shadow_verify_stats WHERE shadow_name=$1',[String(name)]);
+}
+
 async function mirrorAbsenceWrite(action,body,parsed){
   if(!pool)return;
   const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
   if(!data||data.ok===false)return;
   if(action==='saveAbsence'){
     const id=String(data.id||'').trim();if(!id)return;
+    const sick=data.sickness||{};
     await pool.query(
       `INSERT INTO absences_shadow(
-        id,employee_name,absence_type,start_date,end_date,created_at_text,created_by,active,credited_hours,shadow_updated_at
-      ) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,now())
+        id,employee_name,absence_type,start_date,end_date,created_at_text,created_by,active,
+        sickness_case_id,sickness_mode,employer_pay_through,payer,sickness_case_days,note,
+        credited_hours,shadow_updated_at
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9,$10,$11,$12,$13,$14,now())
       ON CONFLICT(id) DO UPDATE SET
         employee_name=EXCLUDED.employee_name,absence_type=EXCLUDED.absence_type,
         start_date=EXCLUDED.start_date,end_date=EXCLUDED.end_date,
-        created_by=EXCLUDED.created_by,active=true,credited_hours=EXCLUDED.credited_hours,
-        shadow_updated_at=now()`,
+        created_by=EXCLUDED.created_by,active=true,
+        sickness_case_id=EXCLUDED.sickness_case_id,sickness_mode=EXCLUDED.sickness_mode,
+        employer_pay_through=EXCLUDED.employer_pay_through,payer=EXCLUDED.payer,
+        sickness_case_days=EXCLUDED.sickness_case_days,note=EXCLUDED.note,
+        credited_hours=EXCLUDED.credited_hours,shadow_updated_at=now()`,
       [id,String(body.targetEmployee||''),String(body.type||''),String(body.startDate||''),
        String(body.endDate||''),new Date().toISOString(),String(body.employee||''),
+       String(sick.caseId||''),String(sick.mode||''),String(sick.employerPayThrough||''),
+       String(sick.payer||''),Math.max(0,Number(sick.caseCalendarDays)||0),String(sick.note||''),
        Number(data.creditedHours||0)]
     );
+    if(String(body.type||'')==='Krank')await invalidateShadowVerify('sickness_alerts');
   }else if(action==='deleteAbsence'){
     await pool.query(
       'UPDATE absences_shadow SET active=false,shadow_updated_at=now() WHERE id=$1',
       [String(body.id||'')]
     );
+    await invalidateShadowVerify('sickness_alerts');
+  }else if(action==='endSicknessAbsence'){
+    const id=String(body.id||'').trim();
+    if(id){
+      if(data.removedEntire){
+        await pool.query('UPDATE absences_shadow SET active=false,shadow_updated_at=now() WHERE id=$1',[id]);
+      }else if(data.changed){
+        await pool.query('UPDATE absences_shadow SET end_date=$2,shadow_updated_at=now() WHERE id=$1',[id,String(data.newEnd||'')]);
+      }
+    }
+    await invalidateShadowVerify('sickness_alerts');
   }
 }
 
@@ -2845,6 +2870,95 @@ async function verifyAbsencesShadow(rows){
   await saveShadowVerifyStat('absences',rows.length,pg.size,mismatches);
 }
 
+
+
+function isoAddDays(dateText,days){
+  const m=String(dateText||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);if(!m)return '';
+  const d=new Date(Date.UTC(Number(m[1]),Number(m[2])-1,Number(m[3])+Number(days),12,0,0));
+  return d.toISOString().slice(0,10);
+}
+function isoDateList(start,end){
+  const out=[];let d=String(start||''),guard=0;
+  while(d&&d<=String(end||'')&&guard<3700){out.push(d);d=isoAddDays(d,1);guard++;}
+  return out;
+}
+async function employeeSicknessMetaFromSnapshot(){
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:Mitarbeiter']
+  );
+  const out=[];
+  for(const row of q.rows){
+    const payload=row.payload||{};if(Number(payload.sourceRow||row.source_key)<=1)continue;
+    const cells=Array.isArray(payload.cells)?payload.cells:[];
+    const name=textCell(cells,0).trim();if(!name)continue;
+    const activeRaw=textCell(cells,11).trim().toLowerCase();
+    const active=!['nein','no','false','0','inaktiv'].includes(activeRaw);
+    out.push({name,active,entryDate:berlinDateOnly(textCell(cells,30))});
+  }
+  return out;
+}
+async function postgresSicknessAlerts(){
+  const [employees,aq]=await Promise.all([
+    employeeSicknessMetaFromSnapshot(),
+    pool.query(`SELECT id,employee_name,start_date,end_date,sickness_case_id,sickness_mode,payer
+                  FROM absences_shadow
+                 WHERE active=true AND absence_type='Krank'`)
+  ]);
+  const alerts=[];
+  for(const rec of employees.filter(x=>x.active)){
+    const rows=aq.rows.filter(r=>String(r.employee_name||'')===rec.name).map(r=>({
+      id:String(r.id||''),caseId:String(r.sickness_case_id||r.id||''),mode:String(r.sickness_mode||''),
+      start:berlinDateOnly(r.start_date),end:berlinDateOnly(r.end_date),payer:String(r.payer||'')
+    }));
+    const groups=new Map();
+    for(const r of rows){if(!groups.has(r.caseId))groups.set(r.caseId,[]);groups.get(r.caseId).push(r);}
+    for(const [caseId,group] of groups){
+      const dateSet=new Set();
+      for(const r of rows.filter(x=>x.caseId===caseId))for(const d of isoDateList(r.start,r.end))dateSet.add(d);
+      const dates=[...dateSet].sort();
+      const last=group.slice().sort((a,b)=>b.end.localeCompare(a.end))[0];
+      const eligibleFrom=rec.entryDate?isoAddDays(rec.entryDate,28):'';
+      const used=dates.filter(d=>!eligibleFrom||d>=eligibleFrom).length;
+      const remaining=Math.max(0,42-Math.min(42,used));
+      let level='',title='',detail='';
+      if(group.some(x=>x.mode==='Unklar')){
+        level='error';title='Krankheitsfall ungeklärt';
+        detail='Neuer Fall oder Fortsetzung derselben Erkrankung muss vor der Lohnabrechnung geklärt werden.';
+      }else if(used>=42){
+        level='error';title='6-Wochen-Frist erreicht';
+        detail='Arbeitgeber-Entgeltfortzahlung ist für diesen Fall ausgeschöpft; Krankengeld/Krankenkasse prüfen.';
+      }else if(used>=35){
+        level='warn';title='6-Wochen-Frist nähert sich';
+        detail='Noch '+remaining+' Kalendertag'+(remaining===1?'':'e')+' Arbeitgeber-Entgeltfortzahlung in diesem Krankheitsfall.';
+      }
+      if(level)alerts.push({employee:rec.name,caseId,level,title,detail,start:group[0].start,end:last.end,usedDays:used,remainingDays:remaining,payer:last.payer||''});
+    }
+  }
+  const rank={error:0,warn:1,info:2};
+  alerts.sort((a,b)=>(rank[a.level]-rank[b.level])||a.employee.localeCompare(b.employee,'de'));
+  return {count:alerts.length,alerts,checkedAt:berlinDateOnly(new Date())};
+}
+function canonicalSicknessAlerts(data){
+  return {count:Number(data&&data.count||0),alerts:(Array.isArray(data&&data.alerts)?data.alerts:[]).map(x=>({
+    employee:String(x.employee||''),caseId:String(x.caseId||''),level:String(x.level||''),title:String(x.title||''),
+    detail:String(x.detail||''),start:String(x.start||''),end:String(x.end||''),usedDays:Number(x.usedDays||0),
+    remainingDays:Number(x.remainingDays||0),payer:String(x.payer||'')
+  }))};
+}
+async function verifySicknessAlertsShadow(data){
+  if(!pool||!data)return;
+  const pg=await postgresSicknessAlerts(),a=canonicalSicknessAlerts(data),b=canonicalSicknessAlerts(pg);
+  const mismatches=JSON.stringify(a)===JSON.stringify(b)?0:1;
+  console.log('SHADOW_VERIFY sickness_alerts google='+a.count+' postgres='+b.count+' mismatches='+mismatches);
+  await saveShadowVerifyStat('sickness_alerts',a.count,b.count,mismatches);
+}
+async function directSicknessAlertsRead(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  if(!(await shadowReadyForDirectRead('sickness_alerts')))return null;
+  return postgresSicknessAlerts();
+}
 
 async function initMaintenanceAttachmentsShadow(){
   if(!pool)return;
@@ -4542,6 +4656,7 @@ async function tryDirectPostgresRead(action,body){
   if(action==='getOfferReminders')return directOfferRemindersRead(body);
   if(action==='getPlannerWorkers')return directPlannerWorkersRead(body);
   if(action==='getAbsences')return directAbsencesRead(body);
+  if(action==='getSicknessAlerts')return directSicknessAlertsRead(body);
   if(action==='searchMaintenanceCustomers')return directMaintenanceSearchRead(body);
   if(action==='getMaintenanceCustomer')return directMaintenanceCustomerRead(body);
   if(action==='getMaintenanceOverview')return directMaintenanceOverviewRead(body);
@@ -4599,7 +4714,7 @@ async function proxyLegacy(req, res, body) {
       console.error('Postgres employee read failed; falling back to Google:', e.message);
     }
   }
-  if (['getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getAbsences','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','getObjectReports','getRegieReports','getTimeBankAccount','getMyTimeBank','getVacationAccount','getVacationAccounts'].includes(action)) {
+  if (['getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getAbsences','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','getObjectReports','getRegieReports','getTimeBankAccount','getMyTimeBank','getVacationAccount','getVacationAccounts'].includes(action)) {
     try {
       const direct=await tryDirectPostgresRead(action,body);
       if (direct!==null) {
@@ -4659,6 +4774,7 @@ async function proxyLegacy(req, res, body) {
         if (action==='getMaintenanceArchive') verifyMaintenanceArchiveShadow(verifyData,body.q).catch(e=>console.error('maintenance archive shadow verify failed',e.message));
         if (action==='findMaintenanceDeviceByInternalId') verifyMaintenanceDeviceByInternalIdShadow(verifyData,body.internalId).catch(e=>console.error('maintenance device-id shadow verify failed',e.message));
         if (action==='getAbsences') verifyAbsencesShadow(verifyData).catch(e=>console.error('absence shadow verify failed',e.message));
+        if (action==='getSicknessAlerts') verifySicknessAlertsShadow(verifyData).catch(e=>console.error('sickness alerts shadow verify failed',e.message));
         if (action==='getVacationAccount') {
           verifyVacationAccountShadow(verifyData).catch(e=>console.error('vacation entitlement shadow verify failed',e.message));
           verifyVacationFullShadow(verifyData).catch(e=>console.error('vacation full shadow verify failed',e.message));
@@ -4745,7 +4861,7 @@ async function proxyLegacy(req, res, body) {
         mirrorDeleteMaintenanceAttachment(body,parsed).catch(e=>console.error('maintenance attachment delete mirror failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
-          ['saveAbsence','deleteAbsence'].includes(action)) {
+          ['saveAbsence','deleteAbsence','endSicknessAbsence'].includes(action)) {
         mirrorAbsenceWrite(action,body,parsed).catch(e=>console.error('absence shadow mirror failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false && action==='saveVacationEntitlement') {
@@ -4938,6 +5054,7 @@ async function health() {
         offerReminders:await shadowReadyForDirectRead('offer_reminders'),
         plannerWorkers:await shadowReadyForDirectRead('planner_workers'),
         absences:await shadowReadyForDirectRead('absences'),
+        sicknessAlerts:await shadowReadyForDirectRead('sickness_alerts'),
         maintenanceSearchVerifiedQueries:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'maintenance_search:%' AND mismatches=0"
         )).rows[0]?.n||0,
@@ -5139,7 +5256,7 @@ initDb()
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
     if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' maintenance_attachments='+h.shadowCounts.maintenanceAttachments+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus+' day_closures='+h.shadowCounts.dayClosures+' time_entries='+h.shadowCounts.timeEntries+' objects='+h.shadowCounts.objects+' regie_merges='+h.shadowCounts.regieMerges+' object_notes='+h.shadowCounts.objectNotes);
     console.log('RAILWAY_SESSIONS active='+Number(h.activeRailwaySessions||0));
-    if(h.directReadReady)console.log('DIRECT_READ_READY manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders)+' offer_reminders='+Boolean(h.directReadReady.offerReminders)+' planner_workers='+Boolean(h.directReadReady.plannerWorkers)+' absences='+Boolean(h.directReadReady.absences)+' maintenance_search_queries='+Number(h.directReadReady.maintenanceSearchVerifiedQueries||0)+' maintenance_customers='+Number(h.directReadReady.maintenanceCustomersVerified||0)+' maintenance_overview='+Boolean(h.directReadReady.maintenanceOverview)+' maintenance_archive_queries='+Number(h.directReadReady.maintenanceArchiveVerifiedQueries||0)+' maintenance_device_ids='+Number(h.directReadReady.maintenanceDeviceIdsVerified||0)+' object_note_reads='+Number(h.directReadReady.objectNoteReadsVerified||0)+' object_reports='+Number(h.directReadReady.objectReportsVerified||0)+' regie_reports='+Number(h.directReadReady.regieReportsVerified||0)+' vacation_keys='+Number(h.directReadReady.vacationVerifiedKeys||0)+' timebank_employees='+Number(h.directReadReady.timeBankVerifiedEmployees||0)+' my_timebank_employees='+Number(h.directReadReady.myTimeBankVerifiedEmployees||0));
+    if(h.directReadReady)console.log('DIRECT_READ_READY manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders)+' offer_reminders='+Boolean(h.directReadReady.offerReminders)+' planner_workers='+Boolean(h.directReadReady.plannerWorkers)+' absences='+Boolean(h.directReadReady.absences)+' sickness_alerts='+Boolean(h.directReadReady.sicknessAlerts)+' maintenance_search_queries='+Number(h.directReadReady.maintenanceSearchVerifiedQueries||0)+' maintenance_customers='+Number(h.directReadReady.maintenanceCustomersVerified||0)+' maintenance_overview='+Boolean(h.directReadReady.maintenanceOverview)+' maintenance_archive_queries='+Number(h.directReadReady.maintenanceArchiveVerifiedQueries||0)+' maintenance_device_ids='+Number(h.directReadReady.maintenanceDeviceIdsVerified||0)+' object_note_reads='+Number(h.directReadReady.objectNoteReadsVerified||0)+' object_reports='+Number(h.directReadReady.objectReportsVerified||0)+' regie_reports='+Number(h.directReadReady.regieReportsVerified||0)+' vacation_keys='+Number(h.directReadReady.vacationVerifiedKeys||0)+' timebank_employees='+Number(h.directReadReady.timeBankVerifiedEmployees||0)+' my_timebank_employees='+Number(h.directReadReady.myTimeBankVerifiedEmployees||0));
     if(Array.isArray(h.shadowReadiness)&&h.shadowReadiness.length)console.log('SHADOW_READINESS '+h.shadowReadiness.map(x=>x.shadowName+'='+x.status+'('+x.mismatches+')').join(' | '));
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
