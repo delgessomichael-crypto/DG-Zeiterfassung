@@ -3279,6 +3279,7 @@ async function health() {
   let employeeSnapshotDirty = null;
   let shadowCounts = null;
   let shadowVerify = [];
+  let shadowReadiness = [];
   let writeStats = [];
   let dayClosureSourceAudit = null;
   if (pool) {
@@ -3341,6 +3342,14 @@ async function health() {
         'SELECT shadow_name,google_count,postgres_count,mismatches,checked_at FROM shadow_verify_stats ORDER BY shadow_name'
       );
       shadowVerify=verifyQ.rows;
+      shadowReadiness=shadowVerify.map(x=>({
+        shadowName:x.shadow_name,
+        status:Number(x.mismatches||0)===0?'ready':'mismatch',
+        googleCount:Number(x.google_count||0),
+        postgresCount:Number(x.postgres_count||0),
+        mismatches:Number(x.mismatches||0),
+        checkedAt:x.checked_at
+      }));
       const writeQ=await pool.query(
         `SELECT action,success_count,failure_count,last_success_at,last_failure_at
            FROM write_action_stats
@@ -3383,6 +3392,7 @@ async function health() {
     timeEntriesShadow: pool ? 'enabled' : 'disabled',
     shadowCounts,
     shadowVerify,
+    shadowReadiness,
     writeStats,
     dayClosureSourceAudit
   };
@@ -3513,6 +3523,7 @@ initDb()
     const h = await health();
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
     if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus+' day_closures='+h.shadowCounts.dayClosures+' time_entries='+h.shadowCounts.timeEntries);
+    if(Array.isArray(h.shadowReadiness)&&h.shadowReadiness.length)console.log('SHADOW_READINESS '+h.shadowReadiness.map(x=>x.shadowName+'='+x.status+'('+x.mismatches+')').join(' | '));
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
   })
