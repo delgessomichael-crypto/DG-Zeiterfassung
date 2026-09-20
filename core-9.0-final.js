@@ -3603,8 +3603,9 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 /* DG Zeiterfassung 9.0 - strikte, einheitliche Backend-Anbindung */
 (function(){
 'use strict';
-const V='9.0',PREVIOUS=[],KEY='dg70_backend',TTL=5*60*1000;
+const V='9.0',PREVIOUS=[],KEY='dg70_backend',TTL=60*60*1000;
 const BACKEND_URL='https://dg-app-10-api-production.up.railway.app/';
+let backendCheckPromise=null;
 function byId(id){return document.getElementById(id);}
 function exact(v){return String(v||'').trim()===V;}
 function compatible(v){const s=String(v||'').trim();return exact(s)||PREVIOUS.includes(s);}
@@ -3612,17 +3613,25 @@ function foundVersion(){return String(window.__DG_FOUND_BACKEND||'unbekannt');}
 function clearVersionNotices(){const n=byId('d3Notice');if(n&&/Google-GS|Google-Backend|Backend.*bereitgestellt|Bereitstellungs-Link|Versionsstand/i.test(n.textContent||''))n.remove();}
 function showMismatch(found){window.__DG_FOUND_BACKEND=String(found||'unbekannt');if(compatible(found)){clearVersionNotices();return true;}if(window.DG3)DG3.backend='';const msg='Versionsstand stimmt nicht: App '+V+' benötigt Google-GS '+V+'. Aktiv ist Google-GS '+foundVersion()+'.';if(typeof window.d3Notice==='function')window.d3Notice(msg,'warn');return false;}
 window.d3CheckBackend=d3CheckBackend=async function(force){
+  if(backendCheckPromise)return backendCheckPromise;
   if(!force){try{const c=JSON.parse(sessionStorage.getItem(KEY)||'null');if(c&&compatible(c.version)&&Date.now()-Number(c.ts||0)<TTL){window.__DG_FOUND_BACKEND=String(c.version);if(window.DG3)DG3.backend=String(c.version);clearVersionNotices();return true;}}catch(_e){}}
-  try{
-    const r=await fetch(BACKEND_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'ping',clientVersion:V})});
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    const raw=JSON.parse(await r.text());if(!raw.ok)throw new Error(raw.error||'Serverfehler.');
-    const data=raw.data!==undefined?raw.data:raw,found=String(data&&data.version||raw.version||'unbekannt');
-    window.__DG_FOUND_BACKEND=found;
-    try{sessionStorage.removeItem('dg60_backend_reachable');sessionStorage.removeItem('dg60_backend');sessionStorage.removeItem('dg602_backend');if(compatible(found))sessionStorage.setItem(KEY,JSON.stringify({ts:Date.now(),version:found}));else sessionStorage.removeItem(KEY);}catch(_e){}
-    if(window.DG3)DG3.backend=compatible(found)?found:'';
-    return showMismatch(found);
-  }catch(e){window.__DG_FOUND_BACKEND='nicht erreichbar';if(window.DG3)DG3.backend='';try{sessionStorage.removeItem(KEY);}catch(_e){}if(typeof window.d3Notice==='function')window.d3Notice('Google-Backend ist nicht erreichbar: '+(e&&e.message?e.message:'Unbekannter Fehler')+'.','warn');return false;}
+  backendCheckPromise=(async()=>{
+    try{
+      const r=await fetch(BACKEND_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'ping',clientVersion:V})});
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      const raw=JSON.parse(await r.text());if(!raw.ok)throw new Error(raw.error||'Serverfehler.');
+      const data=raw.data!==undefined?raw.data:raw,found=String(data&&data.version||raw.version||'unbekannt');
+      window.__DG_FOUND_BACKEND=found;
+      try{sessionStorage.removeItem('dg60_backend_reachable');sessionStorage.removeItem('dg60_backend');sessionStorage.removeItem('dg602_backend');if(compatible(found))sessionStorage.setItem(KEY,JSON.stringify({ts:Date.now(),version:found}));else sessionStorage.removeItem(KEY);}catch(_e){}
+      if(window.DG3)DG3.backend=compatible(found)?found:'';
+      return showMismatch(found);
+    }catch(e){
+      window.__DG_FOUND_BACKEND='nicht erreichbar';if(window.DG3)DG3.backend='';try{sessionStorage.removeItem(KEY);}catch(_e){}
+      if(typeof window.d3Notice==='function')window.d3Notice('Google-Backend ist nicht erreichbar: '+(e&&e.message?e.message:'Unbekannter Fehler')+'.','warn');
+      return false;
+    }
+  })();
+  try{return await backendCheckPromise;}finally{backendCheckPromise=null;}
 };
 window.d3Api=d3Api=async function(payload){
   const action=String(payload&&payload.action||''),read=/^(get|check|search|find)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload||{});
@@ -3642,7 +3651,7 @@ window.d3Api=d3Api=async function(payload){
   if(read&&window.DG3&&DG3.reads)DG3.reads.set(key,run);
   try{return await run;}finally{if(read&&window.DG3&&DG3.reads&&DG3.reads.get(key)===run)DG3.reads.delete(key);}
 };
-async function checkOnStart(){await window.d3CheckBackend(true);}
+async function checkOnStart(){await window.d3CheckBackend(false);}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){setTimeout(checkOnStart,120);},{once:true});else setTimeout(checkOnStart,120);
 })();
 ;
