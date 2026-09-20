@@ -145,7 +145,7 @@ async function initDb() {
 
   const pingTimer = setInterval(() => {
     refreshGooglePing().catch(e => console.error('scheduled Google ping failed', e.message));
-  }, GOOGLE_PING_TTL_MS);
+  }, GOOGLE_PING_REFRESH_MS);
   if (typeof pingTimer.unref === 'function') pingTimer.unref();
 }
 
@@ -358,7 +358,9 @@ const CACHEABLE_ACTIONS = new Set([
 
 const READ_CACHE_TTL_MS = 60 * 60 * 1000;
 const GOOGLE_PING_TTL_MS = 60 * 60 * 1000;
+const GOOGLE_PING_REFRESH_MS = 50 * 60 * 1000;
 let googlePingCache = null;
+let googlePingRefreshPromise = null;
 
 async function loadGooglePingCache() {
   if (!pool) return;
@@ -375,6 +377,8 @@ function googlePingFresh() {
 }
 
 async function refreshGooglePing() {
+  if (googlePingRefreshPromise) return googlePingRefreshPromise;
+  googlePingRefreshPromise = (async () => {
   if (!GOOGLE_BACKEND_URL) throw new Error('Google backend not configured');
   const startedAt = Date.now();
   const payload = {action:'ping',clientVersion:'9.0'};
@@ -413,6 +417,12 @@ async function refreshGooglePing() {
     ]);
   }
   return value;
+  })();
+  try {
+    return await googlePingRefreshPromise;
+  } finally {
+    googlePingRefreshPromise = null;
+  }
 }
 
 function sendGooglePingCache(req,res,value) {
@@ -430,6 +440,10 @@ function sendGooglePingCache(req,res,value) {
 
 async function handlePing(req,res) {
   if (googlePingFresh()) return sendGooglePingCache(req,res,googlePingCache);
+  if (googlePingCache && googlePingCache.raw) {
+    refreshGooglePing().catch(e => console.error('Google stale ping refresh failed:', e.message));
+    return sendGooglePingCache(req,res,googlePingCache);
+  }
   try {
     const value = await refreshGooglePing();
     return sendGooglePingCache(req,res,value);
