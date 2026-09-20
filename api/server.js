@@ -547,9 +547,44 @@ async function writeCachedResponse(action, body, responseText, httpStatus) {
   );
 }
 
-async function invalidateReadCache() {
+const CACHE_GROUPS = {
+  employee: ['getEmployees','getEmployeeAdminData','getVacationAccount','getVacationAccounts','getTimeBankAccount','getAbsences','getAbsenceOverview','getPlannerWorkers','getDashboardSummary51'],
+  time: ['getDayData','getMonthData','getBossMonthData','getBossDayClosures','getRegieReports','getAbsences','getAbsenceOverview','getVacationAccount','getVacationAccounts','getTimeBankAccount','getDashboardSummary51'],
+  offers: ['getOfferReports','getOfferReminders','getOfferStatistics','getOwnReminders','getDashboardSummary51'],
+  inquiries: ['getCustomerInquiries','getInquiryReminders','getOwnReminders','getDashboardSummary51'],
+  maintenance: ['getMaintenanceOverview','getMaintenanceContracts','getMaintenanceArchive','getMaintenanceCustomer','getDashboardSummary51'],
+  planner: ['getPlannerWorkers','getPlannerAvailability','getPlannerEvents'],
+  calendar: ['getEmployeeCalendarEvents'],
+  manualOrders: ['getManualOrders','getDashboardSummary51'],
+  objects: ['getObjectReports','checkRegieBillingRisk','getRegieReports','getDashboardSummary51']
+};
+
+function cacheActionsForWrite(action) {
+  const a = String(action || '');
+  const groups = new Set();
+  if (/Employee|Vacation|Absence|Sickness|Holiday|TimeBank|Payroll/i.test(a)) groups.add('employee');
+  if (/Entry|Day|Month|Regie|TimeBank|Payroll|Absence|Vacation|Sickness|Holiday/i.test(a)) groups.add('time');
+  if (/Offer|OwnReminder/i.test(a)) groups.add('offers');
+  if (/Inquiry|CustomerInquiry/i.test(a)) groups.add('inquiries');
+  if (/Maintenance/i.test(a)) groups.add('maintenance');
+  if (/Planner/i.test(a)) groups.add('planner');
+  if (/ExternalGoogleEvent/i.test(a)) groups.add('calendar');
+  if (/ManualOrder/i.test(a)) groups.add('manualOrders');
+  if (/Object|Regie/i.test(a)) groups.add('objects');
+  if (!groups.size) return null;
+  const actions = new Set();
+  for (const group of groups) for (const readAction of CACHE_GROUPS[group]) actions.add(readAction);
+  return [...actions];
+}
+
+async function invalidateReadCache(action) {
   if (!pool) return;
-  await pool.query('TRUNCATE response_cache');
+  const actions = cacheActionsForWrite(action);
+  if (!actions) {
+    await pool.query('TRUNCATE response_cache');
+    return;
+  }
+  await pool.query('DELETE FROM response_cache WHERE action = ANY($1::text[])',[actions]);
 }
 
 
@@ -623,7 +658,7 @@ async function proxyLegacy(req, res, body) {
       if (isCacheableAction(action)) {
         writeCachedResponse(action, body, raw, upstream.status).catch(e=>console.error('response cache write failed',e.message));
       } else if (action && action !== 'ping' && action !== 'employeeLogin') {
-        invalidateReadCache().catch(e=>console.error('response cache invalidation failed',e.message));
+        invalidateReadCache(action).catch(e=>console.error('response cache invalidation failed',e.message));
       }
       if (EMPLOYEE_MUTATION_ACTIONS.has(action) && upstream.status === 200 && parsed && parsed.ok !== false) {
         markEmployeeSnapshotDirty(action).catch(e=>console.error('employee snapshot dirty flag failed',e.message));
