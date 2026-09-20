@@ -2576,10 +2576,18 @@ async function syncAndVerifyMonthStatuses(body,data){
 async function mirrorSetDayStatus(body,parsed){
   const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
   if(!data||data.ok===false)return;
-  await upsertDayStatusShadow(
-    String(body.employee||''),String(body.date||''),String(data.status||body.status||'Arbeiten'),
-    'Mitarbeiter',0,''
+  const employee=String(body.employee||''),date=String(body.date||'');
+  const old=await pool.query(
+    'SELECT status FROM day_status_shadow WHERE employee_name=$1 AND status_date=$2 LIMIT 1',
+    [employee,date]
   );
+  const oldStatus=String(old.rows[0]?.status||'Arbeiten');
+  const status=String(data.status||body.status||'Arbeiten');
+  const profile=await employeeAutomationProfile(employee);
+  const credit=status==='Arbeiten'?0:profileHoursForDate(profile,date);
+  await upsertDayStatusShadow(employee,date,status,'Mitarbeiter',credit,'');
+  if(['Urlaub','Feiertag'].includes(status))await pgAutoClosureForStatus(employee,date,status,credit,'Mitarbeiter');
+  else if(status==='Arbeiten'&&['Urlaub','Feiertag'].includes(oldStatus))await pgRemoveAutoClosure(employee,date,oldStatus);
 }
 
 async function initConflictReviewsShadow(){
@@ -3667,6 +3675,174 @@ async function invalidateShadowVerify(name){
   await pool.query('DELETE FROM shadow_verify_stats WHERE shadow_name=$1',[String(name)]);
 }
 
+
+function easterSundayIsoUtc(year){
+  year=Number(year);
+  const a=year%19,b=Math.floor(year/100),cc=year%100,d=Math.floor(b/4),e=b%4;
+  const f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30;
+  const i=Math.floor(cc/4),k=cc%4,l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451);
+  const month=Math.floor((h+l-7*m+114)/31),day=((h+l-7*m+114)%31)+1;
+  return new Date(Date.UTC(year,month-1,day,12,0,0));
+}
+function isoFromUtcDate(d){return d.toISOString().slice(0,10);}
+function addUtcDays(d,n){const x=new Date(d.getTime());x.setUTCDate(x.getUTCDate()+Number(n||0));return x;}
+function bavariaNurembergHolidayDates(year){
+  const easter=easterSundayIsoUtc(year);
+  const fixed=[
+    [1,1],[1,6],[5,1],[10,3],[11,1],[12,25],[12,26]
+  ].map(x=>String(year)+'-'+String(x[0]).padStart(2,'0')+'-'+String(x[1]).padStart(2,'0'));
+  return [...fixed,
+    isoFromUtcDate(addUtcDays(easter,-2)),
+    isoFromUtcDate(addUtcDays(easter,1)),
+    isoFromUtcDate(addUtcDays(easter,39)),
+    isoFromUtcDate(addUtcDays(easter,50)),
+    isoFromUtcDate(addUtcDays(easter,60))
+  ];
+}
+function isoWeekday(date){
+  const m=String(date||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);if(!m)return 0;
+  return new Date(Date.UTC(Number(m[1]),Number(m[2])-1,Number(m[3]),12,0,0)).getUTCDay();
+}
+async function employeeAutomationProfile(employee){
+  const live=await pool.query('SELECT payload FROM employee_admin_shadow WHERE employee_name=$1 LIMIT 1',[String(employee)]);
+  if(live.rowCount)return live.rows[0].payload||{};
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:Mitarbeiter']
+  );
+  for(const row of q.rows){
+    const p=row.payload||{};if(Number(p.sourceRow||row.source_key)<=1)continue;
+    const x=Array.isArray(p.cells)?p.cells:[];
+    if(textCell(x,0).trim()!==String(employee))continue;
+    return {
+      name:String(employee),employmentType:textCell(x,3)||'Vollzeit',
+      monday:Number(textCell(x,5))||0,tuesday:Number(textCell(x,6))||0,
+      wednesday:Number(textCell(x,7))||0,thursday:Number(textCell(x,8))||0,
+      friday:Number(textCell(x,9))||0,
+      holidayCredit:String(textCell(x,10)).toLowerCase()!=='nein',
+      active:String(textCell(x,11)).toLowerCase()!=='nein'
+    };
+  }
+  return {};
+}
+async function activeEmployeeAutomationProfiles(){
+  const live=await pool.query('SELECT employee_name,payload FROM employee_admin_shadow ORDER BY sort_order ASC');
+  if(live.rowCount)return live.rows.map(r=>Object.assign({name:String(r.employee_name)},r.payload||{})).filter(x=>x.active!==false);
+  const names=await getEmployeesFromSnapshot()||[];
+  const out=[];for(const name of names)out.push(Object.assign({name},await employeeAutomationProfile(name)));
+  return out.filter(x=>x.active!==false);
+}
+function profileHoursForDate(p,date){
+  const dow=isoWeekday(date),key={1:'monday',2:'tuesday',3:'wednesday',4:'thursday',5:'friday'}[dow];
+  return key?Math.round(Number(p&&p[key]||0)*100)/100:0;
+}
+async function pgAutoClosureForStatus(employee,date,status,credit,source){
+  employee=String(employee||'');date=String(date||'');status=String(status||'');
+  credit=Math.round(Math.max(0,Number(credit)||0)*100)/100;
+  if(!employee||date<'2026-09-07'||!['Urlaub','Feiertag'].includes(status))return;
+  const work=await pool.query(
+    'SELECT 1 FROM time_entries_shadow WHERE employee_name=$1 AND entry_date=$2 LIMIT 1',
+    [employee,date]
+  );
+  if(work.rowCount)return;
+  const existing=await pool.query(
+    'SELECT legacy_col5 FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 LIMIT 1',
+    [employee,date]
+  );
+  const note='Automatisch: '+status+(source?' · '+String(source):'');
+  if(existing.rowCount){
+    if(!/^Automatisch:\s*(Urlaub|Feiertag)/i.test(String(existing.rows[0].legacy_col5||'')))return;
+    await pool.query(
+      `UPDATE day_closures_shadow SET closed_at_text=$3,gross_total=$4,legacy_col5=$5,legacy_col6='',
+        pause_minutes=0,net_total=$4,updated_at_text=$3,update_reason='DG 7.2 Statusautomatik',
+        shadow_updated_at=now() WHERE employee_name=$1 AND closure_date=$2`,
+      [employee,date,new Date().toISOString(),credit,note]
+    );
+    return;
+  }
+  await pool.query(
+    `INSERT INTO day_closures_shadow(
+      employee_name,closure_date,closed_at_text,gross_total,legacy_col5,legacy_col6,
+      pause_minutes,net_total,updated_at_text,update_reason,shadow_updated_at
+    ) VALUES($1,$2,$3,$4,$5,'',0,$4,'','DG 7.2 Statusautomatik',now())`,
+    [employee,date,new Date().toISOString(),credit,note]
+  );
+}
+async function pgRemoveAutoClosure(employee,date,status){
+  const q=await pool.query(
+    'SELECT legacy_col5 FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 LIMIT 1',
+    [String(employee),String(date)]
+  );
+  if(!q.rowCount)return;
+  const note=String(q.rows[0].legacy_col5||'');
+  if(!/^Automatisch:\s*(Urlaub|Feiertag)/i.test(note))return;
+  if(status&&!note.toLowerCase().includes(String(status).toLowerCase()))return;
+  await pool.query('DELETE FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2',
+    [String(employee),String(date)]);
+}
+async function pgSyncAutoClosures(year){
+  year=Number(year)||0;
+  const q=await pool.query(
+    `SELECT employee_name,status_date,status,source,credited_hours FROM day_status_shadow
+      WHERE status IN ('Urlaub','Feiertag') AND status_date>='2026-09-07'
+        AND ($1::int=0 OR status_date LIKE ($1::text||'-%'))`,
+    [year]
+  );
+  for(const r of q.rows)await pgAutoClosureForStatus(
+    r.employee_name,berlinDateOnly(r.status_date),r.status,Number(r.credited_hours)||0,r.source
+  );
+}
+async function mirrorHolidayYear(year){
+  year=Number(year)||0;if(!year)return;
+  const employees=await activeEmployeeAutomationProfiles();
+  const holidays=bavariaNurembergHolidayDates(year).filter(d=>{const w=isoWeekday(d);return w>=1&&w<=5;});
+  for(const date of holidays){
+    for(const emp of employees){
+      const name=String(emp.name||'');if(!name)continue;
+      const old=await pool.query(
+        'SELECT source FROM day_status_shadow WHERE employee_name=$1 AND status_date=$2 LIMIT 1',
+        [name,date]
+      );
+      if(old.rowCount&&String(old.rows[0].source||'')!=='Automatisch Feiertag')continue;
+      const credit=(String(emp.employmentType||'')==='Aushilfe'||emp.holidayCredit===false)
+        ?0:profileHoursForDate(emp,date);
+      await upsertDayStatusShadow(name,date,'Feiertag','Automatisch Feiertag',credit,'holiday:'+date);
+    }
+  }
+  await pgSyncAutoClosures(year);
+}
+async function mirrorAbsenceStatuses(action,body,parsed){
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;if(!data||data.ok===false)return;
+  if(action==='saveAbsence'){
+    const id=String(data.id||'');if(!id)return;
+    const employee=String(body.targetEmployee||''),type=String(body.type||'');
+    const start=String(body.startDate||''),end=String(body.endDate||'');
+    const sy=Number(start.slice(0,4))||0,ey=Number(end.slice(0,4))||sy;
+    for(let y=sy;y<=ey;y++)await mirrorHolidayYear(y);
+    const profile=await employeeAutomationProfile(employee);
+    for(const date of isoDateList(start,end)){
+      const dow=isoWeekday(date);if(dow<1||dow>5)continue;
+      const old=await pool.query(
+        'SELECT status FROM day_status_shadow WHERE employee_name=$1 AND status_date=$2 LIMIT 1',
+        [employee,date]
+      );
+      if(old.rowCount&&String(old.rows[0].status||'')==='Feiertag')continue;
+      const credit=profileHoursForDate(profile,date);
+      await upsertDayStatusShadow(employee,date,type,'Chef Abwesenheit',credit,id);
+      if(type==='Urlaub')await pgAutoClosureForStatus(employee,date,type,credit,'Chef Abwesenheit');
+    }
+  }else if(action==='deleteAbsence'){
+    const id=String(body.id||'');if(!id)return;
+    const q=await pool.query(
+      `SELECT employee_name,status_date,status FROM day_status_shadow WHERE reference=$1`,
+      [id]
+    );
+    await pool.query('DELETE FROM day_status_shadow WHERE reference=$1',[id]);
+    for(const r of q.rows)if(['Urlaub','Feiertag'].includes(String(r.status||'')))
+      await pgRemoveAutoClosure(r.employee_name,berlinDateOnly(r.status_date),r.status);
+  }
+}
+
 async function mirrorAbsenceWrite(action,body,parsed){
   if(!pool)return;
   const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
@@ -3712,6 +3888,7 @@ async function mirrorAbsenceWrite(action,body,parsed){
     }
     await invalidateShadowVerify('sickness_alerts');
   }
+  if(action==='saveAbsence'||action==='deleteAbsence')await mirrorAbsenceStatuses(action,body,parsed);
 }
 
 async function verifyAbsencesShadow(rows){
@@ -6785,6 +6962,11 @@ async function proxyLegacy(req, res, body) {
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false && action==='markConflictReviewed') {
         mirrorConflictReviewWrite(body,parsed).catch(e=>console.error('conflict review shadow mirror failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false && action==='syncHolidays') {
+        mirrorHolidayYear(Number(body.year)||0).catch(e=>console.error('holiday status shadow mirror failed',e.message));
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'day_data:%' OR shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'month_data:%' OR shadow_name LIKE 'boss_day_closures:%'")
+          .catch(e=>console.error('holiday readiness invalidate failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false && action==='setDayStatus') {
         mirrorSetDayStatus(body,parsed).catch(e=>console.error('day status shadow mirror failed',e.message));
