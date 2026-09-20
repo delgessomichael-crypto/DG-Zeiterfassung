@@ -4699,6 +4699,104 @@ async function upsertInquiryFromView(row){
   );
 }
 
+
+async function postgresCustomerInquiryView(status){
+  status=String(status||'Offen');
+  const q=await pool.query(
+    `SELECT id,source,customer,email,phone,postal_code,city,subject,description,received_at_text,
+            status,read_flag,internal_note,done_reason,contact_at_text,contact_person,contact_note,
+            offer_id,external_url,phone_url,dropbox_url,aqon_appointment_url,aqon_details,aqon_replied_at_text
+       FROM customer_inquiries_shadow`
+  );
+  const excluded=new Set(['Erledigt','Gelöscht','Übernommen','Archiviert','Reminder']);
+  const rows=q.rows.filter(r=>{
+    const st=String(r.status||'Neu');
+    if(status==='Offen')return !excluded.has(st);
+    if(status&&status!=='Alle')return st===status;
+    return true;
+  }).map(r=>({
+    id:String(r.id||''),source:String(r.source||''),customer:String(r.customer||''),
+    email:String(r.email||''),phone:String(r.phone||''),postalCode:String(r.postal_code||''),
+    city:String(r.city||''),subject:String(r.subject||''),description:String(r.description||''),
+    receivedAt:berlinDateTime(r.received_at_text),status:String(r.status||'Neu'),
+    read:Boolean(r.read_flag),internalNote:String(r.internal_note||''),doneReason:String(r.done_reason||''),
+    contactAt:berlinDateTime(r.contact_at_text),contactPerson:String(r.contact_person||''),
+    contactNote:String(r.contact_note||''),offerId:String(r.offer_id||''),
+    externalUrl:String(r.external_url||''),phoneUrl:String(r.phone_url||''),
+    dropboxUrl:String(r.dropbox_url||''),aqonAppointmentUrl:String(r.aqon_appointment_url||''),
+    aqonDetails:String(r.aqon_details||''),aqonRepliedAt:berlinDateTime(r.aqon_replied_at_text)
+  }));
+  rows.sort((a,b)=>String(b.receivedAt).localeCompare(String(a.receivedAt)));
+  return rows;
+}
+function canonicalCustomerInquiries(rows){
+  return (Array.isArray(rows)?rows:[]).map(x=>({
+    id:String(x.id||''),source:String(x.source||''),customer:String(x.customer||''),
+    email:String(x.email||''),phone:String(x.phone||''),postalCode:String(x.postalCode||''),
+    city:String(x.city||''),subject:String(x.subject||''),description:String(x.description||''),
+    receivedAt:String(x.receivedAt||''),status:String(x.status||'Neu'),read:Boolean(x.read),
+    internalNote:String(x.internalNote||''),doneReason:String(x.doneReason||''),
+    contactAt:String(x.contactAt||''),contactPerson:String(x.contactPerson||''),
+    contactNote:String(x.contactNote||''),offerId:String(x.offerId||''),
+    externalUrl:String(x.externalUrl||''),phoneUrl:String(x.phoneUrl||''),
+    dropboxUrl:String(x.dropboxUrl||''),aqonAppointmentUrl:String(x.aqonAppointmentUrl||''),
+    aqonDetails:String(x.aqonDetails||''),aqonRepliedAt:String(x.aqonRepliedAt||'')
+  }));
+}
+async function verifyCustomerInquiryView(rows,status){
+  if(!pool||!Array.isArray(rows))return;
+  const pg=await postgresCustomerInquiryView(status);
+  const a=canonicalCustomerInquiries(rows),b=canonicalCustomerInquiries(pg);
+  const mismatches=stableJsonString(a)===stableJsonString(b)?0:1;
+  const key='customer_inquiries_view:'+String(status||'Offen');
+  console.log('SHADOW_VERIFY '+key+' google='+a.length+' postgres='+b.length+' mismatches='+mismatches);
+  await saveShadowVerifyStat(key,a.length,b.length,mismatches);
+}
+
+async function postgresInquiryReminderView(includeDone){
+  const q=await pool.query(
+    `SELECT r.id,r.inquiry_id,r.customer,r.phone,r.email,r.description,r.source,r.created_at_text,
+            r.due_date_text,r.status,r.result,i.internal_note,i.external_url,i.phone_url
+       FROM inquiry_reminders_shadow r
+       LEFT JOIN customer_inquiries_shadow i ON i.id=r.inquiry_id
+       ${includeDone?'':"WHERE COALESCE(r.status,'Offen')='Offen'"}`
+  );
+  const today=berlinDateOnly(new Date());
+  const rows=q.rows.map(r=>{
+    const due=berlinDateOnly(r.due_date_text);
+    return {
+      id:String(r.id||''),inquiryId:String(r.inquiry_id||''),customer:String(r.customer||''),
+      phone:String(r.phone||''),email:String(r.email||''),description:String(r.description||''),
+      source:String(r.source||''),createdAt:berlinDateTime(r.created_at_text),dueDate:due,
+      status:String(r.status||'Offen'),result:String(r.result||''),
+      internalNote:String(r.internal_note||''),externalUrl:String(r.external_url||''),
+      phoneUrl:String(r.phone_url||''),isDue:Boolean(due&&due<=today),isOverdue:Boolean(due&&due<today)
+    };
+  });
+  rows.sort((a,b)=>String(a.dueDate).localeCompare(String(b.dueDate))||
+    String(a.customer).localeCompare(String(b.customer),'de'));
+  return rows;
+}
+function canonicalInquiryReminders(rows){
+  return (Array.isArray(rows)?rows:[]).map(x=>({
+    id:String(x.id||''),inquiryId:String(x.inquiryId||''),customer:String(x.customer||''),
+    phone:String(x.phone||''),email:String(x.email||''),description:String(x.description||''),
+    source:String(x.source||''),createdAt:String(x.createdAt||''),dueDate:String(x.dueDate||''),
+    status:String(x.status||'Offen'),result:String(x.result||''),internalNote:String(x.internalNote||''),
+    externalUrl:String(x.externalUrl||''),phoneUrl:String(x.phoneUrl||''),
+    isDue:Boolean(x.isDue),isOverdue:Boolean(x.isOverdue)
+  }));
+}
+async function verifyInquiryReminderView(rows,includeDone){
+  if(!pool||!Array.isArray(rows))return;
+  const pg=await postgresInquiryReminderView(includeDone);
+  const a=canonicalInquiryReminders(rows),b=canonicalInquiryReminders(pg);
+  const mismatches=stableJsonString(a)===stableJsonString(b)?0:1;
+  const key='inquiry_reminders_view:'+(includeDone?'all':'open');
+  console.log('SHADOW_VERIFY '+key+' google='+a.length+' postgres='+b.length+' mismatches='+mismatches);
+  await saveShadowVerifyStat(key,a.length,b.length,mismatches);
+}
+
 async function syncInquiryViewShadow(rows,status){
   if(!pool||!Array.isArray(rows))return;
   const client=await pool.connect();
@@ -6463,8 +6561,16 @@ async function proxyLegacy(req, res, body) {
         if (action==='getEmployeeAdminData') refreshAndVerifyEmployeeAdminShadow(verifyData).catch(e=>console.error('employee admin shadow refresh failed',e.message));
         if (action==='getManualOrders') verifyManualOrdersShadow(verifyData).catch(e=>console.error('manual order shadow verify failed',e.message));
         if (action==='getOwnReminders') verifyOwnRemindersShadow(verifyData).catch(e=>console.error('own reminder shadow verify failed',e.message));
-        if (action==='getCustomerInquiries') syncInquiryViewShadow(verifyData,body.status).catch(e=>console.error('customer inquiries shadow refresh failed',e.message));
-        if (action==='getInquiryReminders') syncInquiryReminderViewShadow(verifyData,Boolean(body.includeDone)).catch(e=>console.error('inquiry reminders shadow refresh failed',e.message));
+        if (action==='getCustomerInquiries') {
+          syncInquiryViewShadow(verifyData,body.status)
+            .then(()=>verifyCustomerInquiryView(verifyData,body.status))
+            .catch(e=>console.error('customer inquiries shadow refresh/verify failed',e.message));
+        }
+        if (action==='getInquiryReminders') {
+          syncInquiryReminderViewShadow(verifyData,Boolean(body.includeDone))
+            .then(()=>verifyInquiryReminderView(verifyData,Boolean(body.includeDone)))
+            .catch(e=>console.error('inquiry reminders shadow refresh/verify failed',e.message));
+        }
         if (action==='getOfferReminders') verifyOfferRemindersShadow(verifyData,Boolean(body.includeDone)).catch(e=>console.error('offer reminder shadow verify failed',e.message));
         if (action==='getOfferReports') saveExactViewShadow('getOfferReports',offerReportsViewKey(body),verifyData).catch(e=>console.error('offer reports exact view save failed',e.message));
         if (action==='getOfferStatistics') saveExactViewShadow('getOfferStatistics',offerStatisticsViewKey(),verifyData).catch(e=>console.error('offer statistics exact view save failed',e.message));
@@ -6612,6 +6718,10 @@ async function proxyLegacy(req, res, body) {
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder'].includes(action)) {
         mirrorInquiryReminderWrite(action,body,parsed).catch(e=>console.error('inquiry reminder shadow mirror failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false && action==='syncCustomerInquiries') {
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'customer_inquiries_view:%' OR shadow_name LIKE 'inquiry_reminders_view:%'")
+          .catch(e=>console.error('inquiry verification invalidation failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['createOwnReminder','saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder'].includes(action)) {
@@ -6955,6 +7065,12 @@ async function health() {
         )).rows[0]?.n||0,
         offerReportViewsVerified:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'offer_reports_view:%' AND mismatches=0"
+        )).rows[0]?.n||0,
+        customerInquiryViewsVerified:(await pool.query(
+          "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'customer_inquiries_view:%' AND mismatches=0"
+        )).rows[0]?.n||0,
+        inquiryReminderViewsVerified:(await pool.query(
+          "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'inquiry_reminders_view:%' AND mismatches=0"
         )).rows[0]?.n||0,
         offerStatisticsView:await shadowReadyForDirectRead('offer_statistics_view')
       };
