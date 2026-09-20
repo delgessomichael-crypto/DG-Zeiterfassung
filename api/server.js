@@ -3307,6 +3307,108 @@ async function mirrorManualOrderWrite(action, body, parsed) {
   }
 }
 
+
+function berlinDateOnly(value){
+  if(value==null||value==='')return '';
+  const s=String(value).trim();
+  const m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m)return m[1]+'-'+m[2]+'-'+m[3];
+  const d=new Date(value);
+  if(Number.isNaN(d.getTime()))return s;
+  const parts=new Intl.DateTimeFormat('en-CA',{
+    timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit'
+  }).formatToParts(d).reduce((o,x)=>(o[x.type]=x.value,o),{});
+  return parts.year+'-'+parts.month+'-'+parts.day;
+}
+
+function berlinDateTime(value){
+  if(value==null||value==='')return '';
+  const s=String(value).trim();
+  if(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s))return s;
+  const d=new Date(value);
+  if(Number.isNaN(d.getTime()))return s;
+  const p=new Intl.DateTimeFormat('en-CA',{
+    timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit',
+    hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false
+  }).formatToParts(d).reduce((o,x)=>(o[x.type]=x.value,o),{});
+  return p.year+'-'+p.month+'-'+p.day+' '+p.hour+':'+p.minute+':'+p.second;
+}
+
+async function shadowReadyForDirectRead(name,maxAgeHours=24){
+  if(!pool)return false;
+  const q=await pool.query(
+    `SELECT mismatches,checked_at FROM shadow_verify_stats
+      WHERE shadow_name=$1 AND checked_at>now()-($2::text||' hours')::interval`,
+    [String(name),String(Number(maxAgeHours)||24)]
+  );
+  return Boolean(q.rowCount && Number(q.rows[0].mismatches||0)===0);
+}
+
+async function directManualOrdersRead(body){
+  const session=await localSessionForBody(body,true);
+  if(!session)return null;
+  if(!(await shadowReadyForDirectRead('manual_orders')))return null;
+  const status=String(body.status||'').trim();
+  const params=[];let where='';
+  if(status&&status!=='Alle'){
+    params.push(status);
+    where=' WHERE status=$1';
+  }
+  const q=await pool.query(
+    `SELECT id,customer,address,phone,email,description,source,inquiry_id,status,
+            created_at_text,started_at_text,completed_at_text,internal_note
+       FROM manual_orders_shadow`+where+` ORDER BY created_at_text ASC,id ASC`,
+    params
+  );
+  return q.rows.map(r=>({
+    id:String(r.id||''),customer:String(r.customer||''),address:String(r.address||''),
+    phone:String(r.phone||''),email:String(r.email||''),description:String(r.description||''),
+    source:String(r.source||''),inquiryId:String(r.inquiry_id||''),
+    status:String(r.status||'Offen'),createdAt:berlinDateTime(r.created_at_text),
+    startedAt:berlinDateTime(r.started_at_text),completedAt:berlinDateTime(r.completed_at_text),
+    internalNote:String(r.internal_note||'')
+  }));
+}
+
+async function directOwnRemindersRead(body){
+  const session=await localSessionForBody(body,true);
+  if(!session)return null;
+  if(!(await shadowReadyForDirectRead('own_reminders')))return null;
+  const includeDone=Boolean(body.includeDone);
+  const q=await pool.query(
+    `SELECT id,reminder_text,due_date_text,status,result,created_at_text,created_by,
+            changed_at_text,changed_by,attachments_json,internal_note
+       FROM own_reminders_shadow
+      ${includeDone?'':"WHERE COALESCE(status,'Offen')='Offen'"}`
+  );
+  const today=berlinDateOnly(new Date());
+  const rows=q.rows.map(r=>{
+    const due=berlinDateOnly(r.due_date_text);
+    let attachments=[];
+    try{
+      const x=JSON.parse(String(r.attachments_json||'[]'));
+      attachments=Array.isArray(x)?x:[];
+    }catch(_e){}
+    return {
+      id:String(r.id||''),text:String(r.reminder_text||''),dueDate:due,
+      status:String(r.status||'Offen'),result:String(r.result||''),
+      createdAt:berlinDateTime(r.created_at_text),createdBy:String(r.created_by||''),
+      changedAt:berlinDateTime(r.changed_at_text),changedBy:String(r.changed_by||''),
+      attachments,internalNote:String(r.internal_note||''),
+      isDue:Boolean(due&&due<=today),isOverdue:Boolean(due&&due<today)
+    };
+  });
+  rows.sort((a,b)=>String(a.dueDate).localeCompare(String(b.dueDate))||
+    String(a.text).localeCompare(String(b.text),'de'));
+  return rows;
+}
+
+async function tryDirectPostgresRead(action,body){
+  if(action==='getManualOrders')return directManualOrdersRead(body);
+  if(action==='getOwnReminders')return directOwnRemindersRead(body);
+  return null;
+}
+
 async function getEmployeesFromSnapshot() {
   if (Array.isArray(employeeNamesCache) && employeeNamesCache.length) return employeeNamesCache.slice();
   if (!pool) return null;
@@ -3346,6 +3448,17 @@ async function proxyLegacy(req, res, body) {
       }
     } catch (e) {
       console.error('Postgres employee read failed; falling back to Google:', e.message);
+    }
+  }
+  if (['getManualOrders','getOwnReminders'].includes(action)) {
+    try {
+      const direct=await tryDirectPostgresRead(action,body);
+      if (direct!==null) {
+        console.log('POSTGRES_READ action='+action+' rows='+(Array.isArray(direct)?direct.length:1));
+        return json(res,200,{ok:true,data:direct,source:'postgres'},req);
+      }
+    } catch(e) {
+      console.error('Direct Postgres read failed; falling back to Google:',action,e.message);
     }
   }
   if (!GOOGLE_BACKEND_URL) return json(res, 503, {ok:false,error:'Google backend not configured'}, req);
@@ -3546,6 +3659,7 @@ async function health() {
   let writeStats = [];
   let dayClosureSourceAudit = null;
   let activeRailwaySessions = 0;
+  let directReadReady = {};
   if (pool) {
     try {
       const q = await pool.query('SELECT 1 AS ok');
@@ -3632,6 +3746,10 @@ async function health() {
         'SELECT COUNT(*)::int AS n FROM railway_sessions WHERE revoked_at IS NULL AND expires_at>now()'
       );
       activeRailwaySessions=sessionQ.rows[0]?.n||0;
+      directReadReady={
+        manualOrders:await shadowReadyForDirectRead('manual_orders'),
+        ownReminders:await shadowReadyForDirectRead('own_reminders')
+      };
     } catch (e) {
       database = 'error';
     }
@@ -3670,7 +3788,8 @@ async function health() {
     shadowReadiness,
     writeStats,
     dayClosureSourceAudit,
-    activeRailwaySessions
+    activeRailwaySessions,
+    directReadReady
   };
 }
 
@@ -3800,6 +3919,7 @@ initDb()
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
     if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus+' day_closures='+h.shadowCounts.dayClosures+' time_entries='+h.shadowCounts.timeEntries+' objects='+h.shadowCounts.objects+' regie_merges='+h.shadowCounts.regieMerges+' object_notes='+h.shadowCounts.objectNotes);
     console.log('RAILWAY_SESSIONS active='+Number(h.activeRailwaySessions||0));
+    if(h.directReadReady)console.log('DIRECT_READ_READY manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders));
     if(Array.isArray(h.shadowReadiness)&&h.shadowReadiness.length)console.log('SHADOW_READINESS '+h.shadowReadiness.map(x=>x.shadowName+'='+x.status+'('+x.mismatches+')').join(' | '));
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
