@@ -313,11 +313,36 @@ async function markEmployeeSnapshotDirty(action) {
 }
 
 
+const SENSITIVE_REQUEST_FIELDS = new Set([
+  'pin',
+  'employeePin',
+  'deviceSessionToken',
+  'token',
+  'password'
+]);
+
+function hashSecret(value) {
+  return crypto.createHash('sha256').update(String(value == null ? '' : value)).digest('hex');
+}
+
 function normalizedCachePayload(body) {
   const clone = Object.assign({}, body || {});
   delete clone.force;
   delete clone.clientTs;
   delete clone.timestamp;
+  for (const key of Object.keys(clone)) {
+    if (SENSITIVE_REQUEST_FIELDS.has(key) && clone[key] !== undefined && clone[key] !== null && clone[key] !== '') {
+      clone[key] = 'sha256:' + hashSecret(clone[key]);
+    }
+  }
+  return clone;
+}
+
+function sanitizedLogPayload(body) {
+  const clone = Object.assign({}, body || {});
+  for (const key of Object.keys(clone)) {
+    if (SENSITIVE_REQUEST_FIELDS.has(key) && clone[key] !== undefined) clone[key] = '[redacted]';
+  }
   return clone;
 }
 
@@ -436,7 +461,7 @@ async function proxyLegacy(req, res, body) {
       pool.query(
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status)
          VALUES($1,$2::jsonb,$3,$4::jsonb,$5)`,
-        [action,JSON.stringify(body||{}),Boolean(parsed && parsed.ok !== false),
+        [action,JSON.stringify(sanitizedLogPayload(body)),Boolean(parsed && parsed.ok !== false),
          parsed ? JSON.stringify(parsed) : null,upstream.status]
       ).catch(e=>console.error('legacy action log failed',e.message));
     }
@@ -452,7 +477,7 @@ async function proxyLegacy(req, res, body) {
       pool.query(
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status)
          VALUES($1,$2::jsonb,false,$3::jsonb,502)`,
-        [action,JSON.stringify(body||{}),JSON.stringify({error:e.message})]
+        [action,JSON.stringify(sanitizedLogPayload(body)),JSON.stringify({error:e.message})]
       ).catch(()=>{});
     }
     return json(res,502,{ok:false,error:'Google backend unavailable: '+e.message},req);
