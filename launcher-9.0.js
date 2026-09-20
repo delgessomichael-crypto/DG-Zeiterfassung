@@ -148,6 +148,11 @@ async function login(){
     return false;
   }
 }
+function clearLegacyBackendVersionCache(){
+  try{
+    ['dg70_backend','dg60_backend','dg602_backend','dg603_backend','dg51_backend','dg9_backend'].forEach(k=>sessionStorage.removeItem(k));
+  }catch(_e){}
+}
 function bind(){
   const btn=[...document.querySelectorAll('#loginScreen button')].find(b=>/Anmelden/i.test(b.textContent||''));
   if(btn&&!btn.dataset.dg90Launcher){
@@ -166,6 +171,7 @@ function bind(){
 async function boot(){
   if(window[START_FLAG])return;
   window[START_FLAG]=true;
+  clearLegacyBackendVersionCache();
   stamp();
   installVersionGuard();
   bind();
