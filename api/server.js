@@ -228,6 +228,10 @@ CREATE TABLE IF NOT EXISTS inquiry_offers_shadow (
 CREATE INDEX IF NOT EXISTS inquiry_offers_shadow_status_idx
   ON inquiry_offers_shadow(status,created_at_text);
 
+ALTER TABLE inquiry_offers_shadow ADD COLUMN IF NOT EXISTS inspection_date TEXT;
+ALTER TABLE inquiry_offers_shadow ADD COLUMN IF NOT EXISTS inspection_hours NUMERIC(10,2) NOT NULL DEFAULT 0;
+ALTER TABLE inquiry_offers_shadow ADD COLUMN IF NOT EXISTS activity_note TEXT;
+
 CREATE TABLE IF NOT EXISTS offer_reminders_shadow (
   id TEXT PRIMARY KEY,
   offer_id TEXT,
@@ -2299,15 +2303,15 @@ async function mirrorTimeEntryWrite(action,body,parsed){
     return;
   }
 
-  if(action==='acceptOfferAsRunning'){
-    const offerId=String(body.offerId||'');
-    if(offerId){
+  if(action==='acceptOfferAsRunning'||action==='acceptOfferFromReminder'){
+    const offerId=String(data.offerId||body.offerId||'');
+    if(offerId && String(data.mode||'')==='Regieberichte'){
       await pool.query(
         `UPDATE time_entries_shadow SET
-          job_status='Laufend',offer_id='',offer_changed_at_text='',offer_changed_by='',
-          shadow_updated_at=now()
+          job_status='Laufend',offer_id=$1,offer_changed_at_text=now()::text,
+          offer_changed_by=$2,shadow_updated_at=now()
           WHERE offer_id=$1 AND COALESCE(billing_status,'Offen')='Offen'`,
-        [offerId]
+        [offerId,String(body.employee||'')]
       );
     }
     return;
@@ -5237,6 +5241,129 @@ async function initInquiryOffersShadow(){
   }
   console.log('SHADOW inquiry_offers initialized rows='+inserted);
 }
+
+function inspectionTimesForMirror(item,hours){
+  item=item||{};const ev=item.event||{};
+  const mins=Math.max(1,Math.round(Number(hours||0)*60));
+  const norm=v=>{
+    const s=String(v||'').trim();
+    const m=s.match(/^(\d{1,2}):(\d{2})/);
+    return m?String(Number(m[1])).padStart(2,'0')+':'+m[2]:'';
+  };
+  const toTime=n=>{
+    n=((Math.round(Number(n)||0)%1440)+1440)%1440;
+    return String(Math.floor(n/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0');
+  };
+  const start=norm(item.start||ev.startTime||''),end=norm(item.end||ev.endTime||'');
+  if(start){const p=start.split(':').map(Number),sm=p[0]*60+p[1];return {start,end:toTime(sm+mins)};}
+  if(end){const p=end.split(':').map(Number),em=p[0]*60+p[1];return {start:toTime(em-mins),end};}
+  const now=new Date(),p=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Berlin',hour:'2-digit',minute:'2-digit',hour12:false})
+    .format(now).split(':').map(Number),em=p[0]*60+p[1];
+  return {start:toTime(em-mins),end:toTime(em)};
+}
+async function mirrorInspectionTimeEntry(body,parsed){
+  if(!pool)return;
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if(!data||data.ok===false)return;
+  const id=String(data.timeEntryId||'').trim(),offerId=String(data.offerId||'').trim();
+  if(!id||!offerId)return;
+  const item=body.item||{},ev=item.event||{};
+  const employee=String(body.employee||''),date=berlinDateOnly(item.date||new Date());
+  const customer=String(data.customer||item.customer||''),hours=Number(data.hoursBooked||item.hours||0);
+  const activity=String(data.activity||item.activity||item.note||ev.description||'Besichtigungstermin').trim();
+  const times=inspectionTimesForMirror(item,hours);
+  const closedQ=await pool.query(
+    'SELECT 1 FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 LIMIT 1',
+    [employee,date]
+  );
+  const closed=Boolean(closedQ.rowCount),now=new Date().toISOString();
+  await pool.query(
+    `INSERT INTO time_entries_shadow(
+      id,employee_name,entry_date,customer,start_time,end_time,hours,activity,transmitted_at_text,
+      closed,material_used,photo_count,additional_employees_used,source_calendar_event_id,
+      billing_status,object_id,job_status,is_supplement,offer_id,offer_changed_at_text,offer_changed_by,
+      maintenance,source_payload,shadow_updated_at
+    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,false,0,false,$11,'Offen','',
+             'Angebot zu erstellen',false,$12,$9,$2,false,$13::jsonb,now())
+    ON CONFLICT(id) DO UPDATE SET
+      employee_name=EXCLUDED.employee_name,entry_date=EXCLUDED.entry_date,customer=EXCLUDED.customer,
+      start_time=EXCLUDED.start_time,end_time=EXCLUDED.end_time,hours=EXCLUDED.hours,activity=EXCLUDED.activity,
+      transmitted_at_text=EXCLUDED.transmitted_at_text,closed=EXCLUDED.closed,
+      source_calendar_event_id=EXCLUDED.source_calendar_event_id,billing_status='Offen',
+      job_status='Angebot zu erstellen',is_supplement=false,offer_id=EXCLUDED.offer_id,
+      offer_changed_at_text=EXCLUDED.offer_changed_at_text,offer_changed_by=EXCLUDED.offer_changed_by,
+      source_payload=EXCLUDED.source_payload,shadow_updated_at=now()`,
+    [id,employee,date,customer,times.start,times.end,hours,activity,now,closed,
+     String(item.sourceCalendarEventId||ev.id||''),offerId,
+     JSON.stringify({source:'createInspectionOffer',offerId})]
+  );
+  await pool.query(
+    `UPDATE inquiry_offers_shadow SET inspection_date=$2,inspection_hours=$3,activity_note=$4,
+      description=CASE WHEN COALESCE(description,'')='' THEN $4 ELSE description END,shadow_updated_at=now()
+      WHERE offer_id=$1`,
+    [offerId,date,hours,activity]
+  );
+}
+
+async function mirrorAcceptedOfferRunning(body,parsed){
+  if(!pool)return;
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if(!data||data.ok===false)return;
+  const offerId=String(data.offerId||body.offerId||'').trim();if(!offerId)return;
+  const by=String(body.employee||''),now=new Date().toISOString();
+
+  // DG 7.2.1 keeps the offer ID on Regieberichte and changes only the workflow status.
+  if(String(data.mode||'')==='Regieberichte'){
+    await pool.query(
+      `UPDATE time_entries_shadow SET job_status='Laufend',offer_id=$1,
+        offer_changed_at_text=$2,offer_changed_by=$3,shadow_updated_at=now()
+        WHERE offer_id=$1 AND COALESCE(billing_status,'Offen')='Offen'`,
+      [offerId,now,by]
+    );
+  }
+
+  await pool.query(
+    `UPDATE inquiry_offers_shadow SET status='Laufend',changed_at_text=$2,changed_by=$3,shadow_updated_at=now()
+      WHERE offer_id=$1`,
+    [offerId,now,by]
+  );
+
+  // DG 7.2.1 creates a deterministic manual order when no Regiebericht exists.
+  if(String(data.mode||'')==='Manueller Auftrag'){
+    const orderId=String(data.manualOrderId||('AUF-ANG-'+offerId));
+    const q=await pool.query(
+      `SELECT o.inquiry_id,o.customer,o.phone,o.email,o.description,o.source,
+              i.postal_code,i.city,i.internal_note
+         FROM inquiry_offers_shadow o
+         LEFT JOIN customer_inquiries_shadow i ON i.id=o.inquiry_id
+        WHERE o.offer_id=$1 LIMIT 1`,
+      [offerId]
+    );
+    const x=q.rows[0]||{},address=[String(x.postal_code||''),String(x.city||'')].filter(Boolean).join(' ').trim();
+    await pool.query(
+      `INSERT INTO manual_orders_shadow(
+        id,customer,address,phone,email,description,source,inquiry_id,status,
+        created_at_text,started_at_text,completed_at_text,changed_at_text,changed_by,internal_note,shadow_updated_at
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'Laufend',$9,$9,'',$9,$10,$11,now())
+      ON CONFLICT(id) DO UPDATE SET
+        customer=EXCLUDED.customer,address=EXCLUDED.address,phone=EXCLUDED.phone,email=EXCLUDED.email,
+        description=EXCLUDED.description,source=EXCLUDED.source,inquiry_id=EXCLUDED.inquiry_id,
+        status='Laufend',started_at_text=CASE WHEN COALESCE(manual_orders_shadow.started_at_text,'')='' THEN EXCLUDED.started_at_text ELSE manual_orders_shadow.started_at_text END,
+        changed_at_text=EXCLUDED.changed_at_text,changed_by=EXCLUDED.changed_by,
+        internal_note=CASE WHEN COALESCE(EXCLUDED.internal_note,'')<>'' THEN EXCLUDED.internal_note ELSE manual_orders_shadow.internal_note END,
+        shadow_updated_at=now()`,
+      [orderId,String(x.customer||''),address,String(x.phone||''),String(x.email||''),
+       String(x.description||''),String(x.source||'Angebot'),String(x.inquiry_id||''),now,by,String(x.internal_note||'')]
+    );
+    if(x.inquiry_id){
+      await pool.query(
+        `UPDATE customer_inquiries_shadow SET status='Übernommen',read_flag=true,
+          changed_at_text=$2,changed_by=$3,shadow_updated_at=now() WHERE id=$1`,
+        [String(x.inquiry_id),now,by]
+      );
+    }
+  }
+}
 async function mirrorInquiryOfferWrite(action,body,parsed){
   if(!pool)return;
   const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
@@ -5247,8 +5374,8 @@ async function mirrorInquiryOfferWrite(action,body,parsed){
     await pool.query(
       `INSERT INTO inquiry_offers_shadow(
         offer_id,inquiry_id,customer,phone,email,description,source,created_at_text,status,
-        changed_at_text,changed_by,calendar_event_id,shadow_updated_at
-      ) VALUES($1,'',$2,$3,$4,$5,'Besichtigung',$6,'Zu erstellen',$6,$7,$8,now())
+        changed_at_text,changed_by,calendar_event_id,inspection_date,inspection_hours,activity_note,shadow_updated_at
+      ) VALUES($1,'',$2,$3,$4,$5,'Besichtigung',$6,'Zu erstellen',$6,$7,$8,$9,$10,$11,now())
       ON CONFLICT(offer_id) DO UPDATE SET
         customer=EXCLUDED.customer,phone=EXCLUDED.phone,email=EXCLUDED.email,
         description=EXCLUDED.description,source=EXCLUDED.source,status=EXCLUDED.status,
@@ -5256,7 +5383,9 @@ async function mirrorInquiryOfferWrite(action,body,parsed){
         calendar_event_id=EXCLUDED.calendar_event_id,shadow_updated_at=now()`,
       [id,String(data.customer||item.customer||''),String(ev.phone||''),String(ev.email||''),
        String(ev.description||''),String(data.transferredAt||''),String(data.transferredBy||body.employee||''),
-       String(data.sourceCalendarEventId||item.sourceCalendarEventId||ev.id||'')]
+       String(data.sourceCalendarEventId||item.sourceCalendarEventId||ev.id||''),
+       berlinDateOnly(item.date||new Date()),Number(data.hoursBooked||item.hours||0),
+       String(data.activity||item.activity||item.note||ev.description||'Besichtigungstermin')]
     );
   }else if(action==='inquiryToOffer'){
     const id=String(data.offerId||'').trim();if(!id)return;
@@ -5275,7 +5404,7 @@ async function mirrorInquiryOfferWrite(action,body,parsed){
       [id,String(body.id||''),String(body.customer||''),String(body.phone||''),String(body.employee||'')]
     );
   }else if(['setRegieReportsOfferStatus','saveOfferCreatedWithReminder','moveOfferBackToCreate',
-             'declineOfferFromReminder','acceptOfferFromReminder'].includes(action)){
+             'declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning'].includes(action)){
     const offerId=String(data.offerId||body.offerId||'').trim();if(!offerId)return;
     let status='';
     if(action==='setRegieReportsOfferStatus'){
@@ -5285,7 +5414,7 @@ async function mirrorInquiryOfferWrite(action,body,parsed){
     }else if(action==='saveOfferCreatedWithReminder')status='Offen';
     else if(action==='moveOfferBackToCreate')status='Zu erstellen';
     else if(action==='declineOfferFromReminder')status='Abgelehnt';
-    else if(action==='acceptOfferFromReminder'&&!body.asRunning)status='Angenommen';
+    else if(action==='acceptOfferFromReminder'||action==='acceptOfferAsRunning')status='Laufend';
     if(status){
       await pool.query(
         `UPDATE inquiry_offers_shadow SET status=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now()
@@ -6996,8 +7125,15 @@ async function proxyLegacy(req, res, body) {
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['createInspectionOffer','inquiryToOffer','setRegieReportsOfferStatus','saveOfferCreatedWithReminder',
-           'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder'].includes(action)) {
+           'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning'].includes(action)) {
         mirrorInquiryOfferWrite(action,body,parsed).catch(e=>console.error('inquiry offer shadow mirror failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false && action==='createInspectionOffer') {
+        mirrorInspectionTimeEntry(body,parsed).catch(e=>console.error('inspection time entry shadow mirror failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false &&
+          ['acceptOfferAsRunning','acceptOfferFromReminder'].includes(action)) {
+        mirrorAcceptedOfferRunning(body,parsed).catch(e=>console.error('accepted offer running shadow mirror failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['savePlannerWorker','movePlannerWorker','setPlannerWorkerActive'].includes(action)) {
@@ -7082,7 +7218,8 @@ async function proxyLegacy(req, res, body) {
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['saveEntry','deleteEntry','updateEmployeeEntry','updateBossDayEntry','deleteBossDayEntry','markRegieReportBilled',
            'updateRegieReport','markRegieObjectsBilled','markRegieObjectBilled','setRegieObjectJobStatus','markRegieObjectCompleted','setRegieReportsOfferStatus',
-           'moveOfferBackToCreate','saveOfferCreatedWithReminder','acceptOfferAsRunning','discardOfferPermanently'].includes(action)) {
+           'moveOfferBackToCreate','saveOfferCreatedWithReminder','acceptOfferAsRunning','acceptOfferFromReminder',
+           'createInspectionOffer','discardOfferPermanently'].includes(action)) {
         mirrorTimeEntryWrite(action,body,parsed).catch(e=>console.error('time entries shadow mirror failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'week_data:%'")
           .catch(e=>console.error('week data time readiness invalidate failed',e.message));
