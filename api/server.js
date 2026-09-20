@@ -91,6 +91,15 @@ CREATE INDEX IF NOT EXISTS legacy_action_log_duration_idx
 ALTER TABLE legacy_action_log
   ADD COLUMN IF NOT EXISTS duration_ms INTEGER;
 
+CREATE TABLE IF NOT EXISTS write_action_stats (
+  action TEXT PRIMARY KEY,
+  success_count BIGINT NOT NULL DEFAULT 0,
+  failure_count BIGINT NOT NULL DEFAULT 0,
+  last_success_at TIMESTAMPTZ,
+  last_failure_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
@@ -569,6 +578,36 @@ function isCacheableAction(action) {
   return CACHEABLE_ACTIONS.has(action);
 }
 
+function isWriteAction(action) {
+  const a=String(action||'');
+  return Boolean(a) &&
+    !/^(get|check|search|find)/.test(a) &&
+    !['ping','employeeLogin','employeeLogout','systemHealthCheck'].includes(a);
+}
+
+async function bumpWriteStat(action, ok) {
+  if (!pool || !isWriteAction(action)) return;
+  if (ok) {
+    await pool.query(
+      `INSERT INTO write_action_stats(action,success_count,last_success_at,updated_at)
+       VALUES($1,1,now(),now())
+       ON CONFLICT(action) DO UPDATE SET
+         success_count=write_action_stats.success_count+1,
+         last_success_at=now(),updated_at=now()`,
+      [String(action)]
+    );
+  } else {
+    await pool.query(
+      `INSERT INTO write_action_stats(action,failure_count,last_failure_at,updated_at)
+       VALUES($1,1,now(),now())
+       ON CONFLICT(action) DO UPDATE SET
+         failure_count=write_action_stats.failure_count+1,
+         last_failure_at=now(),updated_at=now()`,
+      [String(action)]
+    );
+  }
+}
+
 function shouldBypassReadCache(body) {
   return Boolean(body && body.force);
 }
@@ -769,6 +808,7 @@ async function proxyLegacy(req, res, body) {
       if (EMPLOYEE_MUTATION_ACTIONS.has(action) && upstream.status === 200 && parsed && parsed.ok !== false) {
         markEmployeeSnapshotDirty(action).catch(e=>console.error('employee snapshot dirty flag failed',e.message));
       }
+      bumpWriteStat(action, upstream.status === 200 && parsed && parsed.ok !== false).catch(()=>{});
       pool.query(
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
          VALUES($1,$2::jsonb,$3,$4::jsonb,$5,$6)`,
@@ -784,6 +824,7 @@ async function proxyLegacy(req, res, body) {
     );
   } catch (e) {
     if (pool) {
+      bumpWriteStat(action,false).catch(()=>{});
       pool.query(
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
          VALUES($1,$2::jsonb,false,$3::jsonb,502,$4)`,
