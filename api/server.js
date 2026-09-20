@@ -3502,6 +3502,54 @@ async function replaceTimeBankEmployeeShadow(data){
   }finally{client.release();}
 }
 
+
+async function mirrorTimeBankWrite(action,body,parsed){
+  if(!pool)return;
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if(!data||data.ok===false)return;
+  const id=String(data.id||'').trim(),employee=String(body.targetEmployee||'').trim();
+  if(!id||!employee)return;
+
+  let hours=Number(data.hours||0),type='',year=0,month=0,reference='',reason='';
+  const now=new Date();
+  const createdIso=berlinDateOnly(now);
+
+  if(action==='saveTimeBankManual'){
+    const raw=String(body.timeBankAction||'');
+    type=(raw==='Auszahlung'||raw==='Stunden abziehen')?'Stunden abziehen':'Stunden Gutschreiben';
+    year=Number(createdIso.slice(0,4))||0;
+    month=Number(createdIso.slice(5,7))||0;
+    reason=String(body.reason||'');
+    // Google normalizes the sign and returns it in data.hours.
+    reference='manual:postgres-mirror:'+id;
+  }else if(action==='applyTimeBankToMonth'){
+    type='Monatsausgleich';
+    year=Number(body.year)||0;month=Number(body.month)||0;
+    reason='Anrechnung auf Monats-Soll';
+    reference='month-credit:'+year+'-'+month+':postgres-mirror:'+id;
+  }else if(action==='bankMonthSurplus'){
+    type='Monatsplus';
+    year=Number(body.year)||0;month=Number(body.month)||0;
+    reason='Monatsplus ins Zeitguthaben übernommen';
+    reference='month-surplus:'+employee+':'+year+'-'+month;
+  }else return;
+
+  await pool.query(
+    `INSERT INTO time_bank_shadow(
+      id,employee_name,hours,booking_type,booking_year,booking_month,reference,reason,
+      created_at_text,created_iso,created_by,shadow_updated_at
+    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())
+    ON CONFLICT(id) DO UPDATE SET
+      employee_name=EXCLUDED.employee_name,hours=EXCLUDED.hours,booking_type=EXCLUDED.booking_type,
+      booking_year=EXCLUDED.booking_year,booking_month=EXCLUDED.booking_month,
+      reference=CASE WHEN COALESCE(time_bank_shadow.reference,'')<>'' THEN time_bank_shadow.reference ELSE EXCLUDED.reference END,
+      reason=EXCLUDED.reason,created_at_text=EXCLUDED.created_at_text,created_iso=EXCLUDED.created_iso,
+      created_by=EXCLUDED.created_by,shadow_updated_at=now()`,
+    [id,employee,hours,type,year,month,reference,reason,new Date().toISOString(),createdIso,String(body.employee||'')]
+  );
+  await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'time_bank:%' OR shadow_name LIKE 'my_time_bank:%'");
+}
+
 async function verifyTimeBankShadow(data){
   if(!pool||!data||!data.employee||!Array.isArray(data.transactions))return;
   const employee=String(data.employee);
@@ -6858,6 +6906,16 @@ async function proxyLegacy(req, res, body) {
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','saveAbsence','deleteAbsence','endSicknessAbsence'].includes(action)) {
         invalidateShadowVerify('employee_admin').catch(e=>console.error('employee admin balance readiness invalidate failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false &&
+          ['saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus'].includes(action)) {
+        mirrorTimeBankWrite(action,body,parsed).catch(e=>console.error('time bank write shadow mirror failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false &&
+          ['saveAbsence','deleteAbsence'].includes(action) &&
+          (String(body.type||'')==='Freizeitausgleich' || action==='deleteAbsence')) {
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'time_bank:%' OR shadow_name LIKE 'my_time_bank:%'")
+          .catch(e=>console.error('absence time bank readiness invalidate failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','saveAbsence','deleteAbsence','endSicknessAbsence'].includes(action)) {
