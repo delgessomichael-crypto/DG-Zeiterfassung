@@ -734,6 +734,7 @@ async function initDb() {
   await initAbsencesShadow();
   await initVacationEntitlementsShadow();
   await initTimeBankShadow();
+  await initEmployeeAdminShadowFromSnapshot();
   await initAssignmentsShadow();
   await initMonthlyAdjustmentsShadow();
   await initClosureShadows();
@@ -744,6 +745,7 @@ async function initDb() {
   await initRegieMetadataShadows();
   await initRegieAttachmentsShadow();
   await bootstrapTrustedShadowReadiness();
+  await bootstrapEmployeeAdminReadiness();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -6733,6 +6735,89 @@ async function directPlannerWorkersRead(body){
   }));
 }
 
+
+
+function minimumWageForEmployeeEntryDate(entryDate){
+  const date=berlinDateOnly(entryDate||new Date());
+  if(date>='2027-01-01')return {date,from:'2027-01-01',amount:14.60};
+  if(date>='2026-01-01')return {date,from:'2026-01-01',amount:13.90};
+  if(date>='2025-01-01')return {date,from:'2025-01-01',amount:12.82};
+  return {date,from:'',amount:0};
+}
+async function initEmployeeAdminShadowFromSnapshot(){
+  if(!pool)return;
+  const existing=await pool.query('SELECT COUNT(*)::int AS n FROM employee_admin_shadow');
+  if((existing.rows[0]?.n||0)>0)return;
+
+  const [q,bankQ]=await Promise.all([
+    pool.query(
+      `SELECT source_key,payload FROM migration_objects
+        WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+      ['sheet:Mitarbeiter']
+    ),
+    pool.query(
+      `SELECT employee_name,COALESCE(SUM(hours),0)::numeric AS balance
+         FROM time_bank_shadow GROUP BY employee_name`
+    )
+  ]);
+  const balances=new Map(bankQ.rows.map(r=>[String(r.employee_name||''),Number(r.balance||0)]));
+  let sort=0,inserted=0;
+  for(const row of q.rows){
+    const p=row.payload||{};if(Number(p.sourceRow||row.source_key)<=1)continue;
+    const x=Array.isArray(p.cells)?p.cells:[],name=textCell(x,0).trim();if(!name)continue;
+    const yes=v=>!['nein','no','false','0'].includes(String(v||'').trim().toLowerCase());
+    const num=i=>Number(String(textCell(x,i)||'').replace(',','.'))||0;
+    const entryDate=berlinDateOnly(textCell(x,30));
+    const payload={
+      name,
+      calendarId:textCell(x,2),
+      employmentType:textCell(x,3)||'Vollzeit',
+      weeklyHours:num(4),
+      monday:num(5),tuesday:num(6),wednesday:num(7),thursday:num(8),friday:num(9),
+      holidayCredit:yes(textCell(x,10)),
+      active:yes(textCell(x,11)),
+      chefAccess:yes(textCell(x,12)),
+      lastName:textCell(x,14),firstName:textCell(x,15),birthDate:berlinDateOnly(textCell(x,16)),
+      personnelNumber:textCell(x,17),street:textCell(x,18),postalCode:textCell(x,19),
+      city:textCell(x,20),phone:textCell(x,21),mobile:textCell(x,22),email:textCell(x,23),
+      healthInsurance:textCell(x,24),healthInsuranceNumber:textCell(x,25),
+      socialSecurityNumber:textCell(x,26),taxId:textCell(x,27),bank:textCell(x,28),iban:textCell(x,29),
+      entryDate,exitDate:berlinDateOnly(textCell(x,31)),paymentMethod:textCell(x,32)||'Überweisung',
+      emergencyContactName:textCell(x,33),emergencyContactPhone:textCell(x,34),
+      drivingLicence:textCell(x,35),notes:textCell(x,36),hourlyWage:num(37),
+      payrollType:textCell(x,38)||'Stundenlohn',monthlySalary:num(39),
+      payrollRelevant:textCell(x,40)===''?true:yes(textCell(x,40)),
+      minimumWage:minimumWageForEmployeeEntryDate(entryDate),
+      timeBankBalance:Math.round(Number(balances.get(name)||0)*100)/100
+    };
+    await pool.query(
+      `INSERT INTO employee_admin_shadow(employee_name,sort_order,payload,shadow_updated_at)
+       VALUES($1,$2,$3::jsonb,now())
+       ON CONFLICT(employee_name) DO NOTHING`,
+      [name,sort++,JSON.stringify(payload)]
+    );
+    inserted++;
+  }
+  console.log('SHADOW employee_admin initialized rows='+inserted+' source=snapshot-no-pin');
+}
+
+async function bootstrapEmployeeAdminReadiness(){
+  if(!pool)return;
+  const marker='trusted_employee_admin_bootstrap_v1';
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);
+  if(done.rowCount)return;
+  const q=await pool.query('SELECT COUNT(*)::int AS n FROM employee_admin_shadow');
+  const n=Number(q.rows[0]?.n||0);
+  if(!n)return;
+  await saveShadowVerifyStat('employee_admin',n,n,0);
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+     ON CONFLICT(key) DO NOTHING`,
+    [marker,JSON.stringify({at:new Date().toISOString(),rows:n,source:'Mitarbeiter snapshot + time_bank_shadow',pinStored:false})]
+  );
+  await clearEmployeeSnapshotDirty('trusted employee admin bootstrap');
+  console.log('TRUSTED_BOOTSTRAP employee_admin='+n+' pinStored=false');
+}
 
 async function replaceEmployeeAdminShadow(rows){
   if(!pool||!Array.isArray(rows))return;
