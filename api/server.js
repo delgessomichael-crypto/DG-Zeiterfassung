@@ -133,6 +133,8 @@ async function initDb() {
   await pool.query(schema);
   await cleanupInternalData();
   await loadGooglePingCache();
+  employeeSnapshotDirtyCache = null;
+  if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
     cleanupInternalData().catch(e => console.error('internal cleanup failed', e.message));
   }, 6 * 60 * 60 * 1000);
@@ -480,16 +482,25 @@ const EMPLOYEE_MUTATION_ACTIONS = new Set([
   'setEmployeeActive',
   'deleteEmployeeAdmin'
 ]);
+let employeeSnapshotDirtyCache = null;
+let employeeNamesCache = null;
 
 async function isEmployeeSnapshotDirty() {
+  if (employeeSnapshotDirtyCache !== null) return employeeSnapshotDirtyCache;
   if (!pool) return true;
   const q = await pool.query("SELECT value FROM app_meta WHERE key='employee_snapshot_dirty'");
-  if (!q.rowCount) return false;
+  if (!q.rowCount) {
+    employeeSnapshotDirtyCache = false;
+    return false;
+  }
   const v = q.rows[0].value;
-  return v === true || (v && v.dirty === true);
+  employeeSnapshotDirtyCache = v === true || (v && v.dirty === true);
+  return employeeSnapshotDirtyCache;
 }
 
 async function markEmployeeSnapshotDirty(action) {
+  employeeSnapshotDirtyCache = true;
+  employeeNamesCache = null;
   if (!pool) return;
   const value = JSON.stringify({dirty:true,action:String(action||''),at:new Date().toISOString()});
   await pool.query(
@@ -623,6 +634,7 @@ function cellValue(cell) {
 }
 
 async function getEmployeesFromSnapshot() {
+  if (Array.isArray(employeeNamesCache) && employeeNamesCache.length) return employeeNamesCache.slice();
   if (!pool) return null;
   const q = await pool.query(
     `SELECT source_key,payload
@@ -642,6 +654,7 @@ async function getEmployeesFromSnapshot() {
     const active = !activeRaw || ['ja','yes','true','1','aktiv'].includes(activeRaw);
     if (name && active) names.push(name);
   }
+  employeeNamesCache = names.slice();
   return names;
 }
 
