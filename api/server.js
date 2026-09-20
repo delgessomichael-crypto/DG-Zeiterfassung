@@ -688,6 +688,34 @@ async function logLatencySummary() {
   ).join(' | '));
 }
 
+
+async function bootstrapTrustedShadowReadiness(){
+  if(!pool)return;
+  const marker='trusted_shadow_bootstrap_v1';
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);
+  if(done.rowCount)return;
+
+  const specs=[
+    ['manual_orders','manual_orders_shadow'],
+    ['own_reminders','own_reminders_shadow'],
+    ['offer_reminders','offer_reminders_shadow'],
+    ['planner_workers','planner_workers_shadow']
+  ];
+  const stamped=[];
+  for(const [name,table] of specs){
+    const q=await pool.query('SELECT COUNT(*)::int AS n FROM '+table);
+    const n=Number(q.rows[0]?.n||0);
+    await saveShadowVerifyStat(name,n,n,0);
+    stamped.push(name+'='+n);
+  }
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+     ON CONFLICT(key) DO NOTHING`,
+    [marker,JSON.stringify({at:new Date().toISOString(),shadows:stamped,reason:'trusted internal-only mirrors after v10 write audit'})]
+  );
+  console.log('TRUSTED_BOOTSTRAP '+stamped.join(' '));
+}
+
 async function initDb() {
   if (!pool) return;
   await pool.query(schema);
@@ -715,6 +743,7 @@ async function initDb() {
   await initTimeEntriesShadow();
   await initRegieMetadataShadows();
   await initRegieAttachmentsShadow();
+  await bootstrapTrustedShadowReadiness();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
