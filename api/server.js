@@ -443,10 +443,17 @@ function authorized(req) {
 
 async function health() {
   let database = 'not-configured';
+  let postgresEmployeeSnapshotCount = null;
+  let employeeReadSource = 'google-fallback';
   if (pool) {
     try {
       const q = await pool.query('SELECT 1 AS ok');
       database = q.rows[0] && q.rows[0].ok === 1 ? 'ok' : 'error';
+      const names = await getEmployeesFromSnapshot();
+      if (Array.isArray(names) && names.length) {
+        postgresEmployeeSnapshotCount = names.length;
+        employeeReadSource = 'postgres';
+      }
     } catch (e) {
       database = 'error';
     }
@@ -459,6 +466,8 @@ async function health() {
     googleBackendConfigured: Boolean(GOOGLE_BACKEND_URL),
     productionWrites: 'Google-GS-9.0',
     postgresWrites: 'migration-shadow-plus-read-cache',
+    employeeReadSource,
+    postgresEmployeeSnapshotCount,
     readCacheTtlSeconds: READ_CACHE_TTL_MS / 1000
   };
 }
