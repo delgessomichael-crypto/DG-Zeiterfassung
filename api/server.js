@@ -881,9 +881,8 @@ async function verifyPlannerWorkersShadow(rows) {
       normalizeShadowText(r.displayName)===normalizeShadowText(p.display_name) &&
       normalizeShadowText(r.provider||'google')===normalizeShadowText(p.provider||'google') &&
       normalizeShadowText(r.calendarId)===normalizeShadowText(p.calendar_id) &&
-      Boolean(r.active)!==false && Boolean(p.active)!==false
-        ? Number(r.sortOrder||999)===Number(p.sort_order||999)
-        : Boolean(r.active)===Boolean(p.active) && Number(r.sortOrder||999)===Number(p.sort_order||999);
+      Boolean(r.active)===Boolean(p.active) &&
+      Number(r.sortOrder||999)===Number(p.sort_order||999);
     if(!same)mismatches++;
   }
   for(const id of pg.keys())if(!seen.has(id))mismatches++;
