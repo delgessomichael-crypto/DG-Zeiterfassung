@@ -4747,6 +4747,89 @@ function getDashboardSummary51_(employee,pin,force){
   dg51CachePutJson_(key,out,180);return out;
 }
 
+
+/* DG 10.0 migration export: read-only, chef-authenticated, paginated.
+   These functions never modify production data. */
+function migrationCell10_(value) {
+  if (value instanceof Date) {
+    return {type:'date', value:Utilities.formatDate(value, 'UTC', "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")};
+  }
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return {type:'number', value:value};
+  if (typeof value === 'boolean') return {type:'boolean', value:value};
+  return {type:'string', value:String(value)};
+}
+
+function getMigrationManifest10_(employee, employeePin) {
+  requireChef_(employee, employeePin);
+  const ss = getSpreadsheet_();
+  const props = PropertiesService.getScriptProperties();
+  const sheets = ss.getSheets().map(function(sheet){
+    const lastRow = sheet.getLastRow();
+    const lastColumn = sheet.getLastColumn();
+    let headers = [];
+    if (lastRow >= 1 && lastColumn >= 1) {
+      headers = sheet.getRange(1,1,1,lastColumn).getDisplayValues()[0];
+    }
+    return {
+      name: sheet.getName(),
+      sheetId: sheet.getSheetId(),
+      lastRow: lastRow,
+      lastColumn: lastColumn,
+      dataRows: Math.max(0,lastRow-1),
+      headers: headers,
+      frozenRows: sheet.getFrozenRows(),
+      frozenColumns: sheet.getFrozenColumns()
+    };
+  });
+  return {
+    source:'Google-GS',
+    version:DG_BACKEND_VERSION,
+    spreadsheetName:ss.getName(),
+    spreadsheetId:ss.getId(),
+    generatedAt:new Date().toISOString(),
+    sheets:sheets,
+    scriptPropertyKeys:props.getKeys().sort()
+  };
+}
+
+function getMigrationSheetPage10_(employee, employeePin, sheetName, startRow, maxRows) {
+  requireChef_(employee, employeePin);
+  sheetName = clean_(sheetName);
+  if (!sheetName) throw new Error('Tabellenname fehlt.');
+  const ss = getSpreadsheet_();
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error('Tabelle nicht gefunden: '+sheetName);
+  const lastRow = sheet.getLastRow();
+  const lastColumn = sheet.getLastColumn();
+  startRow = Math.max(2, Number(startRow)||2);
+  maxRows = Math.max(1, Math.min(250, Number(maxRows)||200));
+  if (lastRow < startRow || lastColumn < 1) {
+    return {sheetName:sheetName,startRow:startRow,nextRow:0,lastRow:lastRow,lastColumn:lastColumn,rows:[]};
+  }
+  const count = Math.min(maxRows, lastRow-startRow+1);
+  const range = sheet.getRange(startRow,1,count,lastColumn);
+  const values = range.getValues();
+  const formulas = range.getFormulas();
+  const rows = values.map(function(row,ri){
+    return row.map(function(value,ci){
+      const out = migrationCell10_(value);
+      const formula = formulas[ri][ci];
+      if (formula) return {cell:out, formula:String(formula)};
+      return {cell:out};
+    });
+  });
+  const nextRow = startRow + count <= lastRow ? startRow + count : 0;
+  return {
+    sheetName:sheetName,
+    startRow:startRow,
+    nextRow:nextRow,
+    lastRow:lastRow,
+    lastColumn:lastColumn,
+    rows:rows
+  };
+}
+
 function doPost(e) {
   let data = {};
   let action = '';
@@ -4773,7 +4856,7 @@ function doPost(e) {
       checkRegieBillingRisk:1, getBossMonthData:1, saveMonthlyAdjustment:1, deleteMonthlyAdjustment:1, markConflictReviewed:1,
       setMonthClosureStatus:1, getObjectReports:1, createTaxAdvisorPdf:1, createRegiePhotoZip:1, createRegieReportZip:1,
       getPlannerWorkers:1, getPlannerAvailability:1, getMaintenanceContracts:1, getMaintenanceOverview:1, searchMaintenanceCustomers:1, getMaintenanceCustomer:1, getMaintenanceArchive:1, saveMaintenanceCustomer:1, deleteMaintenanceDevice:1, deleteMaintenanceCustomer:1, addMaintenanceRepair:1, findMaintenanceDeviceByInternalId:1, reserveMaintenanceDeviceId:1, getMaintenanceAttachment:1, deleteMaintenanceAttachment:1, planRequest3:1,savePlannerWorker:1, movePlannerWorker:1, setPlannerWorkerActive:1, getPlannerEvents:1, savePlannerEvent:1, deletePlannerEvent:1, saveExternalGoogleEvent:1, deleteExternalGoogleEvent:1,
-      getOfferReports:1, createInspectionOffer:1, setRegieReportsOfferStatus:1, discardOfferPermanently:1, getObjectInternalNote:1, getObjectInternalNotes:1, saveObjectInternalNote:1, acceptOfferAsRunning:1, saveOfferCreatedWithReminder:1, moveOfferBackToCreate:1, getOfferReminders:1, rescheduleOfferReminder:1, declineOfferFromReminder:1, acceptOfferFromReminder:1, getOfferStatistics:1, getOwnReminders:1, createOwnReminder:1, saveOwnReminderInternalNote:1, rescheduleOwnReminder:1, completeOwnReminder:1, deleteOwnReminder:1, transferPlannerEvent:1, getMapsBrowserConfig:1, systemHealthCheck:1, syncCustomerInquiries:1, getCustomerInquiries:1, updateCustomerInquiry:1, saveCustomerInquiryNote:1, completeCustomerInquiry:1, deleteCustomerInquiry:1, saveCustomerInquiryContact:1, archiveCustomerInquiry:1, rejectCustomerInquiry:1, createInquiryReminder:1, getInquiryReminders:1, reopenInquiryReminder:1, archiveInquiryReminder:1, rejectInquiryReminder:1, inquiryToOffer:1, saveManualOrder:1, getManualOrders:1, saveManualOrderNote:1, setManualOrderStatus:1, deleteManualOrder:1
+      getOfferReports:1, getMigrationManifest10:1, getMigrationSheetPage10:1, createInspectionOffer:1, setRegieReportsOfferStatus:1, discardOfferPermanently:1, getObjectInternalNote:1, getObjectInternalNotes:1, saveObjectInternalNote:1, acceptOfferAsRunning:1, saveOfferCreatedWithReminder:1, moveOfferBackToCreate:1, getOfferReminders:1, rescheduleOfferReminder:1, declineOfferFromReminder:1, acceptOfferFromReminder:1, getOfferStatistics:1, getOwnReminders:1, createOwnReminder:1, saveOwnReminderInternalNote:1, rescheduleOwnReminder:1, completeOwnReminder:1, deleteOwnReminder:1, transferPlannerEvent:1, getMapsBrowserConfig:1, systemHealthCheck:1, syncCustomerInquiries:1, getCustomerInquiries:1, updateCustomerInquiry:1, saveCustomerInquiryNote:1, completeCustomerInquiry:1, deleteCustomerInquiry:1, saveCustomerInquiryContact:1, archiveCustomerInquiry:1, rejectCustomerInquiry:1, createInquiryReminder:1, getInquiryReminders:1, reopenInquiryReminder:1, archiveInquiryReminder:1, rejectInquiryReminder:1, inquiryToOffer:1, saveManualOrder:1, getManualOrders:1, saveManualOrderNote:1, setManualOrderStatus:1, deleteManualOrder:1
     };
     if (chefActions[action]) requireChef_(clean_(data.employee), clean_(data.employeePin));
 
@@ -4803,6 +4886,13 @@ function doPost(e) {
 
     if (action === 'getDashboardSummary51') {
       return jsonResponse_({ok:true,data:getDashboardSummary51_(clean_(data.employee),clean_(data.employeePin),Boolean(data.force))});
+    }
+
+    if (action === 'getMigrationManifest10') {
+      return jsonResponse_({ok:true,data:getMigrationManifest10_(clean_(data.employee),clean_(data.employeePin))});
+    }
+    if (action === 'getMigrationSheetPage10') {
+      return jsonResponse_({ok:true,data:getMigrationSheetPage10_(clean_(data.employee),clean_(data.employeePin),clean_(data.sheetName),Number(data.startRow)||2,Number(data.maxRows)||200)});
     }
 
 
