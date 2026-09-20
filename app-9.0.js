@@ -3266,7 +3266,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 /* DG Zeiterfassung 9.0 - konsolidierter Runtime-Layer */
 (function(){
 'use strict';
-const V='8.0',VIEW='dg60_view',STATE='dg60_office_state',BACK='dg60_backend',BACK_TTL=3600000,OFFER_TTL=3600000;
+const V='9.0',VIEW='dg60_view',STATE='dg60_office_state',BACK='dg60_backend',BACK_TTL=3600000,OFFER_TTL=3600000;
 const q=id=>document.getElementById(id),esc60=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let offerAt=0,offerPromise=null;
 const parts=v=>String(v||'').split('.').map(x=>Number(x)||0);
@@ -3318,7 +3318,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 /* DG Zeiterfassung 9.0 - strikte, einheitliche Backend-Anbindung */
 (function(){
 'use strict';
-const V='8.0',PREVIOUS=['7.4.1','7.4.0','7.3.7','7.3.6','7.3.5','7.3.4','7.3.3','7.3.2','7.3.1','7.3','7.2.1','7.2','7.1','7.0'],KEY='dg70_backend',TTL=5*60*1000;
+const V='9.0',PREVIOUS=[],KEY='dg70_backend',TTL=5*60*1000;
 const BACKEND_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
 function byId(id){return document.getElementById(id);}
 function exact(v){return String(v||'').trim()===V;}
@@ -3367,7 +3367,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 (function(){
 'use strict';
 
-const V60='8.0';
+const V60='9.0';
 let activeRecognition60=null;
 let activeSpeechTarget60='';
 let activeSpeechButton60=null;
@@ -8510,7 +8510,7 @@ function installBackendCheck(){
     if(!force){
       try{
         const c=JSON.parse(sessionStorage.getItem(key)||'null');
-        if(c&&['9.0','8.0'].includes(String(c.version||''))&&Date.now()-Number(c.ts||0)<ttl){
+        if(c&&String(c.version||'')==='9.0'&&Date.now()-Number(c.ts||0)<ttl){
           if(window.DG3)DG3.backend=String(c.version);
           return true;
         }
@@ -8525,12 +8525,11 @@ function installBackendCheck(){
       if(!r.ok)throw new Error('HTTP '+r.status);
       const raw=JSON.parse(await r.text());if(!raw.ok)throw new Error(raw.error||'Serverfehler.');
       const data=raw.data!==undefined?raw.data:raw,found=String(data&&data.version||raw.version||'');
-      const ok=found==='9.0'||found==='8.0';
+      const ok=found==='9.0';
       if(window.DG3)DG3.backend=ok?found:'';
       sessionStorage.setItem(key,JSON.stringify({ts:Date.now(),version:found}));
       const old=byId('d3Notice');
       if(found==='9.0'){if(old&&/Google-GS|Google-Backend|Versionsstand/i.test(old.textContent||''))old.remove();}
-      else if(found==='8.0'&&typeof window.d3Notice==='function')window.d3Notice('Version 9.0 ist aktiv. Google-GS 9.0 bitte noch als neue Version bereitstellen; GS 8.0 bleibt bis dahin kompatibel.','warn');
       else if(typeof window.d3Notice==='function')window.d3Notice('Versionsstand stimmt nicht: App 9.0 erwartet Google-GS 9.0. Aktiv ist '+(found||'unbekannt')+'.','warn');
       return ok;
     }catch(e){
