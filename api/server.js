@@ -4440,6 +4440,33 @@ async function mirrorMaintenanceCustomerTree(data,employee) {
   }finally{client.release();}
 }
 
+
+async function mirrorReservedMaintenanceDeviceId(body,parsed){
+  if(!pool)return;
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  const reserved=Number(data&&data.internalDeviceId);
+  if(!Number.isFinite(reserved)||reserved<1000)return;
+  const next=reserved+1;
+  const value=JSON.stringify({
+    nextInternalDeviceId:String(next),
+    lastReservedInternalDeviceId:String(reserved),
+    reservedBy:String(body&&body.employee||''),
+    reservedAt:new Date().toISOString(),
+    source:'google'
+  });
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES('maintenance_next_device_id',$1::jsonb)
+     ON CONFLICT(key) DO UPDATE SET value=
+       CASE
+         WHEN COALESCE((app_meta.value->>'nextInternalDeviceId')::int,0) > $2::int
+           THEN app_meta.value
+         ELSE EXCLUDED.value
+       END,
+       updated_at=now()`,
+    [value,next]
+  );
+}
+
 async function mirrorMaintenanceWrite(action,body,parsed){
   if(!pool)return;
   const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
@@ -6983,6 +7010,9 @@ async function proxyLegacy(req, res, body) {
           ['savePlannerEvent','deletePlannerEvent'].includes(action)) {
         mirrorPlannerEventWrite(action,body,parsed).catch(e=>console.error('planner event shadow mirror failed',e.message));
         invalidateShadowVerify('maintenance_contracts').catch(e=>console.error('maintenance contracts planner readiness invalidate failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false && action==='reserveMaintenanceDeviceId') {
+        mirrorReservedMaintenanceDeviceId(body,parsed).catch(e=>console.error('maintenance device id reservation mirror failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['saveMaintenanceCustomer','deleteMaintenanceCustomer','deleteMaintenanceDevice','addMaintenanceRepair','addManualMaintenanceCount'].includes(action)) {
