@@ -14,7 +14,7 @@
 <link rel="preconnect" href="https://script.google.com"/>
 <link rel="dns-prefetch" href="//script.google.com"/>
 <link rel="preload" href="./app-5.0.css?v=20260918-800-prod1" as="style"/>
-<link rel="preload" href="./app-8.0.js?v=20260920-800-ui25" as="script"/>
+<link rel="preload" href="./app-8.0.js?v=20260920-800-ui27" as="script"/>
 <link rel="manifest" href="manifest.json"/>
 <link href="dg_icon_192.png" rel="icon"/>
 <link href="dg_icon_192.png" rel="apple-touch-icon"/>
@@ -237,17 +237,17 @@
 (function(){
   if(!('serviceWorker' in navigator))return;
   window.addEventListener('load',function(){
-    navigator.serviceWorker.register('./sw-8.0-prod.js?v=20260920-800-ui25',{updateViaCache:'none'})
+    navigator.serviceWorker.register('./sw-8.0-prod.js?v=20260920-800-ui27',{updateViaCache:'none'})
       .then(function(r){return r.update();})
       .catch(function(e){console.warn('DG Offline-Cache nicht bereit',e);});
   },{once:true});
 })();
 </script>
 
-<script defer src="./app-8.0.js?v=20260920-800-ui25"></script>
+<script defer src="./app-8.0.js?v=20260920-800-ui27"></script>
 <script defer src="./app-8.0-customerflow.js?v=20260919-customerflow2"></script>
 <script defer src="./payroll-hotfix-8.0.js?v=20260919-800-ui8"></script>
-<script defer src="./ui-hotfix-8.0.js?v=20260920-800-ui25"></script>
+<script defer src="./ui-hotfix-8.0.js?v=20260920-800-ui27"></script>
 <script>
 (function(){
 'use strict';
