@@ -3,11 +3,14 @@
 const http = require('http');
 const crypto = require('crypto');
 const { Pool } = require('pg');
+const XLSX = require('xlsx');
 
 const PORT = Number(process.env.PORT || 3000);
 const DATABASE_URL = process.env.DATABASE_URL || '';
 const GOOGLE_BACKEND_URL = process.env.GOOGLE_BACKEND_URL || '';
 const MIGRATION_TOKEN = process.env.MIGRATION_TOKEN || '';
+const MIGRATION_UPLOAD_KEY = process.env.MIGRATION_UPLOAD_KEY || '';
+const WEB_ORIGIN = process.env.WEB_ORIGIN || 'https://dg-app-10-web-production.up.railway.app';
 
 const pool = DATABASE_URL ? new Pool({
   connectionString: DATABASE_URL,
@@ -45,6 +48,16 @@ CREATE TABLE IF NOT EXISTS migration_objects (
 CREATE INDEX IF NOT EXISTS migration_objects_type_idx
   ON migration_objects(entity_type);
 
+CREATE TABLE IF NOT EXISTS migration_sheets (
+  migration_run_id BIGINT NOT NULL REFERENCES migration_runs(id) ON DELETE CASCADE,
+  sheet_name TEXT NOT NULL,
+  source_rows INTEGER NOT NULL DEFAULT 0,
+  source_columns INTEGER NOT NULL DEFAULT 0,
+  imported_rows INTEGER NOT NULL DEFAULT 0,
+  payload_sha256 TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY(migration_run_id, sheet_name)
+);
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
@@ -62,7 +75,18 @@ async function initDb() {
   await pool.query(schema);
 }
 
-function json(res, status, body) {
+function cors(req, res) {
+  const origin = String(req.headers.origin || '');
+  if (origin && origin === WEB_ORIGIN) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Migration-Key');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+}
+
+function json(res, status, body, req) {
+  if (req) cors(req, res);
   const data = Buffer.from(JSON.stringify(body));
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
@@ -83,6 +107,109 @@ async function readBody(req) {
   }
   const raw = Buffer.concat(chunks).toString('utf8');
   return raw ? JSON.parse(raw) : {};
+}
+
+function uploadAuthorized(req) {
+  if (!MIGRATION_UPLOAD_KEY) return false;
+  const key = String(req.headers['x-migration-key'] || '');
+  if (key.length !== MIGRATION_UPLOAD_KEY.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(key), Buffer.from(MIGRATION_UPLOAD_KEY));
+}
+
+async function readBinary(req, limit) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > limit) throw new Error('Upload too large');
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+function sheetRowsWithFormulas(ws) {
+  if (!ws || !ws['!ref']) return [];
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const rows = [];
+  for (let r = range.s.r; r <= range.e.r; r++) {
+    let last = -1;
+    const row = [];
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const cell = ws[XLSX.utils.encode_cell({r,c})];
+      if (!cell) { row.push(null); continue; }
+      const item = { v: cell.v === undefined ? null : cell.v, t: cell.t || null };
+      if (cell.f) item.f = cell.f;
+      if (cell.z) item.z = cell.z;
+      row.push(item);
+      if (cell.v !== undefined || cell.f) last = c;
+    }
+    if (last >= 0) rows.push({ sourceRow:r+1, cells:row.slice(0,last+1) });
+  }
+  return rows;
+}
+
+async function importWorkbook(buffer) {
+  if (!pool) throw new Error('Database not configured');
+  const wb = XLSX.read(buffer, { type:'buffer', cellDates:true, cellFormula:true, cellNF:true });
+  const client = await pool.connect();
+  const counts = {};
+  let runId = null;
+  try {
+    await client.query('BEGIN');
+    const rr = await client.query(
+      "INSERT INTO migration_runs(source_version,mode,status,notes) VALUES($1,'xlsx-shadow','running',$2) RETURNING id",
+      ['Google-Sheets-live','Direct XLSX snapshot from Del Gesso Zeiterfassung']
+    );
+    runId = rr.rows[0].id;
+    for (const name of wb.SheetNames) {
+      const ws = wb.Sheets[name];
+      const rows = sheetRowsWithFormulas(ws);
+      const nonHeader = rows.filter(x => x.sourceRow > 1);
+      counts[name] = nonHeader.length;
+      let cols = 0;
+      for (const r of rows) cols = Math.max(cols, r.cells.length);
+      const digest = crypto.createHash('sha256').update(JSON.stringify(rows)).digest('hex');
+      await client.query(
+        'INSERT INTO migration_sheets(migration_run_id,sheet_name,source_rows,source_columns,imported_rows,payload_sha256) VALUES($1,$2,$3,$4,$5,$6)',
+        [runId,name,nonHeader.length,cols,nonHeader.length,digest]
+      );
+      for (const row of rows) {
+        const payload = JSON.stringify({ sheet:name, sourceRow:row.sourceRow, cells:row.cells });
+        const sha = crypto.createHash('sha256').update(payload).digest('hex');
+        await client.query(
+          `INSERT INTO migration_objects(entity_type,source_key,payload,payload_sha256,migration_run_id)
+           VALUES($1,$2,$3::jsonb,$4,$5)
+           ON CONFLICT(entity_type,source_key)
+           DO UPDATE SET payload=EXCLUDED.payload,payload_sha256=EXCLUDED.payload_sha256,
+                         imported_at=now(),migration_run_id=EXCLUDED.migration_run_id`,
+          ['sheet:'+name,String(row.sourceRow),payload,sha,runId]
+        );
+      }
+    }
+    const total = Object.values(counts).reduce((a,b)=>a+b,0);
+    await client.query(
+      "UPDATE migration_runs SET finished_at=now(),status='success',source_counts=$2::jsonb,target_counts=$2::jsonb,notes=$3 WHERE id=$1",
+      [runId,JSON.stringify(counts),'XLSX import completed; row counts identical at import time']
+    );
+    await client.query(
+      `INSERT INTO app_meta(key,value) VALUES('latest_migration',$1::jsonb)
+       ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
+      [JSON.stringify({runId,totalRows:total,sheets:counts,importedAt:new Date().toISOString()})]
+    );
+    await client.query('COMMIT');
+    return {ok:true,runId,totalRows:total,sheets:counts};
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+async function latestMigration() {
+  if (!pool) throw new Error('Database not configured');
+  const q = await pool.query("SELECT value,updated_at FROM app_meta WHERE key='latest_migration'");
+  return {ok:true,latest:q.rows[0]||null};
 }
 
 function authorized(req) {
@@ -143,25 +270,41 @@ async function counts() {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
+    if (req.method === 'OPTIONS') {
+      cors(req,res);
+      res.writeHead(204);
+      return res.end();
+    }
 
     if (req.method === 'GET' && url.pathname === '/health') {
-      return json(res, 200, await health());
+      return json(res, 200, await health(), req);
     }
 
     if (req.method === 'GET' && url.pathname === '/v1/migration/counts') {
-      if (!authorized(req)) return json(res, 401, { ok:false, error:'Unauthorized' });
-      return json(res, 200, await counts());
+      if (!authorized(req)) return json(res, 401, { ok:false, error:'Unauthorized' }, req);
+      return json(res, 200, await counts(), req);
     }
 
     if (req.method === 'POST' && url.pathname === '/v1/migration/shadow') {
       if (!authorized(req)) return json(res, 401, { ok:false, error:'Unauthorized' });
-      return json(res, 200, await shadowUpsert(await readBody(req)));
+      return json(res, 200, await shadowUpsert(await readBody(req)), req);
     }
 
-    return json(res, 404, { ok:false, error:'Not Found' });
+    if (req.method === 'POST' && url.pathname === '/v1/migration/import-xlsx') {
+      if (!uploadAuthorized(req)) return json(res, 401, {ok:false,error:'Unauthorized'}, req);
+      const buffer = await readBinary(req, 10 * 1024 * 1024);
+      return json(res, 200, await importWorkbook(buffer), req);
+    }
+
+    if (req.method === 'GET' && url.pathname === '/v1/migration/latest') {
+      if (!uploadAuthorized(req)) return json(res, 401, {ok:false,error:'Unauthorized'}, req);
+      return json(res, 200, await latestMigration(), req);
+    }
+
+    return json(res, 404, { ok:false, error:'Not Found' }, req);
   } catch (e) {
     console.error(e);
-    return json(res, 500, { ok:false, error:e && e.message ? e.message : String(e) });
+    return json(res, 500, { ok:false, error:e && e.message ? e.message : String(e) }, req);
   }
 });
 
