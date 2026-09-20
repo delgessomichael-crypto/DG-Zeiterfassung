@@ -1,0 +1,13 @@
+{
+  "name": "dg-app-10",
+  "version": "10.0.0",
+  "private": true,
+  "description": "Parallel migration build of DG Zeiterfassung 9.0 for Railway",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
