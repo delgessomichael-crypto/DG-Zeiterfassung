@@ -170,6 +170,27 @@ CREATE TABLE IF NOT EXISTS planner_workers_shadow (
   shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS planner_events_shadow (
+  id TEXT PRIMARY KEY,
+  customer TEXT,
+  address TEXT,
+  task TEXT,
+  event_date TEXT,
+  start_time TEXT,
+  end_time TEXT,
+  employee_ids_json TEXT,
+  employee_names_json TEXT,
+  google_event_ids_json TEXT,
+  created_at_text TEXT,
+  updated_at_text TEXT,
+  updated_by TEXT,
+  event_type TEXT,
+  maintenance_customer_id TEXT,
+  maintenance_object_id TEXT,
+  maintenance_device_id TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
@@ -216,6 +237,7 @@ async function initDb() {
   await initOwnRemindersShadow();
   await initOfferRemindersShadow();
   await initPlannerWorkersShadow();
+  await initPlannerEventsShadow();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -812,6 +834,110 @@ function textCell(cells,index) {
 }
 
 
+
+async function initPlannerEventsShadow() {
+  if (!pool) return;
+  const existing=await pool.query('SELECT COUNT(*)::int AS n FROM planner_events_shadow');
+  if ((existing.rows[0]?.n||0)>0) return;
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:KalenderTermine']
+  );
+  let inserted=0;
+  for (const row of q.rows) {
+    const payload=row.payload||{};
+    if (Number(payload.sourceRow||row.source_key)<=1) continue;
+    const cells=Array.isArray(payload.cells)?payload.cells:[];
+    const id=textCell(cells,0).trim();
+    if(!id) continue;
+    await pool.query(
+      `INSERT INTO planner_events_shadow(
+        id,customer,address,task,event_date,start_time,end_time,employee_ids_json,
+        employee_names_json,google_event_ids_json,created_at_text,updated_at_text,
+        updated_by,event_type,maintenance_customer_id,maintenance_object_id,maintenance_device_id
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+      ON CONFLICT(id) DO NOTHING`,
+      [id,textCell(cells,1),textCell(cells,2),textCell(cells,3),textCell(cells,4),
+       textCell(cells,5),textCell(cells,6),textCell(cells,7),textCell(cells,8),
+       textCell(cells,9),textCell(cells,10),textCell(cells,11),textCell(cells,12),
+       textCell(cells,13),textCell(cells,14),textCell(cells,15),textCell(cells,16)]
+    );
+    inserted++;
+  }
+  console.log('SHADOW planner_events initialized rows='+inserted);
+}
+
+async function mirrorPlannerEventWrite(action, body, parsed) {
+  if (!pool) return;
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if (!data || data.ok===false) return;
+  if (action==='savePlannerEvent') {
+    const item=body.item||{},id=String(data.id||item.id||'').trim();
+    if(!id)return;
+    const existing=await pool.query('SELECT created_at_text,google_event_ids_json FROM planner_events_shadow WHERE id=$1',[id]);
+    const createdAt=existing.rowCount?existing.rows[0].created_at_text:new Date().toISOString();
+    const googleIds=existing.rowCount?existing.rows[0].google_event_ids_json:'{}';
+    await pool.query(
+      `INSERT INTO planner_events_shadow(
+        id,customer,address,task,event_date,start_time,end_time,employee_ids_json,
+        employee_names_json,google_event_ids_json,created_at_text,updated_at_text,updated_by,
+        event_type,maintenance_customer_id,maintenance_object_id,maintenance_device_id,shadow_updated_at
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,now())
+      ON CONFLICT(id) DO UPDATE SET
+        customer=EXCLUDED.customer,address=EXCLUDED.address,task=EXCLUDED.task,
+        event_date=EXCLUDED.event_date,start_time=EXCLUDED.start_time,end_time=EXCLUDED.end_time,
+        employee_ids_json=EXCLUDED.employee_ids_json,employee_names_json=EXCLUDED.employee_names_json,
+        updated_at_text=EXCLUDED.updated_at_text,updated_by=EXCLUDED.updated_by,event_type=EXCLUDED.event_type,
+        maintenance_customer_id=EXCLUDED.maintenance_customer_id,
+        maintenance_object_id=EXCLUDED.maintenance_object_id,
+        maintenance_device_id=EXCLUDED.maintenance_device_id,shadow_updated_at=now()`,
+      [id,String(item.customer||''),String(item.address||''),String(item.task||''),
+       String(item.date||''),String(item.start||''),String(item.end||''),
+       JSON.stringify(Array.isArray(item.employeeIds)?item.employeeIds:[]),
+       JSON.stringify(Array.isArray(item.employeeNames)?item.employeeNames:[]),
+       googleIds,createdAt,new Date().toISOString(),String(body.employee||''),
+       String(data.type||item.type||'Auftrag'),String(item.maintenanceCustomerId||''),
+       String(item.maintenanceObjectId||''),String(data.maintenanceDeviceId||item.maintenanceDeviceId||'')]
+    );
+  } else if (action==='deletePlannerEvent') {
+    await pool.query('DELETE FROM planner_events_shadow WHERE id=$1',[String(body.id||'')]);
+  }
+}
+
+async function verifyPlannerEventsShadow(rows) {
+  if (!pool || !Array.isArray(rows)) return;
+  const dgRows=rows.filter(r=>r&&r.source==='dg'&&!r.external);
+  const q=await pool.query(
+    `SELECT id,customer,address,task,event_date,start_time,end_time,employee_ids_json,event_type,
+            maintenance_customer_id,maintenance_object_id,maintenance_device_id
+       FROM planner_events_shadow`
+  );
+  const pg=new Map(q.rows.map(r=>[String(r.id),r]));
+  let mismatches=0;const seen=new Set();
+  for(const r of dgRows){
+    const id=normalizeShadowText(r.id);if(!id){mismatches++;continue;}
+    seen.add(id);const p=pg.get(id);if(!p){mismatches++;continue;}
+    let pIds=[];try{pIds=JSON.parse(p.employee_ids_json||'[]');}catch(_e){}
+    const same=
+      normalizeShadowText(r.customer)===normalizeShadowText(p.customer) &&
+      normalizeShadowText(r.address)===normalizeShadowText(p.address) &&
+      normalizeShadowText(r.task)===normalizeShadowText(p.task) &&
+      normalizeShadowText(r.date)===normalizeShadowText(p.event_date) &&
+      normalizeShadowText(r.start)===normalizeShadowText(p.start_time) &&
+      normalizeShadowText(r.end)===normalizeShadowText(p.end_time) &&
+      JSON.stringify(Array.isArray(r.employeeIds)?r.employeeIds:[])===JSON.stringify(Array.isArray(pIds)?pIds:[]) &&
+      normalizeShadowText(r.type||'Auftrag')===normalizeShadowText(p.event_type||'Auftrag') &&
+      normalizeShadowText(r.maintenanceCustomerId)===normalizeShadowText(p.maintenance_customer_id) &&
+      normalizeShadowText(r.maintenanceObjectId)===normalizeShadowText(p.maintenance_object_id) &&
+      normalizeShadowText(r.maintenanceDeviceId)===normalizeShadowText(p.maintenance_device_id);
+    if(!same)mismatches++;
+  }
+  for(const id of pg.keys())if(!seen.has(id))mismatches++;
+  console.log('SHADOW_VERIFY planner_events google='+dgRows.length+' postgres='+pg.size+' mismatches='+mismatches);
+  await saveShadowVerifyStat('planner_events',dgRows.length,pg.size,mismatches);
+}
+
 async function initPlannerWorkersShadow() {
   if (!pool) return;
   const existing=await pool.query('SELECT COUNT(*)::int AS n FROM planner_workers_shadow');
@@ -1294,6 +1420,7 @@ async function proxyLegacy(req, res, body) {
         if (action==='getOwnReminders') verifyOwnRemindersShadow(verifyData).catch(e=>console.error('own reminder shadow verify failed',e.message));
         if (action==='getOfferReminders') verifyOfferRemindersShadow(verifyData,Boolean(body.includeDone)).catch(e=>console.error('offer reminder shadow verify failed',e.message));
         if (action==='getPlannerWorkers') verifyPlannerWorkersShadow(verifyData).catch(e=>console.error('planner worker shadow verify failed',e.message));
+        if (action==='getPlannerEvents') verifyPlannerEventsShadow(verifyData).catch(e=>console.error('planner event shadow verify failed',e.message));
       }
       if (isCacheableAction(action)) {
         writeCachedResponse(action, body, raw, upstream.status).catch(e=>console.error('response cache write failed',e.message));
@@ -1320,6 +1447,10 @@ async function proxyLegacy(req, res, body) {
           ['savePlannerWorker','movePlannerWorker','setPlannerWorkerActive'].includes(action)) {
         const plannerRows=parsed.data!==undefined?parsed.data:parsed;
         replacePlannerWorkersShadow(plannerRows).catch(e=>console.error('planner worker shadow mirror failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false &&
+          ['savePlannerEvent','deletePlannerEvent'].includes(action)) {
+        mirrorPlannerEventWrite(action,body,parsed).catch(e=>console.error('planner event shadow mirror failed',e.message));
       }
       pool.query(
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
@@ -1396,13 +1527,15 @@ async function health() {
         pool.query('SELECT COUNT(*)::int AS n FROM manual_orders_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM own_reminders_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM offer_reminders_shadow'),
-        pool.query('SELECT COUNT(*)::int AS n FROM planner_workers_shadow')
+        pool.query('SELECT COUNT(*)::int AS n FROM planner_workers_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM planner_events_shadow')
       ]);
       shadowCounts = {
         manualOrders: counts[0].rows[0]?.n||0,
         ownReminders: counts[1].rows[0]?.n||0,
         offerReminders: counts[2].rows[0]?.n||0,
-        plannerWorkers: counts[3].rows[0]?.n||0
+        plannerWorkers: counts[3].rows[0]?.n||0,
+        plannerEvents: counts[4].rows[0]?.n||0
       };
       const verifyQ=await pool.query(
         'SELECT shadow_name,google_count,postgres_count,mismatches,checked_at FROM shadow_verify_stats ORDER BY shadow_name'
@@ -1436,6 +1569,7 @@ async function health() {
     ownRemindersShadow: pool ? 'enabled' : 'disabled',
     offerRemindersShadow: pool ? 'enabled' : 'disabled',
     plannerWorkersShadow: pool ? 'enabled' : 'disabled',
+    plannerEventsShadow: pool ? 'enabled' : 'disabled',
     shadowCounts,
     shadowVerify,
     writeStats
@@ -1566,7 +1700,7 @@ initDb()
     console.log('MIGRATION VERIFY: sheets='+sheets.length+' sourceRows='+sourceRows+' importedRows='+importedRows+' mismatches='+mismatches.length+(mismatches.length?' ['+mismatches.join(', ')+']':''));
     const h = await health();
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
-    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers);
+    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents);
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
   })
