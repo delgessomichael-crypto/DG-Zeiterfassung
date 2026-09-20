@@ -159,6 +159,17 @@ CREATE TABLE IF NOT EXISTS shadow_verify_stats (
   checked_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS planner_workers_shadow (
+  id TEXT PRIMARY KEY,
+  employee_name TEXT,
+  display_name TEXT,
+  provider TEXT,
+  calendar_id TEXT,
+  active BOOLEAN NOT NULL DEFAULT true,
+  sort_order INTEGER NOT NULL DEFAULT 999,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
@@ -204,6 +215,7 @@ async function initDb() {
   await initManualOrdersShadow();
   await initOwnRemindersShadow();
   await initOfferRemindersShadow();
+  await initPlannerWorkersShadow();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -799,6 +811,86 @@ function textCell(cells,index) {
   return String(v);
 }
 
+
+async function initPlannerWorkersShadow() {
+  if (!pool) return;
+  const existing=await pool.query('SELECT COUNT(*)::int AS n FROM planner_workers_shadow');
+  if ((existing.rows[0]?.n||0)>0) return;
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:KalenderMitarbeiter']
+  );
+  let inserted=0;
+  for (const row of q.rows) {
+    const payload=row.payload||{};
+    if (Number(payload.sourceRow||row.source_key)<=1) continue;
+    const cells=Array.isArray(payload.cells)?payload.cells:[];
+    const id=textCell(cells,0).trim();
+    if(!id) continue;
+    const activeRaw=textCell(cells,5).trim().toLowerCase();
+    const active=!['nein','no','false','0','inaktiv'].includes(activeRaw);
+    await pool.query(
+      `INSERT INTO planner_workers_shadow(
+        id,employee_name,display_name,provider,calendar_id,active,sort_order
+      ) VALUES($1,$2,$3,$4,$5,$6,$7)
+      ON CONFLICT(id) DO NOTHING`,
+      [id,textCell(cells,1),textCell(cells,2),textCell(cells,3)||'google',
+       textCell(cells,4),active,Number(textCell(cells,6))||999]
+    );
+    inserted++;
+  }
+  console.log('SHADOW planner_workers initialized rows='+inserted);
+}
+
+async function replacePlannerWorkersShadow(rows) {
+  if (!pool || !Array.isArray(rows)) return;
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    await client.query('TRUNCATE planner_workers_shadow');
+    for(const r of rows){
+      const id=String(r&&r.id||'').trim();if(!id)continue;
+      await client.query(
+        `INSERT INTO planner_workers_shadow(
+          id,employee_name,display_name,provider,calendar_id,active,sort_order,shadow_updated_at
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,now())`,
+        [id,String(r.employeeName||''),String(r.displayName||''),String(r.provider||'google'),
+         String(r.calendarId||''),r.active!==false,Number(r.sortOrder)||999]
+      );
+    }
+    await client.query('COMMIT');
+  }catch(e){
+    await client.query('ROLLBACK');throw e;
+  }finally{client.release();}
+}
+
+async function verifyPlannerWorkersShadow(rows) {
+  if (!pool || !Array.isArray(rows)) return;
+  const q=await pool.query(
+    `SELECT id,employee_name,display_name,provider,calendar_id,active,sort_order
+       FROM planner_workers_shadow ORDER BY sort_order,id`
+  );
+  const pg=new Map(q.rows.map(r=>[String(r.id),r]));
+  let mismatches=0;const seen=new Set();
+  for(const r of rows){
+    const id=normalizeShadowText(r&&r.id);if(!id){mismatches++;continue;}
+    seen.add(id);const p=pg.get(id);if(!p){mismatches++;continue;}
+    const same =
+      normalizeShadowText(r.employeeName)===normalizeShadowText(p.employee_name) &&
+      normalizeShadowText(r.displayName)===normalizeShadowText(p.display_name) &&
+      normalizeShadowText(r.provider||'google')===normalizeShadowText(p.provider||'google') &&
+      normalizeShadowText(r.calendarId)===normalizeShadowText(p.calendar_id) &&
+      Boolean(r.active)!==false && Boolean(p.active)!==false
+        ? Number(r.sortOrder||999)===Number(p.sort_order||999)
+        : Boolean(r.active)===Boolean(p.active) && Number(r.sortOrder||999)===Number(p.sort_order||999);
+    if(!same)mismatches++;
+  }
+  for(const id of pg.keys())if(!seen.has(id))mismatches++;
+  console.log('SHADOW_VERIFY planner_workers google='+rows.length+' postgres='+pg.size+' mismatches='+mismatches);
+  await saveShadowVerifyStat('planner_workers',rows.length,pg.size,mismatches);
+}
+
 async function initManualOrdersShadow() {
   if (!pool) return;
   const existing=await pool.query('SELECT COUNT(*)::int AS n FROM manual_orders_shadow');
@@ -1202,6 +1294,7 @@ async function proxyLegacy(req, res, body) {
         if (action==='getManualOrders') verifyManualOrdersShadow(verifyData).catch(e=>console.error('manual order shadow verify failed',e.message));
         if (action==='getOwnReminders') verifyOwnRemindersShadow(verifyData).catch(e=>console.error('own reminder shadow verify failed',e.message));
         if (action==='getOfferReminders') verifyOfferRemindersShadow(verifyData,Boolean(body.includeDone)).catch(e=>console.error('offer reminder shadow verify failed',e.message));
+        if (action==='getPlannerWorkers') verifyPlannerWorkersShadow(verifyData).catch(e=>console.error('planner worker shadow verify failed',e.message));
       }
       if (isCacheableAction(action)) {
         writeCachedResponse(action, body, raw, upstream.status).catch(e=>console.error('response cache write failed',e.message));
@@ -1223,6 +1316,11 @@ async function proxyLegacy(req, res, body) {
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['saveOfferCreatedWithReminder','rescheduleOfferReminder','declineOfferFromReminder','acceptOfferFromReminder','moveOfferBackToCreate','acceptOfferAsRunning'].includes(action)) {
         mirrorOfferReminderWrite(action,body,parsed).catch(e=>console.error('offer reminder shadow mirror failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false &&
+          ['savePlannerWorker','movePlannerWorker','setPlannerWorkerActive'].includes(action)) {
+        const plannerRows=parsed.data!==undefined?parsed.data:parsed;
+        replacePlannerWorkersShadow(plannerRows).catch(e=>console.error('planner worker shadow mirror failed',e.message));
       }
       pool.query(
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
@@ -1298,12 +1396,14 @@ async function health() {
       const counts = await Promise.all([
         pool.query('SELECT COUNT(*)::int AS n FROM manual_orders_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM own_reminders_shadow'),
-        pool.query('SELECT COUNT(*)::int AS n FROM offer_reminders_shadow')
+        pool.query('SELECT COUNT(*)::int AS n FROM offer_reminders_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM planner_workers_shadow')
       ]);
       shadowCounts = {
         manualOrders: counts[0].rows[0]?.n||0,
         ownReminders: counts[1].rows[0]?.n||0,
-        offerReminders: counts[2].rows[0]?.n||0
+        offerReminders: counts[2].rows[0]?.n||0,
+        plannerWorkers: counts[3].rows[0]?.n||0
       };
       const verifyQ=await pool.query(
         'SELECT shadow_name,google_count,postgres_count,mismatches,checked_at FROM shadow_verify_stats ORDER BY shadow_name'
@@ -1336,6 +1436,7 @@ async function health() {
     manualOrdersShadow: pool ? 'enabled' : 'disabled',
     ownRemindersShadow: pool ? 'enabled' : 'disabled',
     offerRemindersShadow: pool ? 'enabled' : 'disabled',
+    plannerWorkersShadow: pool ? 'enabled' : 'disabled',
     shadowCounts,
     shadowVerify,
     writeStats
@@ -1466,7 +1567,7 @@ initDb()
     console.log('MIGRATION VERIFY: sheets='+sheets.length+' sourceRows='+sourceRows+' importedRows='+importedRows+' mismatches='+mismatches.length+(mismatches.length?' ['+mismatches.join(', ')+']':''));
     const h = await health();
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
-    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders);
+    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers);
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
   })
