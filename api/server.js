@@ -319,9 +319,47 @@ async function invalidateReadCache() {
   await pool.query('TRUNCATE response_cache');
 }
 
+
+function cellValue(cell) {
+  return cell && Object.prototype.hasOwnProperty.call(cell, 'v') ? cell.v : null;
+}
+
+async function getEmployeesFromSnapshot() {
+  if (!pool) return null;
+  const q = await pool.query(
+    `SELECT source_key,payload
+       FROM migration_objects
+      WHERE entity_type=$1
+      ORDER BY source_key::int ASC`,
+    ['sheet:Mitarbeiter']
+  );
+  if (!q.rowCount) return null;
+  const names = [];
+  for (const row of q.rows) {
+    const payload = row.payload || {};
+    if (Number(payload.sourceRow || row.source_key) <= 1) continue;
+    const cells = Array.isArray(payload.cells) ? payload.cells : [];
+    const name = String(cellValue(cells[0]) == null ? '' : cellValue(cells[0])).trim();
+    const activeRaw = String(cellValue(cells[11]) == null ? '' : cellValue(cells[11])).trim().toLowerCase();
+    const active = !activeRaw || ['ja','yes','true','1','aktiv'].includes(activeRaw);
+    if (name && active) names.push(name);
+  }
+  return names;
+}
+
 async function proxyLegacy(req, res, body) {
-  if (!GOOGLE_BACKEND_URL) return json(res, 503, {ok:false,error:'Google backend not configured'}, req);
   const action = String(body && body.action || '');
+  if (action === 'getEmployees') {
+    try {
+      const names = await getEmployeesFromSnapshot();
+      if (Array.isArray(names) && names.length) {
+        return json(res, 200, {ok:true,data:names,source:'postgres'}, req);
+      }
+    } catch (e) {
+      console.error('Postgres employee read failed; falling back to Google:', e.message);
+    }
+  }
+  if (!GOOGLE_BACKEND_URL) return json(res, 503, {ok:false,error:'Google backend not configured'}, req);
   const cached = await readCachedResponse(action, body);
   if (cached) {
     cors(req,res);
