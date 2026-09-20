@@ -191,6 +191,83 @@ CREATE TABLE IF NOT EXISTS planner_events_shadow (
   shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS maintenance_customers_shadow (
+  id TEXT PRIMARY KEY,
+  name TEXT,
+  billing_street TEXT,
+  billing_zip TEXT,
+  billing_city TEXT,
+  email TEXT,
+  phone TEXT,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at_text TEXT,
+  updated_at_text TEXT,
+  updated_by TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS maintenance_objects_shadow (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT,
+  name TEXT,
+  street TEXT,
+  zip TEXT,
+  city TEXT,
+  notes TEXT,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at_text TEXT,
+  updated_at_text TEXT,
+  updated_by TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS maintenance_devices_shadow (
+  id TEXT PRIMARY KEY,
+  object_id TEXT,
+  customer_id TEXT,
+  device_type TEXT,
+  other_description TEXT,
+  manufacturer TEXT,
+  model TEXT,
+  serial_number TEXT,
+  year_text TEXT,
+  tenant_name TEXT,
+  tenant_phone TEXT,
+  tenant_email TEXT,
+  spare_part_manufacturer TEXT,
+  spare_part_serial_number TEXT,
+  internal_notes TEXT,
+  next_maintenance_due TEXT,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at_text TEXT,
+  updated_at_text TEXT,
+  updated_by TEXT,
+  internal_device_id TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS maintenance_repairs_shadow (
+  id TEXT PRIMARY KEY,
+  device_id TEXT,
+  customer_id TEXT,
+  object_id TEXT,
+  repair_date TEXT,
+  description TEXT,
+  created_at_text TEXT,
+  created_by TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS maintenance_manual_shadow (
+  id TEXT PRIMARY KEY,
+  maintenance_date TEXT,
+  maintenance_count INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
+  created_at_text TEXT,
+  created_by TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
@@ -238,6 +315,7 @@ async function initDb() {
   await initOfferRemindersShadow();
   await initPlannerWorkersShadow();
   await initPlannerEventsShadow();
+  await initMaintenanceShadows();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -835,6 +913,262 @@ function textCell(cells,index) {
 
 
 
+
+function shadowActive(raw){
+  const s=String(raw==null?'':raw).trim().toLowerCase();
+  return !['nein','no','false','0','inaktiv'].includes(s);
+}
+
+async function initMaintenanceShadows() {
+  if (!pool) return;
+  const targets=[
+    ['maintenance_customers_shadow','sheet:Wartungskunden',11],
+    ['maintenance_objects_shadow','sheet:Wartungsobjekte',11],
+    ['maintenance_devices_shadow','sheet:Wartungsgeraete',21],
+    ['maintenance_repairs_shadow','sheet:Wartungsreparaturen',8],
+    ['maintenance_manual_shadow','sheet:Wartungsmanuell',6]
+  ];
+  const existing=await Promise.all(targets.map(x=>pool.query('SELECT COUNT(*)::int AS n FROM '+x[0])));
+  if(existing.some(x=>(x.rows[0]?.n||0)>0)) return;
+
+  for(const [table,entity] of targets){
+    const q=await pool.query(
+      `SELECT source_key,payload FROM migration_objects
+        WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+      [entity]
+    );
+    let inserted=0;
+    for(const row of q.rows){
+      const payload=row.payload||{};
+      if(Number(payload.sourceRow||row.source_key)<=1) continue;
+      const cells=Array.isArray(payload.cells)?payload.cells:[];
+      const id=textCell(cells,0).trim();
+      if(!id) continue;
+
+      if(table==='maintenance_customers_shadow'){
+        await pool.query(
+          `INSERT INTO maintenance_customers_shadow(
+            id,name,billing_street,billing_zip,billing_city,email,phone,active,
+            created_at_text,updated_at_text,updated_by
+          ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(id) DO NOTHING`,
+          [id,textCell(cells,1),textCell(cells,2),textCell(cells,3),textCell(cells,4),
+           textCell(cells,5),textCell(cells,6),shadowActive(textCell(cells,7)),
+           textCell(cells,8),textCell(cells,9),textCell(cells,10)]
+        );
+      } else if(table==='maintenance_objects_shadow'){
+        await pool.query(
+          `INSERT INTO maintenance_objects_shadow(
+            id,customer_id,name,street,zip,city,notes,active,created_at_text,updated_at_text,updated_by
+          ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(id) DO NOTHING`,
+          [id,textCell(cells,1),textCell(cells,2),textCell(cells,3),textCell(cells,4),
+           textCell(cells,5),textCell(cells,6),shadowActive(textCell(cells,7)),
+           textCell(cells,8),textCell(cells,9),textCell(cells,10)]
+        );
+      } else if(table==='maintenance_devices_shadow'){
+        await pool.query(
+          `INSERT INTO maintenance_devices_shadow(
+            id,object_id,customer_id,device_type,other_description,manufacturer,model,serial_number,
+            year_text,tenant_name,tenant_phone,tenant_email,spare_part_manufacturer,
+            spare_part_serial_number,internal_notes,next_maintenance_due,active,
+            created_at_text,updated_at_text,updated_by,internal_device_id
+          ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+          ON CONFLICT(id) DO NOTHING`,
+          [id,textCell(cells,1),textCell(cells,2),textCell(cells,3),textCell(cells,4),
+           textCell(cells,5),textCell(cells,6),textCell(cells,7),textCell(cells,8),
+           textCell(cells,9),textCell(cells,10),textCell(cells,11),textCell(cells,12),
+           textCell(cells,13),textCell(cells,14),textCell(cells,15),
+           shadowActive(textCell(cells,16)),textCell(cells,17),textCell(cells,18),
+           textCell(cells,19),textCell(cells,20)]
+        );
+      } else if(table==='maintenance_repairs_shadow'){
+        await pool.query(
+          `INSERT INTO maintenance_repairs_shadow(
+            id,device_id,customer_id,object_id,repair_date,description,created_at_text,created_by
+          ) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(id) DO NOTHING`,
+          [id,textCell(cells,1),textCell(cells,2),textCell(cells,3),
+           textCell(cells,4),textCell(cells,5),textCell(cells,6),textCell(cells,7)]
+        );
+      } else if(table==='maintenance_manual_shadow'){
+        await pool.query(
+          `INSERT INTO maintenance_manual_shadow(
+            id,maintenance_date,maintenance_count,note,created_at_text,created_by
+          ) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO NOTHING`,
+          [id,textCell(cells,1),Math.max(0,Number(textCell(cells,2))||0),
+           textCell(cells,3),textCell(cells,4),textCell(cells,5)]
+        );
+      }
+      inserted++;
+    }
+    console.log('SHADOW '+table+' initialized rows='+inserted);
+  }
+}
+
+async function mirrorMaintenanceCustomerTree(data,employee) {
+  if(!pool || !data || !data.id) return;
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const cid=String(data.id);
+    await client.query(
+      `INSERT INTO maintenance_customers_shadow(
+        id,name,billing_street,billing_zip,billing_city,email,phone,active,updated_at_text,updated_by,shadow_updated_at
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9,now())
+      ON CONFLICT(id) DO UPDATE SET
+        name=EXCLUDED.name,billing_street=EXCLUDED.billing_street,billing_zip=EXCLUDED.billing_zip,
+        billing_city=EXCLUDED.billing_city,email=EXCLUDED.email,phone=EXCLUDED.phone,active=true,
+        updated_at_text=EXCLUDED.updated_at_text,updated_by=EXCLUDED.updated_by,shadow_updated_at=now()`,
+      [cid,String(data.name||''),String(data.billingStreet||''),String(data.billingZip||''),
+       String(data.billingCity||''),String(data.email||''),String(data.phone||''),
+       new Date().toISOString(),String(employee||'')]
+    );
+    await client.query('UPDATE maintenance_objects_shadow SET active=false,shadow_updated_at=now() WHERE customer_id=$1',[cid]);
+    await client.query('UPDATE maintenance_devices_shadow SET active=false,shadow_updated_at=now() WHERE customer_id=$1',[cid]);
+
+    for(const o of (Array.isArray(data.objects)?data.objects:[])){
+      const oid=String(o.id||'').trim();if(!oid)continue;
+      await client.query(
+        `INSERT INTO maintenance_objects_shadow(
+          id,customer_id,name,street,zip,city,notes,active,updated_at_text,updated_by,shadow_updated_at
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9,now())
+        ON CONFLICT(id) DO UPDATE SET
+          customer_id=EXCLUDED.customer_id,name=EXCLUDED.name,street=EXCLUDED.street,zip=EXCLUDED.zip,
+          city=EXCLUDED.city,notes=EXCLUDED.notes,active=true,updated_at_text=EXCLUDED.updated_at_text,
+          updated_by=EXCLUDED.updated_by,shadow_updated_at=now()`,
+        [oid,cid,String(o.name||''),String(o.street||''),String(o.zip||''),String(o.city||''),
+         String(o.notes||''),new Date().toISOString(),String(employee||'')]
+      );
+      for(const d of (Array.isArray(o.devices)?o.devices:[])){
+        const did=String(d.id||'').trim();if(!did)continue;
+        await client.query(
+          `INSERT INTO maintenance_devices_shadow(
+            id,object_id,customer_id,device_type,other_description,manufacturer,model,serial_number,
+            year_text,tenant_name,tenant_phone,tenant_email,spare_part_manufacturer,
+            spare_part_serial_number,internal_notes,next_maintenance_due,active,
+            updated_at_text,updated_by,internal_device_id,shadow_updated_at
+          ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true,$17,$18,$19,now())
+          ON CONFLICT(id) DO UPDATE SET
+            object_id=EXCLUDED.object_id,customer_id=EXCLUDED.customer_id,device_type=EXCLUDED.device_type,
+            other_description=EXCLUDED.other_description,manufacturer=EXCLUDED.manufacturer,model=EXCLUDED.model,
+            serial_number=EXCLUDED.serial_number,year_text=EXCLUDED.year_text,tenant_name=EXCLUDED.tenant_name,
+            tenant_phone=EXCLUDED.tenant_phone,tenant_email=EXCLUDED.tenant_email,
+            spare_part_manufacturer=EXCLUDED.spare_part_manufacturer,
+            spare_part_serial_number=EXCLUDED.spare_part_serial_number,internal_notes=EXCLUDED.internal_notes,
+            next_maintenance_due=EXCLUDED.next_maintenance_due,active=true,
+            updated_at_text=EXCLUDED.updated_at_text,updated_by=EXCLUDED.updated_by,
+            internal_device_id=EXCLUDED.internal_device_id,shadow_updated_at=now()`,
+          [did,oid,cid,String(d.deviceType||''),String(d.otherDescription||''),String(d.manufacturer||''),
+           String(d.model||''),String(d.serialNumber||''),String(d.year||''),String(d.tenantName||''),
+           String(d.tenantPhone||''),String(d.tenantEmail||''),String(d.sparePartManufacturer||''),
+           String(d.sparePartSerialNumber||''),String(d.internalNotes||''),String(d.nextMaintenanceDue||''),
+           new Date().toISOString(),String(employee||''),String(d.internalDeviceId||'')]
+        );
+        for(const rp of (Array.isArray(d.repairs)?d.repairs:[])){
+          const rid=String(rp.id||'').trim();if(!rid)continue;
+          await client.query(
+            `INSERT INTO maintenance_repairs_shadow(
+              id,device_id,customer_id,object_id,repair_date,description,created_at_text,created_by,shadow_updated_at
+            ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,now())
+            ON CONFLICT(id) DO UPDATE SET
+              device_id=EXCLUDED.device_id,customer_id=EXCLUDED.customer_id,object_id=EXCLUDED.object_id,
+              repair_date=EXCLUDED.repair_date,description=EXCLUDED.description,
+              created_at_text=EXCLUDED.created_at_text,created_by=EXCLUDED.created_by,shadow_updated_at=now()`,
+            [rid,did,cid,oid,String(rp.date||''),String(rp.description||''),
+             String(rp.createdAt||''),String(rp.createdBy||'')]
+          );
+        }
+      }
+    }
+    await client.query('COMMIT');
+  }catch(e){
+    await client.query('ROLLBACK');throw e;
+  }finally{client.release();}
+}
+
+async function mirrorMaintenanceWrite(action,body,parsed){
+  if(!pool)return;
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if(!data||data.ok===false)return;
+  if(action==='saveMaintenanceCustomer'){
+    await mirrorMaintenanceCustomerTree(data,body.employee);
+  } else if(action==='deleteMaintenanceCustomer'){
+    const cid=String(data.id||body.id||'');
+    await Promise.all([
+      pool.query('UPDATE maintenance_customers_shadow SET active=false,shadow_updated_at=now() WHERE id=$1',[cid]),
+      pool.query('UPDATE maintenance_objects_shadow SET active=false,shadow_updated_at=now() WHERE customer_id=$1',[cid]),
+      pool.query('UPDATE maintenance_devices_shadow SET active=false,shadow_updated_at=now() WHERE customer_id=$1',[cid])
+    ]);
+  } else if(action==='deleteMaintenanceDevice'){
+    await pool.query('UPDATE maintenance_devices_shadow SET active=false,shadow_updated_at=now() WHERE id=$1',[String(data.id||body.id||'')]);
+  } else if(action==='addMaintenanceRepair'){
+    const did=String(body.deviceId||'');
+    const d=await pool.query('SELECT customer_id,object_id FROM maintenance_devices_shadow WHERE id=$1',[did]);
+    const meta=d.rows[0]||{};
+    await pool.query(
+      `INSERT INTO maintenance_repairs_shadow(
+        id,device_id,customer_id,object_id,repair_date,description,created_at_text,created_by,shadow_updated_at
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,now())
+      ON CONFLICT(id) DO UPDATE SET description=EXCLUDED.description,shadow_updated_at=now()`,
+      [String(data.id||''),did,String(meta.customer_id||''),String(meta.object_id||''),
+       String(body.date||''),String(body.description||''),new Date().toISOString(),String(body.employee||'')]
+    );
+  } else if(action==='addManualMaintenanceCount'){
+    await pool.query(
+      `INSERT INTO maintenance_manual_shadow(
+        id,maintenance_date,maintenance_count,note,created_at_text,created_by,shadow_updated_at
+      ) VALUES($1,$2,$3,$4,$5,$6,now())
+      ON CONFLICT(id) DO UPDATE SET maintenance_date=EXCLUDED.maintenance_date,
+        maintenance_count=EXCLUDED.maintenance_count,note=EXCLUDED.note,shadow_updated_at=now()`,
+      [String(data.id||''),String(data.date||body.date||''),Math.max(0,Number(data.count||body.count)||0),
+       String(data.note||body.note||''),new Date().toISOString(),String(body.employee||'')]
+    );
+  }
+}
+
+async function verifyMaintenanceCustomerShadow(data){
+  if(!pool||!data||!data.id)return;
+  const cid=String(data.id);
+  const [cq,oq,dq]=await Promise.all([
+    pool.query('SELECT * FROM maintenance_customers_shadow WHERE id=$1',[cid]),
+    pool.query('SELECT * FROM maintenance_objects_shadow WHERE customer_id=$1 AND active=true',[cid]),
+    pool.query('SELECT * FROM maintenance_devices_shadow WHERE customer_id=$1 AND active=true',[cid])
+  ]);
+  let mismatches=0;
+  const pc=cq.rows[0];
+  if(!pc)mismatches++;
+  else{
+    const pairs=[
+      [data.name,pc.name],[data.billingStreet,pc.billing_street],[data.billingZip,pc.billing_zip],
+      [data.billingCity,pc.billing_city],[data.email,pc.email],[data.phone,pc.phone]
+    ];
+    if(pairs.some(([a,b])=>normalizeShadowText(a)!==normalizeShadowText(b)))mismatches++;
+  }
+  const objects=Array.isArray(data.objects)?data.objects:[];
+  const pObjs=new Map(oq.rows.map(x=>[String(x.id),x]));
+  const pDevs=new Map(dq.rows.map(x=>[String(x.id),x]));
+  let googleDevices=0;
+  for(const o of objects){
+    const po=pObjs.get(String(o.id));if(!po){mismatches++;continue;}
+    const opairs=[[o.name,po.name],[o.street,po.street],[o.zip,po.zip],[o.city,po.city],[o.notes,po.notes]];
+    if(opairs.some(([a,b])=>normalizeShadowText(a)!==normalizeShadowText(b)))mismatches++;
+    for(const d of (Array.isArray(o.devices)?o.devices:[])){
+      googleDevices++;
+      const pd=pDevs.get(String(d.id));if(!pd){mismatches++;continue;}
+      const dpairs=[
+        [d.deviceType,pd.device_type],[d.otherDescription,pd.other_description],[d.manufacturer,pd.manufacturer],
+        [d.model,pd.model],[d.serialNumber,pd.serial_number],[d.year,pd.year_text],
+        [d.tenantName,pd.tenant_name],[d.tenantPhone,pd.tenant_phone],[d.tenantEmail,pd.tenant_email],
+        [d.internalNotes,pd.internal_notes],[d.nextMaintenanceDue,pd.next_maintenance_due],
+        [d.internalDeviceId,pd.internal_device_id]
+      ];
+      if(dpairs.some(([a,b])=>normalizeShadowText(a)!==normalizeShadowText(b)))mismatches++;
+    }
+  }
+  if(objects.length!==pObjs.size)mismatches+=Math.abs(objects.length-pObjs.size);
+  if(googleDevices!==pDevs.size)mismatches+=Math.abs(googleDevices-pDevs.size);
+  console.log('SHADOW_VERIFY maintenance_customer google_objects='+objects.length+' postgres_objects='+pObjs.size+' google_devices='+googleDevices+' postgres_devices='+pDevs.size+' mismatches='+mismatches);
+  await saveShadowVerifyStat('maintenance_customer',objects.length+googleDevices,pObjs.size+pDevs.size,mismatches);
+}
+
 async function initPlannerEventsShadow() {
   if (!pool) return;
   const existing=await pool.query('SELECT COUNT(*)::int AS n FROM planner_events_shadow');
@@ -1421,6 +1755,7 @@ async function proxyLegacy(req, res, body) {
         if (action==='getOfferReminders') verifyOfferRemindersShadow(verifyData,Boolean(body.includeDone)).catch(e=>console.error('offer reminder shadow verify failed',e.message));
         if (action==='getPlannerWorkers') verifyPlannerWorkersShadow(verifyData).catch(e=>console.error('planner worker shadow verify failed',e.message));
         if (action==='getPlannerEvents') verifyPlannerEventsShadow(verifyData).catch(e=>console.error('planner event shadow verify failed',e.message));
+        if (action==='getMaintenanceCustomer') verifyMaintenanceCustomerShadow(verifyData).catch(e=>console.error('maintenance customer shadow verify failed',e.message));
       }
       if (isCacheableAction(action)) {
         writeCachedResponse(action, body, raw, upstream.status).catch(e=>console.error('response cache write failed',e.message));
@@ -1451,6 +1786,10 @@ async function proxyLegacy(req, res, body) {
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['savePlannerEvent','deletePlannerEvent'].includes(action)) {
         mirrorPlannerEventWrite(action,body,parsed).catch(e=>console.error('planner event shadow mirror failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false &&
+          ['saveMaintenanceCustomer','deleteMaintenanceCustomer','deleteMaintenanceDevice','addMaintenanceRepair','addManualMaintenanceCount'].includes(action)) {
+        mirrorMaintenanceWrite(action,body,parsed).catch(e=>console.error('maintenance shadow mirror failed',e.message));
       }
       pool.query(
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
@@ -1528,14 +1867,24 @@ async function health() {
         pool.query('SELECT COUNT(*)::int AS n FROM own_reminders_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM offer_reminders_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM planner_workers_shadow'),
-        pool.query('SELECT COUNT(*)::int AS n FROM planner_events_shadow')
+        pool.query('SELECT COUNT(*)::int AS n FROM planner_events_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM maintenance_customers_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM maintenance_objects_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM maintenance_devices_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM maintenance_repairs_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM maintenance_manual_shadow')
       ]);
       shadowCounts = {
         manualOrders: counts[0].rows[0]?.n||0,
         ownReminders: counts[1].rows[0]?.n||0,
         offerReminders: counts[2].rows[0]?.n||0,
         plannerWorkers: counts[3].rows[0]?.n||0,
-        plannerEvents: counts[4].rows[0]?.n||0
+        plannerEvents: counts[4].rows[0]?.n||0,
+        maintenanceCustomers: counts[5].rows[0]?.n||0,
+        maintenanceObjects: counts[6].rows[0]?.n||0,
+        maintenanceDevices: counts[7].rows[0]?.n||0,
+        maintenanceRepairs: counts[8].rows[0]?.n||0,
+        maintenanceManual: counts[9].rows[0]?.n||0
       };
       const verifyQ=await pool.query(
         'SELECT shadow_name,google_count,postgres_count,mismatches,checked_at FROM shadow_verify_stats ORDER BY shadow_name'
@@ -1570,6 +1919,7 @@ async function health() {
     offerRemindersShadow: pool ? 'enabled' : 'disabled',
     plannerWorkersShadow: pool ? 'enabled' : 'disabled',
     plannerEventsShadow: pool ? 'enabled' : 'disabled',
+    maintenanceShadow: pool ? 'enabled' : 'disabled',
     shadowCounts,
     shadowVerify,
     writeStats
@@ -1700,7 +2050,7 @@ initDb()
     console.log('MIGRATION VERIFY: sheets='+sheets.length+' sourceRows='+sourceRows+' importedRows='+importedRows+' mismatches='+mismatches.length+(mismatches.length?' ['+mismatches.join(', ')+']':''));
     const h = await health();
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
-    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents);
+    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual);
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
   })
