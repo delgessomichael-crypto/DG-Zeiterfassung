@@ -457,6 +457,30 @@ CREATE INDEX IF NOT EXISTS time_entries_shadow_employee_date_idx
 CREATE INDEX IF NOT EXISTS time_entries_shadow_object_idx
   ON time_entries_shadow(object_id,billing_status,job_status);
 
+CREATE TABLE IF NOT EXISTS objects_shadow (
+  id TEXT PRIMARY KEY,
+  object_key TEXT,
+  display_name TEXT,
+  created_at_text TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS regie_merges_shadow (
+  object_id TEXT PRIMARY KEY,
+  merge_id TEXT,
+  merged_at_text TEXT,
+  merged_by TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS object_notes_shadow (
+  object_id TEXT PRIMARY KEY,
+  note TEXT,
+  changed_at_text TEXT,
+  changed_by TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
@@ -514,6 +538,7 @@ async function initDb() {
   await initDayStatusShadow();
   await initDayClosuresShadow();
   await initTimeEntriesShadow();
+  await initRegieMetadataShadows();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -1147,6 +1172,139 @@ async function auditDayClosureSourceDuplicates(){
   return out;
 }
 
+
+
+async function initRegieMetadataShadows(){
+  if(!pool)return;
+  const targets=[
+    ['objects_shadow','sheet:Objekte'],
+    ['regie_merges_shadow','sheet:RegieZusammenfuehrungen'],
+    ['object_notes_shadow','sheet:InterneVermerke']
+  ];
+  const existing=await Promise.all(targets.map(x=>pool.query('SELECT COUNT(*)::int AS n FROM '+x[0])));
+  if(existing.some(x=>(x.rows[0]?.n||0)>0))return;
+
+  for(const [table,entity] of targets){
+    const q=await pool.query(
+      `SELECT source_key,payload FROM migration_objects
+        WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+      [entity]
+    );
+    let inserted=0;
+    for(const row of q.rows){
+      const payload=row.payload||{};
+      if(Number(payload.sourceRow||row.source_key)<=1)continue;
+      const cells=Array.isArray(payload.cells)?payload.cells:[];
+      const id=textCell(cells,0).trim();if(!id)continue;
+      if(table==='objects_shadow'){
+        await pool.query(
+          `INSERT INTO objects_shadow(id,object_key,display_name,created_at_text)
+           VALUES($1,$2,$3,$4) ON CONFLICT(id) DO NOTHING`,
+          [id,textCell(cells,1),textCell(cells,2),textCell(cells,3)]
+        );
+      }else if(table==='regie_merges_shadow'){
+        await pool.query(
+          `INSERT INTO regie_merges_shadow(object_id,merge_id,merged_at_text,merged_by)
+           VALUES($1,$2,$3,$4) ON CONFLICT(object_id) DO NOTHING`,
+          [id,textCell(cells,1),textCell(cells,2),textCell(cells,3)]
+        );
+      }else{
+        await pool.query(
+          `INSERT INTO object_notes_shadow(object_id,note,changed_at_text,changed_by)
+           VALUES($1,$2,$3,$4) ON CONFLICT(object_id) DO NOTHING`,
+          [id,textCell(cells,1),textCell(cells,2),textCell(cells,3)]
+        );
+      }
+      inserted++;
+    }
+    console.log('SHADOW '+table+' initialized rows='+inserted);
+  }
+}
+
+function shadowObjectKey(value){
+  return String(value||'').toLowerCase().replace(/ß/g,'ss')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ')
+    .replace(/\bstr\b/g,'strasse').replace(/([a-z0-9]+)str\b/g,'$1strasse');
+}
+
+async function upsertObjectShadow(id,customer){
+  if(!pool||!id)return;
+  const name=String(customer||'');
+  await pool.query(
+    `INSERT INTO objects_shadow(id,object_key,display_name,created_at_text,shadow_updated_at)
+     VALUES($1,$2,$3,$4,now())
+     ON CONFLICT(id) DO UPDATE SET
+       object_key=CASE WHEN EXCLUDED.object_key<>'' THEN EXCLUDED.object_key ELSE objects_shadow.object_key END,
+       display_name=CASE WHEN EXCLUDED.display_name<>'' THEN EXCLUDED.display_name ELSE objects_shadow.display_name END,
+       shadow_updated_at=now()`,
+    [String(id),shadowObjectKey(name),name,new Date().toISOString()]
+  );
+}
+
+async function syncRegieMetadataFromRead(data){
+  if(!pool||!data)return;
+  const groups=Array.isArray(data)?data:[data];
+  for(const g of groups){
+    if(g&&g.objectId)await upsertObjectShadow(g.objectId,g.customer||'');
+    for(const r of (Array.isArray(g&&g.reports)?g.reports:[])){
+      if(r&&r.objectId)await upsertObjectShadow(r.objectId,r.customer||g.customer||'');
+    }
+  }
+}
+
+async function mirrorRegieMetadataWrite(action,body,parsed){
+  if(!pool)return;
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if(!data||data.ok===false)return;
+
+  if(action==='mergeRegieObjects'){
+    const ids=Array.isArray(data.objectIds)?data.objectIds.map(String):[];
+    for(const id of ids){
+      await pool.query(
+        `INSERT INTO regie_merges_shadow(object_id,merge_id,merged_at_text,merged_by,shadow_updated_at)
+         VALUES($1,$2,$3,$4,now())
+         ON CONFLICT(object_id) DO UPDATE SET
+           merge_id=EXCLUDED.merge_id,merged_at_text=EXCLUDED.merged_at_text,
+           merged_by=EXCLUDED.merged_by,shadow_updated_at=now()`,
+        [id,String(data.mergeId||''),String(data.mergedAt||''),String(data.mergedBy||body.employee||'')]
+      );
+    }
+    return;
+  }
+
+  if(action==='saveObjectInternalNote'){
+    await pool.query(
+      `INSERT INTO object_notes_shadow(object_id,note,changed_at_text,changed_by,shadow_updated_at)
+       VALUES($1,$2,$3,$4,now())
+       ON CONFLICT(object_id) DO UPDATE SET note=EXCLUDED.note,
+         changed_at_text=EXCLUDED.changed_at_text,changed_by=EXCLUDED.changed_by,shadow_updated_at=now()`,
+      [String(data.objectId||body.objectId||''),String(data.note||body.note||''),
+       String(data.changedAt||''),String(data.changedBy||body.employee||'')]
+    );
+    return;
+  }
+
+  if(action==='updateRegieReport' && data.objectId){
+    await upsertObjectShadow(data.objectId,(body.item||{}).customer||'');
+  }
+}
+
+async function verifyObjectNotesShadow(data){
+  if(!pool||!data)return;
+  const rows=Array.isArray(data)?data:Object.values(data);
+  let mismatches=0;
+  for(const x of rows){
+    if(!x||!x.objectId)continue;
+    const q=await pool.query('SELECT note FROM object_notes_shadow WHERE object_id=$1',[String(x.objectId)]);
+    const p=q.rows[0];
+    if(!p){
+      if(String(x.note||'')!=='')mismatches++;
+    }else if(normalizeShadowText(x.note)!==normalizeShadowText(p.note))mismatches++;
+  }
+  console.log('SHADOW_VERIFY object_notes google='+rows.length+' mismatches='+mismatches);
+  await saveShadowVerifyStat('object_notes',rows.length,rows.length,mismatches);
+}
 
 async function initTimeEntriesShadow(){
   if(!pool)return;
@@ -3150,7 +3308,11 @@ async function proxyLegacy(req, res, body) {
           syncDayClosureFromDayRead(body,verifyData).catch(e=>console.error('day closure shadow day refresh failed',e.message));
           syncTimeEntriesFromDayRead(body,verifyData).catch(e=>console.error('time entries shadow day refresh failed',e.message));
         }
-        if (action==='getRegieReports'||action==='getObjectReports') syncTimeEntriesFromRegieRead(verifyData).catch(e=>console.error('time entries shadow regie refresh failed',e.message));
+        if (action==='getRegieReports'||action==='getObjectReports') {
+          syncTimeEntriesFromRegieRead(verifyData).catch(e=>console.error('time entries shadow regie refresh failed',e.message));
+          syncRegieMetadataFromRead(verifyData).catch(e=>console.error('regie metadata shadow refresh failed',e.message));
+        }
+        if (action==='getObjectInternalNote'||action==='getObjectInternalNotes') verifyObjectNotesShadow(verifyData).catch(e=>console.error('object notes shadow verify failed',e.message));
         if (action==='getBossDayClosures') syncAndVerifyBossDayClosures(verifyData,body.year,body.month).catch(e=>console.error('day closure shadow verify failed',e.message));
         if (action==='getMonthData') syncAndVerifyMonthStatuses(body,verifyData).catch(e=>console.error('day status shadow month refresh failed',e.message));
       }
@@ -3218,6 +3380,10 @@ async function proxyLegacy(req, res, body) {
            'updateRegieReport','markRegieObjectsBilled','setRegieObjectJobStatus','setRegieReportsOfferStatus',
            'moveOfferBackToCreate','saveOfferCreatedWithReminder','acceptOfferAsRunning','discardOfferPermanently'].includes(action)) {
         mirrorTimeEntryWrite(action,body,parsed).catch(e=>console.error('time entries shadow mirror failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false &&
+          ['mergeRegieObjects','saveObjectInternalNote','updateRegieReport'].includes(action)) {
+        mirrorRegieMetadataWrite(action,body,parsed).catch(e=>console.error('regie metadata shadow mirror failed',e.message));
       }
       pool.query(
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
@@ -3313,7 +3479,10 @@ async function health() {
         pool.query('SELECT COUNT(*)::int AS n FROM conflict_reviews_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM day_status_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM day_closures_shadow'),
-        pool.query('SELECT COUNT(*)::int AS n FROM time_entries_shadow')
+        pool.query('SELECT COUNT(*)::int AS n FROM time_entries_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM objects_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM regie_merges_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM object_notes_shadow')
       ]);
       shadowCounts = {
         manualOrders: counts[0].rows[0]?.n||0,
@@ -3336,7 +3505,10 @@ async function health() {
         conflictReviews: counts[17].rows[0]?.n||0,
         dayStatus: counts[18].rows[0]?.n||0,
         dayClosures: counts[19].rows[0]?.n||0,
-        timeEntries: counts[20].rows[0]?.n||0
+        timeEntries: counts[20].rows[0]?.n||0,
+        objects: counts[21].rows[0]?.n||0,
+        regieMerges: counts[22].rows[0]?.n||0,
+        objectNotes: counts[23].rows[0]?.n||0
       };
       const verifyQ=await pool.query(
         'SELECT shadow_name,google_count,postgres_count,mismatches,checked_at FROM shadow_verify_stats ORDER BY shadow_name'
@@ -3390,6 +3562,7 @@ async function health() {
     dayStatusShadow: pool ? 'enabled' : 'disabled',
     dayClosuresShadow: pool ? 'enabled' : 'disabled',
     timeEntriesShadow: pool ? 'enabled' : 'disabled',
+    regieMetadataShadow: pool ? 'enabled' : 'disabled',
     shadowCounts,
     shadowVerify,
     shadowReadiness,
@@ -3522,7 +3695,7 @@ initDb()
     console.log('MIGRATION VERIFY: sheets='+sheets.length+' sourceRows='+sourceRows+' importedRows='+importedRows+' mismatches='+mismatches.length+(mismatches.length?' ['+mismatches.join(', ')+']':''));
     const h = await health();
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
-    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus+' day_closures='+h.shadowCounts.dayClosures+' time_entries='+h.shadowCounts.timeEntries);
+    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus+' day_closures='+h.shadowCounts.dayClosures+' time_entries='+h.shadowCounts.timeEntries+' objects='+h.shadowCounts.objects+' regie_merges='+h.shadowCounts.regieMerges+' object_notes='+h.shadowCounts.objectNotes);
     if(Array.isArray(h.shadowReadiness)&&h.shadowReadiness.length)console.log('SHADOW_READINESS '+h.shadowReadiness.map(x=>x.shadowName+'='+x.status+'('+x.mismatches+')').join(' | '));
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
