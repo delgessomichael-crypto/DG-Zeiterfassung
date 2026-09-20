@@ -4818,6 +4818,62 @@ async function directOfferRemindersRead(body){
   return rows;
 }
 
+
+function plannerAvailabilityVerifyKey(body){
+  return 'planner_availability:'+String(body&&body.startDate||'')+':'+String(body&&body.endDate||'');
+}
+async function postgresPlannerAvailability(body){
+  const start=String(body&&body.startDate||''),end=String(body&&body.endDate||'');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(start)||!/^\d{4}-\d{2}-\d{2}$/.test(end)||end<start)return null;
+  const [wq,aq,sq]=await Promise.all([
+    pool.query(`SELECT employee_name,display_name FROM planner_workers_shadow WHERE active=true`),
+    pool.query(
+      `SELECT employee_name,absence_type,start_date,end_date
+         FROM absences_shadow
+        WHERE active=true AND end_date>=$1 AND start_date<=$2`,
+      [start,end]
+    ),
+    pool.query(
+      `SELECT employee_name,status_date,status,source
+         FROM day_status_shadow
+        WHERE status_date>=$1 AND status_date<=$2 AND status<>'Arbeiten'`,
+      [start,end]
+    )
+  ]);
+  const names=new Set(wq.rows.map(r=>String(r.employee_name||r.display_name||'')).filter(Boolean));
+  const map=new Map();
+  const put=(employee,date,status,source)=>{
+    employee=String(employee||'');date=berlinDateOnly(date);status=String(status||'');source=String(source||'');
+    if(!employee||!names.has(employee)||!date||date<start||date>end||!status||status==='Arbeiten')return;
+    map.set(employee+'|'+date,{employee,date,status,source});
+  };
+  for(const r of aq.rows){
+    const employee=String(r.employee_name||''),from=berlinDateOnly(r.start_date),to=berlinDateOnly(r.end_date);
+    for(const d of isoDateList(from,to))put(employee,d,String(r.absence_type||''),'Abwesenheit');
+  }
+  for(const r of sq.rows)put(r.employee_name,r.status_date,r.status,r.source);
+  return [...map.values()].sort((a,b)=>a.date.localeCompare(b.date)||a.employee.localeCompare(b.employee,'de'));
+}
+function canonicalPlannerAvailability(rows){
+  return (Array.isArray(rows)?rows:[]).map(x=>({
+    employee:String(x.employee||''),date:String(x.date||''),status:String(x.status||''),source:String(x.source||'')
+  }));
+}
+async function verifyPlannerAvailabilityShadow(rows,body){
+  if(!pool||!Array.isArray(rows))return;
+  const pg=await postgresPlannerAvailability(body);if(!Array.isArray(pg))return;
+  const a=canonicalPlannerAvailability(rows),b=canonicalPlannerAvailability(pg);
+  const mismatches=JSON.stringify(a)===JSON.stringify(b)?0:1,key=plannerAvailabilityVerifyKey(body);
+  console.log('SHADOW_VERIFY '+key+' google='+a.length+' postgres='+b.length+' mismatches='+mismatches);
+  await saveShadowVerifyStat(key,a.length,b.length,mismatches);
+}
+async function directPlannerAvailabilityRead(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const key=plannerAvailabilityVerifyKey(body);
+  if(!(await shadowReadyForDirectRead(key)))return null;
+  return postgresPlannerAvailability(body);
+}
+
 async function directPlannerWorkersRead(body){
   const session=await localSessionForBody(body,true);
   if(!session)return null;
@@ -4886,6 +4942,7 @@ async function tryDirectPostgresRead(action,body){
   if(action==='getOfferReminders')return directOfferRemindersRead(body);
   if(action==='getEmployeeAdminData')return directEmployeeAdminDataRead(body);
   if(action==='getPlannerWorkers')return directPlannerWorkersRead(body);
+  if(action==='getPlannerAvailability')return directPlannerAvailabilityRead(body);
   if(action==='getAbsences')return directAbsencesRead(body);
   if(action==='getAbsenceOverview')return directAbsenceOverviewRead(body);
   if(action==='getSicknessAlerts')return directSicknessAlertsRead(body);
@@ -4961,7 +5018,7 @@ async function proxyLegacy(req, res, body) {
       console.error('Postgres employee read failed; falling back to Google:', e.message);
     }
   }
-  if (['getEmployeeAdminData','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','getObjectReports','getRegieReports','getTimeBankAccount','getMyTimeBank','getVacationAccount','getVacationAccounts'].includes(action)) {
+  if (['getEmployeeAdminData','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','getObjectReports','getRegieReports','getTimeBankAccount','getMyTimeBank','getVacationAccount','getVacationAccounts'].includes(action)) {
     try {
       const direct=await tryDirectPostgresRead(action,body);
       if (direct!==null) {
@@ -5009,6 +5066,7 @@ async function proxyLegacy(req, res, body) {
         if (action==='getOwnReminders') verifyOwnRemindersShadow(verifyData).catch(e=>console.error('own reminder shadow verify failed',e.message));
         if (action==='getOfferReminders') verifyOfferRemindersShadow(verifyData,Boolean(body.includeDone)).catch(e=>console.error('offer reminder shadow verify failed',e.message));
         if (action==='getPlannerWorkers') verifyPlannerWorkersShadow(verifyData).catch(e=>console.error('planner worker shadow verify failed',e.message));
+        if (action==='getPlannerAvailability') verifyPlannerAvailabilityShadow(verifyData,body).catch(e=>console.error('planner availability shadow verify failed',e.message));
         if (action==='getPlannerEvents') verifyPlannerEventsShadow(verifyData).catch(e=>console.error('planner event shadow verify failed',e.message));
         if (action==='getMaintenanceCustomer') {
           mirrorMaintenanceAttachmentsFromCustomer(verifyData)
@@ -5101,6 +5159,8 @@ async function proxyLegacy(req, res, body) {
           ['savePlannerWorker','movePlannerWorker','setPlannerWorkerActive'].includes(action)) {
         const plannerRows=parsed.data!==undefined?parsed.data:parsed;
         replacePlannerWorkersShadow(plannerRows).catch(e=>console.error('planner worker shadow mirror failed',e.message));
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'planner_availability:%'")
+          .catch(e=>console.error('planner availability worker readiness invalidate failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['savePlannerEvent','deletePlannerEvent'].includes(action)) {
@@ -5121,6 +5181,8 @@ async function proxyLegacy(req, res, body) {
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['saveAbsence','deleteAbsence','endSicknessAbsence'].includes(action)) {
         mirrorAbsenceWrite(action,body,parsed).catch(e=>console.error('absence shadow mirror failed',e.message));
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'planner_availability:%'")
+          .catch(e=>console.error('planner availability absence readiness invalidate failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'absence_overview:%'")
           .catch(e=>console.error('absence overview readiness invalidate failed',e.message));
       }
@@ -5140,6 +5202,8 @@ async function proxyLegacy(req, res, body) {
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false && action==='setDayStatus') {
         mirrorSetDayStatus(body,parsed).catch(e=>console.error('day status shadow mirror failed',e.message));
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'planner_availability:%'")
+          .catch(e=>console.error('planner availability status readiness invalidate failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['closeDay','refreshClosedDay'].includes(action)) {
@@ -5315,6 +5379,9 @@ async function health() {
         ownReminders:await shadowReadyForDirectRead('own_reminders'),
         offerReminders:await shadowReadyForDirectRead('offer_reminders'),
         plannerWorkers:await shadowReadyForDirectRead('planner_workers'),
+        plannerAvailabilityVerified:(await pool.query(
+          "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'planner_availability:%' AND mismatches=0"
+        )).rows[0]?.n||0,
         absences:await shadowReadyForDirectRead('absences'),
         absenceOverviewVerified:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'absence_overview:%' AND mismatches=0"
@@ -5522,7 +5589,7 @@ initDb()
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
     if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' maintenance_attachments='+h.shadowCounts.maintenanceAttachments+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus+' day_closures='+h.shadowCounts.dayClosures+' time_entries='+h.shadowCounts.timeEntries+' objects='+h.shadowCounts.objects+' regie_merges='+h.shadowCounts.regieMerges+' object_notes='+h.shadowCounts.objectNotes);
     console.log('RAILWAY_SESSIONS active='+Number(h.activeRailwaySessions||0));
-    if(h.directReadReady)console.log('DIRECT_READ_READY employee_admin='+Boolean(h.directReadReady.employeeAdmin)+' manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders)+' offer_reminders='+Boolean(h.directReadReady.offerReminders)+' planner_workers='+Boolean(h.directReadReady.plannerWorkers)+' absences='+Boolean(h.directReadReady.absences)+' absence_overview='+Number(h.directReadReady.absenceOverviewVerified||0)+' sickness_alerts='+Boolean(h.directReadReady.sicknessAlerts)+' maintenance_search_queries='+Number(h.directReadReady.maintenanceSearchVerifiedQueries||0)+' maintenance_customers='+Number(h.directReadReady.maintenanceCustomersVerified||0)+' maintenance_contracts='+Boolean(h.directReadReady.maintenanceContracts)+' maintenance_overview='+Boolean(h.directReadReady.maintenanceOverview)+' maintenance_archive_queries='+Number(h.directReadReady.maintenanceArchiveVerifiedQueries||0)+' maintenance_device_ids='+Number(h.directReadReady.maintenanceDeviceIdsVerified||0)+' object_note_reads='+Number(h.directReadReady.objectNoteReadsVerified||0)+' object_reports='+Number(h.directReadReady.objectReportsVerified||0)+' regie_reports='+Number(h.directReadReady.regieReportsVerified||0)+' vacation_keys='+Number(h.directReadReady.vacationVerifiedKeys||0)+' timebank_employees='+Number(h.directReadReady.timeBankVerifiedEmployees||0)+' my_timebank_employees='+Number(h.directReadReady.myTimeBankVerifiedEmployees||0));
+    if(h.directReadReady)console.log('DIRECT_READ_READY employee_admin='+Boolean(h.directReadReady.employeeAdmin)+' manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders)+' offer_reminders='+Boolean(h.directReadReady.offerReminders)+' planner_workers='+Boolean(h.directReadReady.plannerWorkers)+' planner_availability='+Number(h.directReadReady.plannerAvailabilityVerified||0)+' absences='+Boolean(h.directReadReady.absences)+' absence_overview='+Number(h.directReadReady.absenceOverviewVerified||0)+' sickness_alerts='+Boolean(h.directReadReady.sicknessAlerts)+' maintenance_search_queries='+Number(h.directReadReady.maintenanceSearchVerifiedQueries||0)+' maintenance_customers='+Number(h.directReadReady.maintenanceCustomersVerified||0)+' maintenance_contracts='+Boolean(h.directReadReady.maintenanceContracts)+' maintenance_overview='+Boolean(h.directReadReady.maintenanceOverview)+' maintenance_archive_queries='+Number(h.directReadReady.maintenanceArchiveVerifiedQueries||0)+' maintenance_device_ids='+Number(h.directReadReady.maintenanceDeviceIdsVerified||0)+' object_note_reads='+Number(h.directReadReady.objectNoteReadsVerified||0)+' object_reports='+Number(h.directReadReady.objectReportsVerified||0)+' regie_reports='+Number(h.directReadReady.regieReportsVerified||0)+' vacation_keys='+Number(h.directReadReady.vacationVerifiedKeys||0)+' timebank_employees='+Number(h.directReadReady.timeBankVerifiedEmployees||0)+' my_timebank_employees='+Number(h.directReadReady.myTimeBankVerifiedEmployees||0));
     if(Array.isArray(h.shadowReadiness)&&h.shadowReadiness.length)console.log('SHADOW_READINESS '+h.shadowReadiness.map(x=>x.shadowName+'='+x.status+'('+x.mismatches+')').join(' | '));
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
