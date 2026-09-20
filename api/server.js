@@ -154,6 +154,25 @@ CREATE TABLE IF NOT EXISTS own_reminders_shadow (
   shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS inquiry_offers_shadow (
+  offer_id TEXT PRIMARY KEY,
+  inquiry_id TEXT,
+  customer TEXT,
+  phone TEXT,
+  email TEXT,
+  description TEXT,
+  source TEXT,
+  created_at_text TEXT,
+  status TEXT,
+  changed_at_text TEXT,
+  changed_by TEXT,
+  calendar_event_id TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS inquiry_offers_shadow_status_idx
+  ON inquiry_offers_shadow(status,created_at_text);
+
 CREATE TABLE IF NOT EXISTS offer_reminders_shadow (
   id TEXT PRIMARY KEY,
   offer_id TEXT,
@@ -618,6 +637,7 @@ async function initDb() {
   await initManualOrdersShadow();
   await initOwnRemindersShadow();
   await initOfferRemindersShadow();
+  await initInquiryOffersShadow();
   await initPlannerWorkersShadow();
   await initPlannerEventsShadow();
   await initMaintenanceShadows();
@@ -4530,6 +4550,72 @@ async function saveShadowVerifyStat(name,googleCount,postgresCount,mismatches){
 }
 
 
+
+async function initInquiryOffersShadow(){
+  if(!pool)return;
+  const existing=await pool.query('SELECT COUNT(*)::int AS n FROM inquiry_offers_shadow');
+  if((existing.rows[0]?.n||0)>0)return;
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:AnfrageAngebote']
+  );
+  let inserted=0;
+  for(const row of q.rows){
+    const payload=row.payload||{};
+    if(Number(payload.sourceRow||row.source_key)<=1)continue;
+    const cells=Array.isArray(payload.cells)?payload.cells:[];
+    const id=textCell(cells,0).trim();if(!id)continue;
+    await pool.query(
+      `INSERT INTO inquiry_offers_shadow(
+        offer_id,inquiry_id,customer,phone,email,description,source,created_at_text,status,
+        changed_at_text,changed_by,calendar_event_id
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      ON CONFLICT(offer_id) DO NOTHING`,
+      [id,textCell(cells,1),textCell(cells,2),textCell(cells,3),textCell(cells,4),
+       textCell(cells,5),textCell(cells,6),textCell(cells,7),textCell(cells,8)||'Offen',
+       textCell(cells,9),textCell(cells,10),textCell(cells,11)]
+    );
+    inserted++;
+  }
+  console.log('SHADOW inquiry_offers initialized rows='+inserted);
+}
+async function mirrorInquiryOfferWrite(action,body,parsed){
+  if(!pool)return;
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if(!data||data.ok===false)return;
+  if(action==='createInspectionOffer'){
+    const item=body.item||{},ev=item.event||{},id=String(data.offerId||'').trim();if(!id)return;
+    if(data.existing)return;
+    await pool.query(
+      `INSERT INTO inquiry_offers_shadow(
+        offer_id,inquiry_id,customer,phone,email,description,source,created_at_text,status,
+        changed_at_text,changed_by,calendar_event_id,shadow_updated_at
+      ) VALUES($1,'',$2,$3,$4,$5,'Besichtigung',$6,'Zu erstellen',$6,$7,$8,now())
+      ON CONFLICT(offer_id) DO UPDATE SET
+        customer=EXCLUDED.customer,phone=EXCLUDED.phone,email=EXCLUDED.email,
+        description=EXCLUDED.description,source=EXCLUDED.source,status=EXCLUDED.status,
+        changed_at_text=EXCLUDED.changed_at_text,changed_by=EXCLUDED.changed_by,
+        calendar_event_id=EXCLUDED.calendar_event_id,shadow_updated_at=now()`,
+      [id,String(data.customer||item.customer||''),String(ev.phone||''),String(ev.email||''),
+       String(ev.description||''),String(data.transferredAt||''),String(data.transferredBy||body.employee||''),
+       String(data.sourceCalendarEventId||item.sourceCalendarEventId||ev.id||'')]
+    );
+  }else if(action==='inquiryToOffer'){
+    const id=String(data.offerId||'').trim();if(!id)return;
+    await pool.query(
+      `INSERT INTO inquiry_offers_shadow(
+        offer_id,inquiry_id,customer,phone,email,description,source,created_at_text,status,
+        changed_at_text,changed_by,calendar_event_id,shadow_updated_at
+      ) VALUES($1,$2,$3,$4,'','','',now()::text,'Offen',now()::text,$5,'',now())
+      ON CONFLICT(offer_id) DO UPDATE SET
+        inquiry_id=EXCLUDED.inquiry_id,customer=EXCLUDED.customer,phone=EXCLUDED.phone,
+        status='Offen',changed_at_text=now()::text,changed_by=EXCLUDED.changed_by,shadow_updated_at=now()`,
+      [id,String(body.id||''),String(body.customer||''),String(body.phone||''),String(body.employee||'')]
+    );
+  }
+}
+
 async function initOfferRemindersShadow() {
   if (!pool) return;
   const existing=await pool.query('SELECT COUNT(*)::int AS n FROM offer_reminders_shadow');
@@ -6171,6 +6257,10 @@ async function proxyLegacy(req, res, body) {
         mirrorOfferReminderWrite(action,body,parsed).catch(e=>console.error('offer reminder shadow mirror failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
+          ['createInspectionOffer','inquiryToOffer'].includes(action)) {
+        mirrorInquiryOfferWrite(action,body,parsed).catch(e=>console.error('inquiry offer shadow mirror failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['savePlannerWorker','movePlannerWorker','setPlannerWorkerActive'].includes(action)) {
         const plannerRows=parsed.data!==undefined?parsed.data:parsed;
         replacePlannerWorkersShadow(plannerRows).catch(e=>console.error('planner worker shadow mirror failed',e.message));
@@ -6373,29 +6463,30 @@ async function health() {
         manualOrders: counts[0].rows[0]?.n||0,
         ownReminders: counts[1].rows[0]?.n||0,
         offerReminders: counts[2].rows[0]?.n||0,
-        plannerWorkers: counts[3].rows[0]?.n||0,
-        plannerEvents: counts[4].rows[0]?.n||0,
-        maintenanceCustomers: counts[5].rows[0]?.n||0,
-        maintenanceObjects: counts[6].rows[0]?.n||0,
-        maintenanceDevices: counts[7].rows[0]?.n||0,
-        maintenanceRepairs: counts[8].rows[0]?.n||0,
-        maintenanceManual: counts[9].rows[0]?.n||0,
-        maintenanceAttachments: counts[10].rows[0]?.n||0,
-        absences: counts[11].rows[0]?.n||0,
-        vacationEntitlements: counts[12].rows[0]?.n||0,
-        timeBank: counts[13].rows[0]?.n||0,
-        monthlyAdjustments: counts[14].rows[0]?.n||0,
-        monthClosures: counts[15].rows[0]?.n||0,
-        payrollReviews: counts[16].rows[0]?.n||0,
-        payrollClosures: counts[17].rows[0]?.n||0,
-        conflictReviews: counts[18].rows[0]?.n||0,
-        dayStatus: counts[19].rows[0]?.n||0,
-        dayClosures: counts[20].rows[0]?.n||0,
-        timeEntries: counts[21].rows[0]?.n||0,
-        objects: counts[22].rows[0]?.n||0,
-        regieMerges: counts[23].rows[0]?.n||0,
-        objectNotes: counts[24].rows[0]?.n||0,
-        regieAttachments: counts[25].rows[0]?.n||0
+        inquiryOffers: counts[3].rows[0]?.n||0,
+        plannerWorkers: counts[4].rows[0]?.n||0,
+        plannerEvents: counts[5].rows[0]?.n||0,
+        maintenanceCustomers: counts[6].rows[0]?.n||0,
+        maintenanceObjects: counts[7].rows[0]?.n||0,
+        maintenanceDevices: counts[8].rows[0]?.n||0,
+        maintenanceRepairs: counts[9].rows[0]?.n||0,
+        maintenanceManual: counts[10].rows[0]?.n||0,
+        maintenanceAttachments: counts[11].rows[0]?.n||0,
+        absences: counts[12].rows[0]?.n||0,
+        vacationEntitlements: counts[13].rows[0]?.n||0,
+        timeBank: counts[14].rows[0]?.n||0,
+        monthlyAdjustments: counts[15].rows[0]?.n||0,
+        monthClosures: counts[16].rows[0]?.n||0,
+        payrollReviews: counts[17].rows[0]?.n||0,
+        payrollClosures: counts[18].rows[0]?.n||0,
+        conflictReviews: counts[19].rows[0]?.n||0,
+        dayStatus: counts[20].rows[0]?.n||0,
+        dayClosures: counts[21].rows[0]?.n||0,
+        timeEntries: counts[22].rows[0]?.n||0,
+        objects: counts[23].rows[0]?.n||0,
+        regieMerges: counts[24].rows[0]?.n||0,
+        objectNotes: counts[25].rows[0]?.n||0,
+        regieAttachments: counts[26].rows[0]?.n||0
       };
       const verifyQ=await pool.query(
         'SELECT shadow_name,google_count,postgres_count,mismatches,checked_at FROM shadow_verify_stats ORDER BY shadow_name'
