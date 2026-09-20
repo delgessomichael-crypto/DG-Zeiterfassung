@@ -1077,6 +1077,28 @@ function shadowActive(raw){
 
 
 
+
+async function auditDayClosureSourceDuplicates(){
+  if(!pool)return {rows:0,unique:0,duplicates:0};
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:Tagesabschluesse']
+  );
+  let rows=0;const keys=new Set();
+  for(const row of q.rows){
+    const payload=row.payload||{};
+    if(Number(payload.sourceRow||row.source_key)<=1)continue;
+    const cells=Array.isArray(payload.cells)?payload.cells:[];
+    const employee=textCell(cells,0).trim(),date=textCell(cells,1).trim();
+    if(!employee||!date)continue;
+    rows++;keys.add(employee+'|'+date);
+  }
+  const out={rows,unique:keys.size,duplicates:Math.max(0,rows-keys.size)};
+  console.log('DAY_CLOSURE_SOURCE_AUDIT rows='+out.rows+' unique='+out.unique+' duplicates='+out.duplicates);
+  return out;
+}
+
 async function initDayClosuresShadow(){
   if(!pool)return;
   const existing=await pool.query('SELECT COUNT(*)::int AS n FROM day_closures_shadow');
@@ -2875,6 +2897,7 @@ async function health() {
   let shadowCounts = null;
   let shadowVerify = [];
   let writeStats = [];
+  let dayClosureSourceAudit = null;
   if (pool) {
     try {
       const q = await pool.query('SELECT 1 AS ok');
@@ -2940,6 +2963,7 @@ async function health() {
           LIMIT 20`
       );
       writeStats=writeQ.rows;
+      dayClosureSourceAudit=await auditDayClosureSourceDuplicates();
     } catch (e) {
       database = 'error';
     }
@@ -2973,7 +2997,8 @@ async function health() {
     dayClosuresShadow: pool ? 'enabled' : 'disabled',
     shadowCounts,
     shadowVerify,
-    writeStats
+    writeStats,
+    dayClosureSourceAudit
   };
 }
 
