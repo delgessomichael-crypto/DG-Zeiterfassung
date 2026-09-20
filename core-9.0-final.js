@@ -12,7 +12,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 
 /* ===== CLEAN SOURCE: app-5.0.js ===== */
-const API_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
+const API_URL='https://dg-app-10-api-production.up.railway.app/';
 
 let preparedPhotos=[],lastDayData={entries:[],total:0,closed:false},customerPad=null,employeePad=null,noCustomerPresent=false,employeeDirectory=[],cameraStream=null,selectedCalendarEventId='',bossFilter='all',bossDetailIndex=-1,bossDetailTab='overview';
 
@@ -3573,7 +3573,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 (function(){
 'use strict';
 const V='9.0',PREVIOUS=[],KEY='dg70_backend',TTL=5*60*1000;
-const BACKEND_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
+const BACKEND_URL='https://dg-app-10-api-production.up.railway.app/';
 function byId(id){return document.getElementById(id);}
 function exact(v){return String(v||'').trim()===V;}
 function compatible(v){const s=String(v||'').trim();return exact(s)||PREVIOUS.includes(s);}
@@ -4041,7 +4041,7 @@ setTimeout(install,100);setTimeout(install,600);setTimeout(install,1600);
 (function(){
 'use strict';
 const V='9.0';
-const BACKEND_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
+const BACKEND_URL='https://dg-app-10-api-production.up.railway.app/';
 const TOKEN_KEY='dg_device_session';
 function $(id){return document.getElementById(id);}
 function isBoss(){try{return localStorage.getItem('dg_chef_access')==='1';}catch(_e){return false;}}
@@ -5426,7 +5426,7 @@ if(document.readyState==='loading'){
 /* DG 8.0 LOGIN RECOVERY - unabhängig vom Bürostart */
 (function(){
 'use strict';
-const URL742='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
+const URL742='https://dg-app-10-api-production.up.railway.app/';
 async function raw742(payload){
   const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),20000);
   try{
