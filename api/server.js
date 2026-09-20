@@ -538,6 +538,19 @@ CREATE TABLE IF NOT EXISTS regie_merges_shadow (
   shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS regie_attachments_shadow (
+  id TEXT PRIMARY KEY,
+  object_ids_text TEXT,
+  customer TEXT,
+  file_id TEXT,
+  url TEXT,
+  file_name TEXT,
+  mime TEXT,
+  uploaded_at_text TEXT,
+  uploaded_by TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS object_notes_shadow (
   object_id TEXT PRIMARY KEY,
   note TEXT,
@@ -620,6 +633,7 @@ async function initDb() {
   await initDayClosuresShadow();
   await initTimeEntriesShadow();
   await initRegieMetadataShadows();
+  await initRegieAttachmentsShadow();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -1336,6 +1350,101 @@ async function auditDayClosureSourceDuplicates(){
 }
 
 
+
+
+async function initRegieAttachmentsShadow(){
+  if(!pool)return;
+  const existing=await pool.query('SELECT COUNT(*)::int AS n FROM regie_attachments_shadow');
+  if((existing.rows[0]?.n||0)>0)return;
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:RegieZusatzdateien']
+  );
+  let inserted=0;
+  for(const row of q.rows){
+    const payload=row.payload||{};if(Number(payload.sourceRow||row.source_key)<=1)continue;
+    const cells=Array.isArray(payload.cells)?payload.cells:[];
+    const id=textCell(cells,0).trim();if(!id)continue;
+    await pool.query(
+      `INSERT INTO regie_attachments_shadow(
+        id,object_ids_text,customer,file_id,url,file_name,mime,uploaded_at_text,uploaded_by
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      ON CONFLICT(id) DO NOTHING`,
+      [id,textCell(cells,1),textCell(cells,2),textCell(cells,3),textCell(cells,4),
+       textCell(cells,5),textCell(cells,6),textCell(cells,7),textCell(cells,8)]
+    );
+    inserted++;
+  }
+  console.log('SHADOW regie_attachments initialized rows='+inserted);
+}
+function regieAttachmentsVerifyKey(body){
+  const ids=Array.isArray(body&&body.objectIds)?body.objectIds.map(String).filter(Boolean).sort():[];
+  return 'regie_attachments:'+crypto.createHash('sha256').update(ids.join('|')).digest('hex').slice(0,16);
+}
+async function postgresRegieAttachments(body){
+  const ids=Array.isArray(body&&body.objectIds)?body.objectIds.map(String).filter(Boolean):[];
+  if(!ids.length)return [];
+  const q=await pool.query(
+    `SELECT id,object_ids_text,customer,file_id,url,file_name,mime,uploaded_at_text,uploaded_by
+       FROM regie_attachments_shadow ORDER BY uploaded_at_text ASC,id ASC`
+  );
+  const wanted=new Set(ids);
+  const out=[];
+  for(const r of q.rows){
+    const rowIds=String(r.object_ids_text||'').split('|').map(x=>x.trim()).filter(Boolean);
+    if(!rowIds.some(id=>wanted.has(id)))continue;
+    out.push({
+      id:String(r.id||''),objectIds:rowIds,customer:String(r.customer||''),fileId:String(r.file_id||''),
+      url:String(r.url||''),name:String(r.file_name||''),mime:String(r.mime||''),
+      uploadedAt:berlinDateTime(r.uploaded_at_text||''),uploadedBy:String(r.uploaded_by||'')
+    });
+  }
+  return out;
+}
+function canonicalRegieAttachments(rows){
+  return (Array.isArray(rows)?rows:[]).map(x=>({
+    id:String(x.id||''),objectIds:(Array.isArray(x.objectIds)?x.objectIds:[]).map(String),
+    customer:String(x.customer||''),fileId:String(x.fileId||''),url:String(x.url||''),
+    name:String(x.name||''),mime:String(x.mime||''),uploadedAt:String(x.uploadedAt||''),
+    uploadedBy:String(x.uploadedBy||'')
+  }));
+}
+async function verifyRegieAttachmentsShadow(rows,body){
+  if(!pool||!Array.isArray(rows))return;
+  const pg=await postgresRegieAttachments(body),a=canonicalRegieAttachments(rows),b=canonicalRegieAttachments(pg);
+  const mismatches=JSON.stringify(a)===JSON.stringify(b)?0:1,key=regieAttachmentsVerifyKey(body);
+  console.log('SHADOW_VERIFY '+key+' google='+a.length+' postgres='+b.length+' mismatches='+mismatches);
+  await saveShadowVerifyStat(key,a.length,b.length,mismatches);
+}
+async function directRegieAttachmentsRead(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const key=regieAttachmentsVerifyKey(body);
+  if(!(await shadowReadyForDirectRead(key)))return null;
+  return postgresRegieAttachments(body);
+}
+async function mirrorRegieAttachmentsWrite(body,parsed){
+  if(!pool)return;
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if(!Array.isArray(data))return;
+  const ids=[...new Set((Array.isArray(body.objectIds)?body.objectIds:[]).map(String).filter(Boolean))];
+  const objectIdsText=ids.join('|'),customer=String(body.customer||'');
+  for(const x of data){
+    const id=String(x&&x.id||'').trim();if(!id)continue;
+    await pool.query(
+      `INSERT INTO regie_attachments_shadow(
+        id,object_ids_text,customer,file_id,url,file_name,mime,uploaded_at_text,uploaded_by,shadow_updated_at
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
+      ON CONFLICT(id) DO UPDATE SET
+        object_ids_text=EXCLUDED.object_ids_text,customer=EXCLUDED.customer,file_id=EXCLUDED.file_id,
+        url=EXCLUDED.url,file_name=EXCLUDED.file_name,mime=EXCLUDED.mime,
+        uploaded_at_text=EXCLUDED.uploaded_at_text,uploaded_by=EXCLUDED.uploaded_by,shadow_updated_at=now()`,
+      [id,objectIdsText,customer,String(x.fileId||''),String(x.url||''),String(x.name||''),
+       String(x.mime||''),String(x.uploadedAt||''),String(x.uploadedBy||body.employee||'')]
+    );
+  }
+  await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'regie_attachments:%'");
+}
 
 async function initRegieMetadataShadows(){
   if(!pool)return;
@@ -5725,6 +5834,7 @@ async function tryDirectPostgresRead(action,body){
   if(action==='checkRegieBillingRisk')return directRegieBillingRiskRead(body);
   if(action==='getObjectReports')return directObjectReportsRead(body);
   if(action==='getRegieReports')return directRegieReportsRead(body);
+  if(action==='getRegieAttachments')return directRegieAttachmentsRead(body);
   if(action==='getTimeBankAccount')return directTimeBankAccountRead(body);
   if(action==='getMyTimeBank')return directMyTimeBankRead(body);
   if(action==='getBossDayClosures')return directBossDayClosuresRead(body);
@@ -5791,7 +5901,7 @@ async function proxyLegacy(req, res, body) {
       console.error('Postgres employee read failed; falling back to Google:', e.message);
     }
   }
-  if (['getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts'].includes(action)) {
+  if (['getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getRegieAttachments','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts'].includes(action)) {
     try {
       const direct=await tryDirectPostgresRead(action,body);
       if (direct!==null) {
@@ -5913,6 +6023,7 @@ async function proxyLegacy(req, res, body) {
               .catch(e=>console.error('regie reports shadow verify failed',e.message));
           }
         }
+        if (action==='getRegieAttachments') verifyRegieAttachmentsShadow(verifyData,body).catch(e=>console.error('regie attachments shadow verify failed',e.message));
         if (action==='getObjectInternalNote'||action==='getObjectInternalNotes') verifyObjectNotesShadow(verifyData,body).catch(e=>console.error('object notes shadow verify failed',e.message));
         if (action==='getBossDayClosures') {
           syncAndVerifyBossDayClosures(verifyData,body.year,body.month)
@@ -6076,6 +6187,9 @@ async function proxyLegacy(req, res, body) {
           ['mergeRegieObjects','saveObjectInternalNote','updateRegieReport'].includes(action)) {
         mirrorRegieMetadataWrite(action,body,parsed).catch(e=>console.error('regie metadata shadow mirror failed',e.message));
       }
+      if (upstream.status === 200 && parsed && parsed.ok !== false && action==='addRegieAttachments') {
+        mirrorRegieAttachmentsWrite(body,parsed).catch(e=>console.error('regie attachments shadow mirror failed',e.message));
+      }
       pool.query(
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
          VALUES($1,$2::jsonb,$3,$4::jsonb,$5,$6)`,
@@ -6203,7 +6317,8 @@ async function health() {
         timeEntries: counts[21].rows[0]?.n||0,
         objects: counts[22].rows[0]?.n||0,
         regieMerges: counts[23].rows[0]?.n||0,
-        objectNotes: counts[24].rows[0]?.n||0
+        objectNotes: counts[24].rows[0]?.n||0,
+        regieAttachments: counts[25].rows[0]?.n||0
       };
       const verifyQ=await pool.query(
         'SELECT shadow_name,google_count,postgres_count,mismatches,checked_at FROM shadow_verify_stats ORDER BY shadow_name'
@@ -6268,6 +6383,9 @@ async function health() {
         )).rows[0]?.n||0,
         regieBillingRiskVerified:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'regie_billing_risk:%' AND mismatches=0"
+        )).rows[0]?.n||0,
+        regieAttachmentsVerified:(await pool.query(
+          "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'regie_attachments:%' AND mismatches=0"
         )).rows[0]?.n||0,
         vacationVerifiedKeys:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'vacation_full:%' AND mismatches=0"
@@ -6473,7 +6591,7 @@ initDb()
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
     if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' maintenance_attachments='+h.shadowCounts.maintenanceAttachments+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus+' day_closures='+h.shadowCounts.dayClosures+' time_entries='+h.shadowCounts.timeEntries+' objects='+h.shadowCounts.objects+' regie_merges='+h.shadowCounts.regieMerges+' object_notes='+h.shadowCounts.objectNotes);
     console.log('RAILWAY_SESSIONS active='+Number(h.activeRailwaySessions||0));
-    if(h.directReadReady)console.log('DIRECT_READ_READY employee_admin='+Boolean(h.directReadReady.employeeAdmin)+' manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders)+' offer_reminders='+Boolean(h.directReadReady.offerReminders)+' planner_workers='+Boolean(h.directReadReady.plannerWorkers)+' planner_availability='+Number(h.directReadReady.plannerAvailabilityVerified||0)+' absences='+Boolean(h.directReadReady.absences)+' absence_overview='+Number(h.directReadReady.absenceOverviewVerified||0)+' sickness_alerts='+Boolean(h.directReadReady.sicknessAlerts)+' maintenance_search_queries='+Number(h.directReadReady.maintenanceSearchVerifiedQueries||0)+' maintenance_customers='+Number(h.directReadReady.maintenanceCustomersVerified||0)+' maintenance_contracts='+Boolean(h.directReadReady.maintenanceContracts)+' maintenance_overview='+Boolean(h.directReadReady.maintenanceOverview)+' maintenance_archive_queries='+Number(h.directReadReady.maintenanceArchiveVerifiedQueries||0)+' maintenance_device_ids='+Number(h.directReadReady.maintenanceDeviceIdsVerified||0)+' object_note_reads='+Number(h.directReadReady.objectNoteReadsVerified||0)+' object_reports='+Number(h.directReadReady.objectReportsVerified||0)+' regie_reports='+Number(h.directReadReady.regieReportsVerified||0)+' regie_billing_risk='+Number(h.directReadReady.regieBillingRiskVerified||0)+' vacation_keys='+Number(h.directReadReady.vacationVerifiedKeys||0)+' timebank_employees='+Number(h.directReadReady.timeBankVerifiedEmployees||0)+' my_timebank_employees='+Number(h.directReadReady.myTimeBankVerifiedEmployees||0)+' week_data='+Number(h.directReadReady.weekDataVerified||0)+' day_data='+Number(h.directReadReady.dayDataVerified||0)+' month_data='+Number(h.directReadReady.monthDataVerified||0)+' boss_day_closures='+Number(h.directReadReady.bossDayClosuresVerified||0)+' boss_month_views='+Number(h.directReadReady.bossMonthViewsVerified||0)+' payroll_audit_views='+Number(h.directReadReady.payrollAuditViewsVerified||0)+' payroll_cycle_views='+Number(h.directReadReady.payrollCycleViewsVerified||0)+' offer_report_views='+Number(h.directReadReady.offerReportViewsVerified||0)+' offer_statistics='+Boolean(h.directReadReady.offerStatisticsView));
+    if(h.directReadReady)console.log('DIRECT_READ_READY employee_admin='+Boolean(h.directReadReady.employeeAdmin)+' manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders)+' offer_reminders='+Boolean(h.directReadReady.offerReminders)+' planner_workers='+Boolean(h.directReadReady.plannerWorkers)+' planner_availability='+Number(h.directReadReady.plannerAvailabilityVerified||0)+' absences='+Boolean(h.directReadReady.absences)+' absence_overview='+Number(h.directReadReady.absenceOverviewVerified||0)+' sickness_alerts='+Boolean(h.directReadReady.sicknessAlerts)+' maintenance_search_queries='+Number(h.directReadReady.maintenanceSearchVerifiedQueries||0)+' maintenance_customers='+Number(h.directReadReady.maintenanceCustomersVerified||0)+' maintenance_contracts='+Boolean(h.directReadReady.maintenanceContracts)+' maintenance_overview='+Boolean(h.directReadReady.maintenanceOverview)+' maintenance_archive_queries='+Number(h.directReadReady.maintenanceArchiveVerifiedQueries||0)+' maintenance_device_ids='+Number(h.directReadReady.maintenanceDeviceIdsVerified||0)+' object_note_reads='+Number(h.directReadReady.objectNoteReadsVerified||0)+' object_reports='+Number(h.directReadReady.objectReportsVerified||0)+' regie_reports='+Number(h.directReadReady.regieReportsVerified||0)+' regie_billing_risk='+Number(h.directReadReady.regieBillingRiskVerified||0)+' regie_attachments='+Number(h.directReadReady.regieAttachmentsVerified||0)+' vacation_keys='+Number(h.directReadReady.vacationVerifiedKeys||0)+' timebank_employees='+Number(h.directReadReady.timeBankVerifiedEmployees||0)+' my_timebank_employees='+Number(h.directReadReady.myTimeBankVerifiedEmployees||0)+' week_data='+Number(h.directReadReady.weekDataVerified||0)+' day_data='+Number(h.directReadReady.dayDataVerified||0)+' month_data='+Number(h.directReadReady.monthDataVerified||0)+' boss_day_closures='+Number(h.directReadReady.bossDayClosuresVerified||0)+' boss_month_views='+Number(h.directReadReady.bossMonthViewsVerified||0)+' payroll_audit_views='+Number(h.directReadReady.payrollAuditViewsVerified||0)+' payroll_cycle_views='+Number(h.directReadReady.payrollCycleViewsVerified||0)+' offer_report_views='+Number(h.directReadReady.offerReportViewsVerified||0)+' offer_statistics='+Boolean(h.directReadReady.offerStatisticsView));
     if(Array.isArray(h.shadowReadiness)&&h.shadowReadiness.length)console.log('SHADOW_READINESS '+h.shadowReadiness.map(x=>x.shadowName+'='+x.status+'('+x.mismatches+')').join(' | '));
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
