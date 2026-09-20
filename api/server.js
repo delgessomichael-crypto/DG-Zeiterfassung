@@ -11,6 +11,7 @@ const GOOGLE_BACKEND_URL = process.env.GOOGLE_BACKEND_URL || '';
 const MIGRATION_TOKEN = process.env.MIGRATION_TOKEN || '';
 const MIGRATION_UPLOAD_KEY = process.env.MIGRATION_UPLOAD_KEY || '';
 const WEB_ORIGIN = process.env.WEB_ORIGIN || 'https://dg-app-10-web-production.up.railway.app';
+const MIGRATION_XLSX_URL = process.env.MIGRATION_XLSX_URL || '';
 
 const pool = DATABASE_URL ? new Pool({
   connectionString: DATABASE_URL,
@@ -206,6 +207,27 @@ async function importWorkbook(buffer) {
   }
 }
 
+async function importWorkbookFromUrlOnce() {
+  if (!MIGRATION_XLSX_URL || !pool) return;
+  const existing = await pool.query("SELECT value FROM app_meta WHERE key='latest_migration'");
+  if (existing.rowCount) {
+    console.log('Migration snapshot already present; startup import skipped.');
+    return;
+  }
+  const u = new URL(MIGRATION_XLSX_URL);
+  if (!u.hostname.endsWith('oaiusercontent.com')) {
+    throw new Error('Migration snapshot host not allowed');
+  }
+  console.log('Downloading migration snapshot...');
+  const response = await fetch(MIGRATION_XLSX_URL, { redirect:'follow' });
+  if (!response.ok) throw new Error('Snapshot download failed: '+response.status);
+  const ab = await response.arrayBuffer();
+  const buf = Buffer.from(ab);
+  console.log('Migration snapshot downloaded: '+buf.length+' bytes');
+  const result = await importWorkbook(buf);
+  console.log('Migration snapshot imported: run '+result.runId+', '+result.totalRows+' rows');
+}
+
 async function latestMigration() {
   if (!pool) throw new Error('Database not configured');
   const q = await pool.query("SELECT value,updated_at FROM app_meta WHERE key='latest_migration'");
@@ -309,6 +331,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 initDb()
+  .then(() => importWorkbookFromUrlOnce())
   .then(() => server.listen(PORT, '0.0.0.0', () => console.log('DG-App-10 API listening on ' + PORT)))
   .catch(err => {
     console.error('Database initialization failed', err);
