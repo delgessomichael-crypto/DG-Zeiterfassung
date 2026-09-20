@@ -5006,6 +5006,50 @@ async function upsertInquiryFromView(row){
 }
 
 
+
+function customerInquiryViewKey(status){
+  return 'customer_inquiries_view:'+String(status||'Offen');
+}
+function inquiryReminderViewKey(includeDone){
+  return 'inquiry_reminders_view:'+(includeDone?'all':'open');
+}
+async function markInquiryViewFresh(key){
+  if(!pool||!key)return;
+  const value=JSON.stringify({key:String(key),refreshedAt:new Date().toISOString()});
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+     ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
+    ['fresh:'+String(key),value]
+  );
+}
+async function inquiryViewFresh(key,maxMinutes=70){
+  if(!pool||!key)return false;
+  const q=await pool.query(
+    `SELECT updated_at FROM app_meta
+      WHERE key=$1 AND updated_at>now()-($2::text||' minutes')::interval`,
+    ['fresh:'+String(key),String(Number(maxMinutes)||70)]
+  );
+  return Boolean(q.rowCount);
+}
+async function invalidateInquiryFreshness(){
+  if(!pool)return;
+  await pool.query("DELETE FROM app_meta WHERE key LIKE 'fresh:customer_inquiries_view:%' OR key LIKE 'fresh:inquiry_reminders_view:%'");
+}
+async function directCustomerInquiriesRead(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const status=String(body.status||'Offen'),key=customerInquiryViewKey(status);
+  if(!(await inquiryViewFresh(key,70)))return null;
+  if(!(await shadowReadyForDirectRead(key,2)))return null;
+  return postgresCustomerInquiryView(status);
+}
+async function directInquiryRemindersRead(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const includeDone=Boolean(body.includeDone),key=inquiryReminderViewKey(includeDone);
+  if(!(await inquiryViewFresh(key,70)))return null;
+  if(!(await shadowReadyForDirectRead(key,2)))return null;
+  return postgresInquiryReminderView(includeDone);
+}
+
 async function postgresCustomerInquiryView(status){
   status=String(status||'Offen');
   const q=await pool.query(
@@ -5054,7 +5098,7 @@ async function verifyCustomerInquiryView(rows,status){
   const pg=await postgresCustomerInquiryView(status);
   const a=canonicalCustomerInquiries(rows),b=canonicalCustomerInquiries(pg);
   const mismatches=stableJsonString(a)===stableJsonString(b)?0:1;
-  const key='customer_inquiries_view:'+String(status||'Offen');
+  const key=customerInquiryViewKey(status);
   console.log('SHADOW_VERIFY '+key+' google='+a.length+' postgres='+b.length+' mismatches='+mismatches);
   await saveShadowVerifyStat(key,a.length,b.length,mismatches);
 }
@@ -5098,7 +5142,7 @@ async function verifyInquiryReminderView(rows,includeDone){
   const pg=await postgresInquiryReminderView(includeDone);
   const a=canonicalInquiryReminders(rows),b=canonicalInquiryReminders(pg);
   const mismatches=stableJsonString(a)===stableJsonString(b)?0:1;
-  const key='inquiry_reminders_view:'+(includeDone?'all':'open');
+  const key=inquiryReminderViewKey(includeDone);
   console.log('SHADOW_VERIFY '+key+' google='+a.length+' postgres='+b.length+' mismatches='+mismatches);
   await saveShadowVerifyStat(key,a.length,b.length,mismatches);
 }
@@ -6859,6 +6903,8 @@ async function invalidateBossMonthViews(){
 }
 
 async function tryDirectPostgresRead(action,body){
+  if(action==='getCustomerInquiries')return directCustomerInquiriesRead(body);
+  if(action==='getInquiryReminders')return directInquiryRemindersRead(body);
   if(action==='getOfferReports')return directOfferReportsViewRead(body);
   if(action==='getOfferStatistics')return directOfferStatisticsViewRead(body);
   if(action==='getMonthPayrollAudit')return directPayrollAuditViewRead(body);
@@ -7011,13 +7057,17 @@ async function proxyLegacy(req, res, body) {
         if (action==='getManualOrders') verifyManualOrdersShadow(verifyData).catch(e=>console.error('manual order shadow verify failed',e.message));
         if (action==='getOwnReminders') verifyOwnRemindersShadow(verifyData).catch(e=>console.error('own reminder shadow verify failed',e.message));
         if (action==='getCustomerInquiries') {
-          syncInquiryViewShadow(verifyData,body.status)
-            .then(()=>verifyCustomerInquiryView(verifyData,body.status))
+          const inquiryStatus=String(body.status||'Offen'),key=customerInquiryViewKey(inquiryStatus);
+          syncInquiryViewShadow(verifyData,inquiryStatus)
+            .then(()=>verifyCustomerInquiryView(verifyData,inquiryStatus))
+            .then(async()=>{if(await shadowReadyForDirectRead(key,2))await markInquiryViewFresh(key);})
             .catch(e=>console.error('customer inquiries shadow refresh/verify failed',e.message));
         }
         if (action==='getInquiryReminders') {
-          syncInquiryReminderViewShadow(verifyData,Boolean(body.includeDone))
-            .then(()=>verifyInquiryReminderView(verifyData,Boolean(body.includeDone)))
+          const includeDone=Boolean(body.includeDone),key=inquiryReminderViewKey(includeDone);
+          syncInquiryReminderViewShadow(verifyData,includeDone)
+            .then(()=>verifyInquiryReminderView(verifyData,includeDone))
+            .then(async()=>{if(await shadowReadyForDirectRead(key,2))await markInquiryViewFresh(key);})
             .catch(e=>console.error('inquiry reminders shadow refresh/verify failed',e.message));
         }
         if (action==='getOfferReminders') verifyOfferRemindersShadow(verifyData,Boolean(body.includeDone)).catch(e=>console.error('offer reminder shadow verify failed',e.message));
@@ -7185,6 +7235,7 @@ async function proxyLegacy(req, res, body) {
       if (upstream.status === 200 && parsed && parsed.ok !== false && action==='syncCustomerInquiries') {
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'customer_inquiries_view:%' OR shadow_name LIKE 'inquiry_reminders_view:%'")
           .catch(e=>console.error('inquiry verification invalidation failed',e.message));
+        invalidateInquiryFreshness().catch(e=>console.error('inquiry freshness invalidation failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['createOwnReminder','saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder'].includes(action)) {
@@ -7551,6 +7602,12 @@ async function health() {
         )).rows[0]?.n||0,
         inquiryReminderViewsVerified:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'inquiry_reminders_view:%' AND mismatches=0"
+        )).rows[0]?.n||0,
+        customerInquiryFreshViews:(await pool.query(
+          "SELECT COUNT(*)::int AS n FROM app_meta WHERE key LIKE 'fresh:customer_inquiries_view:%' AND updated_at>now()-interval '70 minutes'"
+        )).rows[0]?.n||0,
+        inquiryReminderFreshViews:(await pool.query(
+          "SELECT COUNT(*)::int AS n FROM app_meta WHERE key LIKE 'fresh:inquiry_reminders_view:%' AND updated_at>now()-interval '70 minutes'"
         )).rows[0]?.n||0,
         offerStatisticsView:await shadowReadyForDirectRead('offer_statistics_view')
       };
