@@ -274,6 +274,31 @@ const CACHEABLE_ACTIONS = new Set([
 
 const READ_CACHE_TTL_MS = 60 * 60 * 1000;
 
+const EMPLOYEE_MUTATION_ACTIONS = new Set([
+  'saveEmployeeAdmin',
+  'setEmployeeActive',
+  'deleteEmployeeAdmin'
+]);
+
+async function isEmployeeSnapshotDirty() {
+  if (!pool) return true;
+  const q = await pool.query("SELECT value FROM app_meta WHERE key='employee_snapshot_dirty'");
+  if (!q.rowCount) return false;
+  const v = q.rows[0].value;
+  return v === true || (v && v.dirty === true);
+}
+
+async function markEmployeeSnapshotDirty(action) {
+  if (!pool) return;
+  const value = JSON.stringify({dirty:true,action:String(action||''),at:new Date().toISOString()});
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES('employee_snapshot_dirty',$1::jsonb)
+     ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
+    [value]
+  );
+}
+
+
 function normalizedCachePayload(body) {
   const clone = Object.assign({}, body || {});
   delete clone.force;
@@ -351,9 +376,12 @@ async function proxyLegacy(req, res, body) {
   const action = String(body && body.action || '');
   if (action === 'getEmployees') {
     try {
-      const names = await getEmployeesFromSnapshot();
-      if (Array.isArray(names) && names.length) {
-        return json(res, 200, {ok:true,data:names,source:'postgres'}, req);
+      const dirty = await isEmployeeSnapshotDirty();
+      if (!dirty) {
+        const names = await getEmployeesFromSnapshot();
+        if (Array.isArray(names) && names.length) {
+          return json(res, 200, {ok:true,data:names,source:'postgres'}, req);
+        }
       }
     } catch (e) {
       console.error('Postgres employee read failed; falling back to Google:', e.message);
@@ -387,6 +415,9 @@ async function proxyLegacy(req, res, body) {
         writeCachedResponse(action, body, raw, upstream.status).catch(e=>console.error('response cache write failed',e.message));
       } else if (action && action !== 'ping' && action !== 'employeeLogin') {
         invalidateReadCache().catch(e=>console.error('response cache invalidation failed',e.message));
+      }
+      if (EMPLOYEE_MUTATION_ACTIONS.has(action) && upstream.status === 200 && parsed && parsed.ok !== false) {
+        markEmployeeSnapshotDirty(action).catch(e=>console.error('employee snapshot dirty flag failed',e.message));
       }
       pool.query(
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status)
@@ -445,14 +476,16 @@ async function health() {
   let database = 'not-configured';
   let postgresEmployeeSnapshotCount = null;
   let employeeReadSource = 'google-fallback';
+  let employeeSnapshotDirty = null;
   if (pool) {
     try {
       const q = await pool.query('SELECT 1 AS ok');
       database = q.rows[0] && q.rows[0].ok === 1 ? 'ok' : 'error';
+      employeeSnapshotDirty = await isEmployeeSnapshotDirty();
       const names = await getEmployeesFromSnapshot();
       if (Array.isArray(names) && names.length) {
         postgresEmployeeSnapshotCount = names.length;
-        employeeReadSource = 'postgres';
+        if (!employeeSnapshotDirty) employeeReadSource = 'postgres';
       }
     } catch (e) {
       database = 'error';
@@ -467,6 +500,7 @@ async function health() {
     productionWrites: 'Google-GS-9.0',
     postgresWrites: 'migration-shadow-plus-read-cache',
     employeeReadSource,
+    employeeSnapshotDirty,
     postgresEmployeeSnapshotCount,
     readCacheTtlSeconds: READ_CACHE_TTL_MS / 1000
   };
@@ -558,6 +592,8 @@ initDb()
     const importedRows = sheets.reduce((n,x)=>n+Number(x.imported_rows||0),0);
     const mismatches = sheets.filter(x=>Number(x.source_rows||0)!==Number(x.imported_rows||0)).map(x=>x.sheet_name);
     console.log('MIGRATION VERIFY: sheets='+sheets.length+' sourceRows='+sourceRows+' importedRows='+importedRows+' mismatches='+mismatches.length+(mismatches.length?' ['+mismatches.join(', ')+']':''));
+    const h = await health();
+    console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
   })
   .then(() => server.listen(PORT, '0.0.0.0', () => console.log('DG-App-10 API listening on ' + PORT)))
   .catch(err => {
