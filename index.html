@@ -237,7 +237,7 @@
 (function(){
   if(!('serviceWorker' in navigator))return;
   window.addEventListener('load',function(){
-    navigator.serviceWorker.register('./sw-9.0-prod.js?v=20260920-900-prod1',{updateViaCache:'none'})
+    navigator.serviceWorker.register('./sw-9.0-prod.js?v=20260920-900-prod2',{updateViaCache:'none'})
       .then(function(r){return r.update();})
       .catch(function(e){console.warn('DG Offline-Cache nicht bereit',e);});
   },{once:true});
