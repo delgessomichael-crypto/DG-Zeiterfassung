@@ -59,6 +59,19 @@ CREATE TABLE IF NOT EXISTS migration_sheets (
   PRIMARY KEY(migration_run_id, sheet_name)
 );
 
+CREATE TABLE IF NOT EXISTS legacy_action_log (
+  id BIGSERIAL PRIMARY KEY,
+  action TEXT NOT NULL,
+  request_payload JSONB NOT NULL,
+  response_ok BOOLEAN,
+  response_payload JSONB,
+  http_status INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS legacy_action_log_action_idx
+  ON legacy_action_log(action, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
@@ -228,6 +241,46 @@ async function importWorkbookFromUrlOnce() {
   console.log('Migration snapshot imported: run '+result.runId+', '+result.totalRows+' rows');
 }
 
+async function proxyLegacy(req, res, body) {
+  if (!GOOGLE_BACKEND_URL) return json(res, 503, {ok:false,error:'Google backend not configured'}, req);
+  const action = String(body && body.action || '');
+  let upstream, raw, parsed = null;
+  try {
+    upstream = await fetch(GOOGLE_BACKEND_URL, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify(body || {}),
+      redirect:'follow'
+    });
+    raw = await upstream.text();
+    try { parsed = JSON.parse(raw); } catch (_e) {}
+    if (pool) {
+      pool.query(
+        `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status)
+         VALUES($1,$2::jsonb,$3,$4::jsonb,$5)`,
+        [action,JSON.stringify(body||{}),Boolean(parsed && parsed.ok !== false),
+         parsed ? JSON.stringify(parsed) : null,upstream.status]
+      ).catch(e=>console.error('legacy action log failed',e.message));
+    }
+    cors(req,res);
+    res.writeHead(upstream.status,{
+      'Content-Type':upstream.headers.get('content-type')||'application/json; charset=utf-8',
+      'Cache-Control':'no-store',
+      'X-Content-Type-Options':'nosniff'
+    });
+    return res.end(raw);
+  } catch (e) {
+    if (pool) {
+      pool.query(
+        `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status)
+         VALUES($1,$2::jsonb,false,$3::jsonb,502)`,
+        [action,JSON.stringify(body||{}),JSON.stringify({error:e.message})]
+      ).catch(()=>{});
+    }
+    return json(res,502,{ok:false,error:'Google backend unavailable: '+e.message},req);
+  }
+}
+
 async function latestMigration() {
   if (!pool) throw new Error('Database not configured');
   const q = await pool.query("SELECT value,updated_at FROM app_meta WHERE key='latest_migration'");
@@ -296,6 +349,11 @@ const server = http.createServer(async (req, res) => {
       cors(req,res);
       res.writeHead(204);
       return res.end();
+    }
+
+    if (req.method === 'POST' && url.pathname === '/') {
+      const body = await readBody(req);
+      return proxyLegacy(req,res,body);
     }
 
     if (req.method === 'GET' && url.pathname === '/health') {
