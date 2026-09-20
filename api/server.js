@@ -2,6 +2,7 @@
 
 const http = require('http');
 const crypto = require('crypto');
+const zlib = require('zlib');
 const { Pool } = require('pg');
 const XLSX = require('xlsx');
 
@@ -158,16 +159,38 @@ function cors(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
 }
 
+function chooseApiEncoding(req, data) {
+  if (!req || !data || data.length < 1024) return {body:data,encoding:null};
+  const a = String(req.headers['accept-encoding'] || '').toLowerCase();
+  if (/(^|[,\s])br([,\s]|$)/.test(a)) {
+    return {body:zlib.brotliCompressSync(data,{params:{[zlib.constants.BROTLI_PARAM_QUALITY]:4}}),encoding:'br'};
+  }
+  if (/(^|[,\s])gzip([,\s]|$)/.test(a)) {
+    return {body:zlib.gzipSync(data,{level:5}),encoding:'gzip'};
+  }
+  return {body:data,encoding:null};
+}
+
+function sendApiBody(req,res,status,contentType,data,extraHeaders={}) {
+  const raw = Buffer.isBuffer(data) ? data : Buffer.from(String(data));
+  const variant = chooseApiEncoding(req, raw);
+  const headers = {
+    'Content-Type': contentType || 'application/json; charset=utf-8',
+    'Content-Length': variant.body.length,
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Vary': 'Origin, Accept-Encoding',
+    ...extraHeaders
+  };
+  if (variant.encoding) headers['Content-Encoding'] = variant.encoding;
+  res.writeHead(status, headers);
+  res.end(variant.body);
+}
+
 function json(res, status, body, req) {
   if (req) cors(req, res);
   const data = Buffer.from(JSON.stringify(body));
-  res.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': data.length,
-    'Cache-Control': 'no-store',
-    'X-Content-Type-Options': 'nosniff'
-  });
-  res.end(data);
+  sendApiBody(req,res,status,'application/json; charset=utf-8',data);
 }
 
 async function readBody(req) {
@@ -394,14 +417,15 @@ async function refreshGooglePing() {
 
 function sendGooglePingCache(req,res,value) {
   cors(req,res);
-  res.writeHead(Number(value.httpStatus||200),{
-    'Content-Type':value.contentType||'application/json; charset=utf-8',
-    'Cache-Control':'no-store',
-    'X-DG-Ping-Cache':'HIT',
-    'X-DG-Ping-Age':String(Math.max(0,Math.floor((Date.now()-new Date(value.checkedAt).getTime())/1000))),
-    'X-Content-Type-Options':'nosniff'
-  });
-  return res.end(value.raw);
+  return sendApiBody(
+    req,res,Number(value.httpStatus||200),
+    value.contentType||'application/json; charset=utf-8',
+    value.raw,
+    {
+      'X-DG-Ping-Cache':'HIT',
+      'X-DG-Ping-Age':String(Math.max(0,Math.floor((Date.now()-new Date(value.checkedAt).getTime())/1000)))
+    }
+  );
 }
 
 async function handlePing(req,res) {
@@ -562,14 +586,13 @@ async function proxyLegacy(req, res, body) {
   const cached = await readCachedResponse(action, body);
   if (cached) {
     cors(req,res);
-    res.writeHead(cached.httpStatus,{
-      'Content-Type':'application/json; charset=utf-8',
-      'Cache-Control':'no-store',
-      'X-DG-Cache':'HIT',
-      'X-DG-Cache-Age':String(Math.max(0,Math.floor((Date.now()-new Date(cached.createdAt).getTime())/1000))),
-      'X-Content-Type-Options':'nosniff'
-    });
-    return res.end(cached.responseText);
+    return sendApiBody(
+      req,res,cached.httpStatus,'application/json; charset=utf-8',cached.responseText,
+      {
+        'X-DG-Cache':'HIT',
+        'X-DG-Cache-Age':String(Math.max(0,Math.floor((Date.now()-new Date(cached.createdAt).getTime())/1000)))
+      }
+    );
   }
   let upstream, raw, parsed = null;
   const upstreamStartedAt = Date.now();
@@ -599,12 +622,11 @@ async function proxyLegacy(req, res, body) {
       ).catch(e=>console.error('legacy action log failed',e.message));
     }
     cors(req,res);
-    res.writeHead(upstream.status,{
-      'Content-Type':upstream.headers.get('content-type')||'application/json; charset=utf-8',
-      'Cache-Control':'no-store',
-      'X-Content-Type-Options':'nosniff'
-    });
-    return res.end(raw);
+    return sendApiBody(
+      req,res,upstream.status,
+      upstream.headers.get('content-type')||'application/json; charset=utf-8',
+      raw
+    );
   } catch (e) {
     if (pool) {
       pool.query(
