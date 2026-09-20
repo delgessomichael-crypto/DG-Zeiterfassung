@@ -3,7 +3,7 @@
   "name": "DG Zeiterfassung 9.0",
   "short_name": "DG 9.0",
   "description": "DG Zeiterfassung 9.0 - Del Gesso Gebäudetechnik",
-  "start_url": "./",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "display_override": [
