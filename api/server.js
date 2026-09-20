@@ -4783,6 +4783,22 @@ async function mirrorInquiryWrite(action,body,parsed){
         read_flag=true,offer_id=$4,changed_at_text=$5,changed_by=$6,shadow_updated_at=now() WHERE id=$1`,
       [id,String(body.customer||''),String(body.phone||''),String(data.offerId||''),now,by]
     );
+  }else if(action==='saveManualOrder'){
+    const inquiryId=String(body.item&&body.item.inquiryId||'');
+    if(inquiryId&&!/^AQON:/.test(inquiryId)){
+      await pool.query(
+        `UPDATE customer_inquiries_shadow SET status='Übernommen',read_flag=true,
+          changed_at_text=$2,changed_by=$3,shadow_updated_at=now() WHERE id=$1`,
+        [inquiryId,now,by]
+      );
+    }
+  }else if(action==='planRequest3'&&String(body.kind||'')==='inquiry'){
+    const inquiryId=String(body.id||'');if(!inquiryId)return;
+    await pool.query(
+      `UPDATE customer_inquiries_shadow SET status=$2,read_flag=true,
+        changed_at_text=$3,changed_by=$4,shadow_updated_at=now() WHERE id=$1`,
+      [inquiryId,body.offer?'Besichtigung geplant':'Termin geplant',now,by]
+    );
   }
 }
 
@@ -4898,12 +4914,35 @@ async function mirrorInquiryOfferWrite(action,body,parsed){
       `INSERT INTO inquiry_offers_shadow(
         offer_id,inquiry_id,customer,phone,email,description,source,created_at_text,status,
         changed_at_text,changed_by,calendar_event_id,shadow_updated_at
-      ) VALUES($1,$2,$3,$4,'','','',now()::text,'Offen',now()::text,$5,'',now())
+      )
+      SELECT $1,$2,$3,$4,COALESCE(email,''),COALESCE(description,subject,''),COALESCE(source,''),
+             now()::text,'Offen',now()::text,$5,'',now()
+        FROM customer_inquiries_shadow WHERE id=$2
       ON CONFLICT(offer_id) DO UPDATE SET
         inquiry_id=EXCLUDED.inquiry_id,customer=EXCLUDED.customer,phone=EXCLUDED.phone,
+        email=EXCLUDED.email,description=EXCLUDED.description,source=EXCLUDED.source,
         status='Offen',changed_at_text=now()::text,changed_by=EXCLUDED.changed_by,shadow_updated_at=now()`,
       [id,String(body.id||''),String(body.customer||''),String(body.phone||''),String(body.employee||'')]
     );
+  }else if(['setRegieReportsOfferStatus','saveOfferCreatedWithReminder','moveOfferBackToCreate',
+             'declineOfferFromReminder','acceptOfferFromReminder'].includes(action)){
+    const offerId=String(data.offerId||body.offerId||'').trim();if(!offerId)return;
+    let status='';
+    if(action==='setRegieReportsOfferStatus'){
+      const s=String(data.status||body.offerStatus||'');
+      status=s==='Offenes Angebot'?'Offen':s==='Angebot Angenommen'?'Angenommen':
+             s==='Angebot Abgelehnt'?'Abgelehnt':s==='Angebot zu erstellen'?'Zu erstellen':'';
+    }else if(action==='saveOfferCreatedWithReminder')status='Offen';
+    else if(action==='moveOfferBackToCreate')status='Zu erstellen';
+    else if(action==='declineOfferFromReminder')status='Abgelehnt';
+    else if(action==='acceptOfferFromReminder'&&!body.asRunning)status='Angenommen';
+    if(status){
+      await pool.query(
+        `UPDATE inquiry_offers_shadow SET status=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now()
+          WHERE offer_id=$1`,
+        [offerId,status,new Date().toISOString(),String(body.employee||'')]
+      );
+    }
   }
 }
 
@@ -4943,7 +4982,30 @@ async function mirrorOfferReminderWrite(action, body, parsed) {
   const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
   if (!data || data.ok===false) return;
   const now=new Date().toISOString();
-  if (action==='saveOfferCreatedWithReminder') {
+  if (action==='inquiryToOffer') {
+    const id=String(data.reminderId||'').trim(),offerId=String(data.offerId||'').trim();
+    if(!id||!offerId)return;
+    const q=await pool.query(
+      'SELECT customer,phone,email,description,subject FROM customer_inquiries_shadow WHERE id=$1',
+      [String(body.id||'')]
+    );
+    const x=q.rows[0]||{};
+    const due=new Date();due.setUTCDate(due.getUTCDate()+5);
+    await pool.query(
+      `INSERT INTO offer_reminders_shadow(
+        id,offer_id,customer,offer_number,phone,email,description,created_at_text,
+        due_date_text,status,result,changed_at_text,changed_by,shadow_updated_at
+      ) VALUES($1,$2,$3,'Anfrage',$4,$5,$6,$7,$8,'Offen','',$7,$9,now())
+      ON CONFLICT(id) DO UPDATE SET
+        offer_id=EXCLUDED.offer_id,customer=EXCLUDED.customer,offer_number=EXCLUDED.offer_number,
+        phone=EXCLUDED.phone,email=EXCLUDED.email,description=EXCLUDED.description,
+        due_date_text=EXCLUDED.due_date_text,status='Offen',result='',
+        changed_at_text=EXCLUDED.changed_at_text,changed_by=EXCLUDED.changed_by,shadow_updated_at=now()`,
+      [id,offerId,String(x.customer||body.customer||''),String(x.phone||body.phone||''),
+       String(x.email||''),String(x.description||x.subject||''),now,berlinDateOnly(due),
+       String(body.employee||'')]
+    );
+  } else if (action==='saveOfferCreatedWithReminder') {
     const item=body.item||{},id=String(data.reminderId||'').trim();
     if(!id) return;
     await pool.query(
@@ -6543,7 +6605,8 @@ async function proxyLegacy(req, res, body) {
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['updateCustomerInquiry','saveCustomerInquiryNote','completeCustomerInquiry','deleteCustomerInquiry',
-           'saveCustomerInquiryContact','archiveCustomerInquiry','rejectCustomerInquiry','inquiryToOffer'].includes(action)) {
+           'saveCustomerInquiryContact','archiveCustomerInquiry','rejectCustomerInquiry','inquiryToOffer',
+           'saveManualOrder','planRequest3'].includes(action)) {
         mirrorInquiryWrite(action,body,parsed).catch(e=>console.error('customer inquiry shadow mirror failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
@@ -6555,11 +6618,13 @@ async function proxyLegacy(req, res, body) {
         mirrorOwnReminderWrite(action,body,parsed).catch(e=>console.error('own reminder shadow mirror failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
-          ['saveOfferCreatedWithReminder','rescheduleOfferReminder','declineOfferFromReminder','acceptOfferFromReminder','moveOfferBackToCreate','acceptOfferAsRunning'].includes(action)) {
+          ['inquiryToOffer','saveOfferCreatedWithReminder','rescheduleOfferReminder','declineOfferFromReminder',
+           'acceptOfferFromReminder','moveOfferBackToCreate','acceptOfferAsRunning'].includes(action)) {
         mirrorOfferReminderWrite(action,body,parsed).catch(e=>console.error('offer reminder shadow mirror failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
-          ['createInspectionOffer','inquiryToOffer'].includes(action)) {
+          ['createInspectionOffer','inquiryToOffer','setRegieReportsOfferStatus','saveOfferCreatedWithReminder',
+           'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder'].includes(action)) {
         mirrorInquiryOfferWrite(action,body,parsed).catch(e=>console.error('inquiry offer shadow mirror failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
