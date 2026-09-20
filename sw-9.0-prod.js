@@ -1,9 +1,9 @@
 /* DG Zeiterfassung 9.0 production service worker */
-const CACHE='dg-zeiterfassung-9.0-prod-20260920-6';
+const CACHE='dg-zeiterfassung-9.0-prod-20260920-7';
 const STATIC=[
   './launcher-9.0.js?v=20260920-900-launch3',
   './app-5.0.css?v=20260918-800-prod1',
-  './app-9.0.js?v=20260920-900-prod4',
+  './app-9.0.js?v=20260920-900-parity1',
   './dg_icon_192.png',
   './dg_icon_512.png',
   './manifest.json'
