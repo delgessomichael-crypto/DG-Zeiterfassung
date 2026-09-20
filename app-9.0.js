@@ -10,9 +10,9 @@
 'use strict';
 const V='9.0';
 function stamp(){
-  if(document.title!=='DG Zeiterfassung '+V)document.title='DG Zeiterfassung '+V;
-  document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim())&&x.textContent!=='Version '+V)x.textContent='Version '+V;});
-  document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(x.textContent||'')&&x.textContent!=='Zeiterfassung - '+V)x.textContent='Zeiterfassung - '+V;});
+  if(document.title!=='DG Zeiterfassung '+V)document.title='DG Zeiterfassung 9.0';
+  document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim())&&x.textContent!=='Version '+V)x.textContent='Version 9.0';});
+  document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(x.textContent||'')&&x.textContent!=='Zeiterfassung - '+V)x.textContent='Zeiterfassung - 9.0';});
   try{window.DG_APP_VERSION=V;window.DG_RELEASE=V;if(window.DG3)DG3.version=V;}catch(_e){}
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',stamp,{once:true});else stamp();
@@ -2996,7 +2996,7 @@ function installDayRenderer520(){if(window.__dg520DayWrapped)return;const old=wi
 function installPayrollUi520(){addCss520();installAdminWrappers520();makePayrollSection520();ensureCorrectionModal520();installDayRenderer520();const sync=()=>{if(byId('dg520Year')&&byId('bossYear'))byId('dg520Year').value=byId('bossYear').value;if(byId('dg520Month')&&byId('bossMonth'))byId('dg520Month').value=byId('bossMonth').value;updateDue520(currentAudit520)};if(byId('bossYear')&&!byId('bossYear').dataset.dg520){byId('bossYear').dataset.dg520='1';byId('bossYear').addEventListener('change',sync)}if(byId('bossMonth')&&!byId('bossMonth').dataset.dg520){byId('bossMonth').dataset.dg520='1';byId('bossMonth').addEventListener('change',sync)}}
 const oldLoadBossMonth520=window.loadBossMonth;if(typeof oldLoadBossMonth520==='function')window.loadBossMonth=async function(){const r=await oldLoadBossMonth520.apply(this,arguments);if(byId('dg520PayrollClose')){byId('dg520Year').value=byId('bossYear').value;byId('dg520Month').value=byId('bossMonth').value;updateDue520(currentAudit520)}return r};
 window.d3CheckBackend=d3CheckBackend=async function(force){try{if(force)sessionStorage.removeItem('dg51_backend');const cached=JSON.parse(sessionStorage.getItem('dg51_backend')||'null');if(!force&&cached&&cached.version&&Date.now()-Number(cached.ts||0)<1800000){const p=String(cached.version).split('.').map(Number),ok=p[0]>5||(p[0]===5&&p[1]>=2);if(ok){DG3.backend=String(cached.version);byId('d3Notice')?.remove();return true}}}catch(_e){}try{const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]>5||(p[0]===5&&p[1]>=2);DG3.backend=ok?found:'';if(ok){try{sessionStorage.setItem('dg51_backend',JSON.stringify({ts:Date.now(),version:found}))}catch(_e){}byId('d3Notice')?.remove();return true}d3Notice('App 5.2.5 benötigt Google-GS 5.2.0.2 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');return false}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false}};
-function versionLabels520(){document.title='DG Zeiterfassung 5.2.0';document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent))x.textContent='Zeiterfassung - 5.2.0'});document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test(x.textContent.trim()))x.textContent='Version 5.2.0'});try{DG3.version=V520;window.DG_APP_VERSION=V520}catch(_e){}try{sessionStorage.removeItem('dg51_backend')}catch(_e){}}
+function versionLabels520(){document.title='DG Zeiterfassung 9.0';document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent))x.textContent='Zeiterfassung - 9.0'});document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test(x.textContent.trim()))x.textContent='Version 9.0'});try{DG3.version=V520;window.DG_APP_VERSION=V520}catch(_e){}try{sessionStorage.removeItem('dg51_backend')}catch(_e){}}
 function boot520(){versionLabels520();installPayrollUi520();setTimeout(installPayrollUi520,200);setTimeout(installPayrollUi520,900)}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot520);else boot520();
 })();
 ;
@@ -3110,7 +3110,7 @@ function installOpenDayPatch521(){
 function applyFixes521(){addCss521();ensureDeleteModal521();ensurePayrollTile521();fixMaintenanceAndAdmin521();installDayRenderer521();installOpenDayPatch521();}
 const oldInstallOffice521=window.d3InstallOffice;if(typeof oldInstallOffice521==='function')window.d3InstallOffice=function(){const r=oldInstallOffice521.apply(this,arguments);setTimeout(applyFixes521,0);return r};
 let observer521Timer=0;const observer521=new MutationObserver(()=>{clearTimeout(observer521Timer);observer521Timer=setTimeout(()=>{ensurePayrollTile521();fixMaintenanceAndAdmin521();},120);});
-function boot521(){applyFixes521();const root=q521('bossView');if(root)observer521.observe(root,{childList:true,subtree:true});setTimeout(applyFixes521,250);setTimeout(applyFixes521,1200);setInterval(ensurePayrollTile521,3600000);document.title='DG Zeiterfassung '+V521;document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version '+V521});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - '+V521});try{if(window.DG3)DG3.version=V521;window.DG_APP_VERSION=V521}catch(_e){}}
+function boot521(){applyFixes521();const root=q521('bossView');if(root)observer521.observe(root,{childList:true,subtree:true});setTimeout(applyFixes521,250);setTimeout(applyFixes521,1200);setInterval(ensurePayrollTile521,3600000);document.title='DG Zeiterfassung 9.0';document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version 9.0'});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - 9.0'});try{if(window.DG3)DG3.version=V521;window.DG_APP_VERSION=V521}catch(_e){}}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot521);else boot521();
 })();
 
@@ -3168,7 +3168,7 @@ window.dg522ReviewOne=async function(issueEncoded,empEncoded,date){const issueId
 window.dg522ReleaseEmployee=async function(empEncoded){const employee=decodeURIComponent(empEncoded),issues=employeeIssues522(employee),openIssues=issues.filter(x=>!x.reviewed),p=period522();if(!openIssues.length)return false;if(!confirm(employee+': '+openIssues.length+' Auffälligkeit'+(openIssues.length===1?'':'en')+' als geprüft und korrekt bestätigen?'))return false;try{for(const x of openIssues){await api(chefPayload({action:'markPayrollIssueReviewed',issueId:x.id,targetEmployee:employee,year:p.year,month:p.month,date:x.date||'',note:'Mitarbeiter geprüft / freigegeben in Tagesübersicht'}));rememberReviewed522(x.id)}await refreshAudit522();if(typeof d3Notice==='function')d3Notice('✓ '+employee+' geprüft und freigegeben.','ok')}catch(e){if(typeof d3Notice==='function')d3Notice(e.message,'error');else alert(e.message)}return false};
 function installRenderer522(){if(window.__dg522RendererWrapped||typeof window.renderBossDayClosuresV48!=='function')return;window.__dg522RendererWrapped=true;const old=window.renderBossDayClosuresV48;window.renderBossDayClosuresV48=function(rows){const r=old.apply(this,arguments);lastRows522=rows||[];setTimeout(()=>refreshAudit522(rows),0);return r}}
 function installMonthSelectors522(){['dg48DayYear','dg48DayMonth'].forEach(id=>{const el=$522(id);if(!el||el.dataset.dg522==='1')return;el.dataset.dg522='1';el.addEventListener('change',()=>setTimeout(()=>refreshAudit522(),0))})}
-function boot522(){addCss522();installRenderer522();installMonthSelectors522();document.title='DG Zeiterfassung '+V522;document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version '+V522});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - '+V522});try{if(window.DG3)DG3.version=V522;window.DG_APP_VERSION=V522}catch(_e){}setTimeout(installMonthSelectors522,500)}
+function boot522(){addCss522();installRenderer522();installMonthSelectors522();document.title='DG Zeiterfassung 9.0';document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version 9.0'});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - 9.0'});try{if(window.DG3)DG3.version=V522;window.DG_APP_VERSION=V522}catch(_e){}setTimeout(installMonthSelectors522,500)}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot522);else boot522();
 })();
 
@@ -3252,7 +3252,7 @@ window.d3Sync=d3Sync=async function(force){
 const showBoss525=window.showBoss;
 if(typeof showBoss525==='function')window.showBoss=showBoss=function(){clearStaleReadNotice();return showBoss525.apply(this,arguments)};
 
-function stamp525(){document.title='DG Zeiterfassung '+V525;document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version '+V525});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - '+V525});try{DG3.version=V525;window.DG_APP_VERSION=V525}catch(_e){}}
+function stamp525(){document.title='DG Zeiterfassung 9.0';document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version 9.0'});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - 9.0'});try{DG3.version=V525;window.DG_APP_VERSION=V525}catch(_e){}}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',stamp525);else stamp525();
 })();
 
@@ -3273,7 +3273,7 @@ const parts=v=>String(v||'').split('.').map(x=>Number(x)||0);
 const backendOk=v=>{const p=parts(v);return (p[0]||0)>=6||(p[0]===5&&p[1]===2&&p[2]===0&&(p[3]||0)>=8);};
 const backend60=v=>(parts(v)[0]||0)>=6;
 
-function stamp(){document.title='DG Zeiterfassung '+V;document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version '+V;});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - '+V;});try{DG3.version=V;window.DG_APP_VERSION=V;}catch(_e){}}
+function stamp(){document.title='DG Zeiterfassung 9.0';document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version 9.0';});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - 9.0';});try{DG3.version=V;window.DG_APP_VERSION=V;}catch(_e){}}
 function css(){if(q('dg60Css'))return;const s=document.createElement('style');s.id='dg60Css';s.textContent='.dg60-count{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;padding:0 7px;margin-left:7px;border-radius:999px;background:#e2e8f0;color:#334155;font-size:12px;font-weight:900}.dg60-rem-ok{margin-top:8px;padding:8px 10px;border-radius:10px;background:#f0fdf4;color:#166534;font-size:12px;font-weight:800}.dg60-rem-warn{margin-top:8px;padding:8px 10px;border-radius:10px;background:#fff7ed;color:#9a3412;font-size:12px;font-weight:800}#dg60OfficeToolbar{display:flex;justify-content:flex-end;margin:0 0 14px;padding:10px 12px;border:1px solid #d7dee8;border-radius:14px;background:#f8fafc}#dg60OpenWindow{border:0;border-radius:11px;padding:11px 16px;background:#1f5f36;color:#fff;font-weight:800;cursor:pointer}@media(max-width:700px){#dg60OpenWindow{width:100%}}';document.head.appendChild(s);}
 
 /* Ein Backend-Ping hoechstens alle 30 Minuten. 5.2.0.8 bleibt waehrend der Umstellung kompatibel. */
@@ -3414,11 +3414,11 @@ function addCss60(){
 }
 
 function setVisibleVersion60(){
-  document.title='DG Zeiterfassung '+V60;
+  document.title='DG Zeiterfassung 9.0';
   const loginVersion=document.querySelector('#loginScreen .center.muted.small');
-  if(loginVersion)loginVersion.textContent='Version '+V60;
+  if(loginVersion)loginVersion.textContent='Version 9.0';
   const heroVersion=document.querySelector('#mainScreen .hero .head-row strong');
-  if(heroVersion)heroVersion.textContent='Zeiterfassung - '+V60;
+  if(heroVersion)heroVersion.textContent='Zeiterfassung - 9.0';
   try{window.DG_APP_VERSION=V60;if(window.DG3)window.DG3.version=V60;}catch(_e){}
 }
 
@@ -3617,12 +3617,12 @@ function stamp(){
   if(stamping)return;
   stamping=true;
   try{
-    if(document.title!=='DG Zeiterfassung '+V)document.title='DG Zeiterfassung '+V;
+    if(document.title!=='DG Zeiterfassung '+V)document.title='DG Zeiterfassung 9.0';
     document.querySelectorAll('.login-card .muted.small,#loginScreen .center.muted.small').forEach(x=>{
-      if(/^Version /.test((x.textContent||'').trim())&&x.textContent!=='Version '+V)x.textContent='Version '+V;
+      if(/^Version /.test((x.textContent||'').trim())&&x.textContent!=='Version '+V)x.textContent='Version 9.0';
     });
     document.querySelectorAll('.hero strong,#mainScreen .hero .head-row strong').forEach(x=>{
-      if(/Zeiterfassung/.test(x.textContent||'')&&x.textContent!=='Zeiterfassung - '+V)x.textContent='Zeiterfassung - '+V;
+      if(/Zeiterfassung/.test(x.textContent||'')&&x.textContent!=='Zeiterfassung - '+V)x.textContent='Zeiterfassung - 9.0';
     });
     try{window.DG_APP_VERSION=V;if(window.DG3)DG3.version=V;}catch(_e){}
   }finally{stamping=false;}
@@ -3792,9 +3792,9 @@ const TOKEN_KEY='dg_device_session';
 function $(id){return document.getElementById(id);}
 function isBoss(){try{return localStorage.getItem('dg_chef_access')==='1';}catch(_e){return false;}}
 function stamp(){
-  document.title='DG Zeiterfassung '+V;
-  document.querySelectorAll('.login-card .muted.small').forEach(function(x){if(/^Version\s+/i.test((x.textContent||'').trim()))x.textContent='Version '+V;});
-  document.querySelectorAll('.hero strong').forEach(function(x){if(/Zeiterfassung/i.test(x.textContent||''))x.textContent='Zeiterfassung - '+V;});
+  document.title='DG Zeiterfassung 9.0';
+  document.querySelectorAll('.login-card .muted.small').forEach(function(x){if(/^Version\s+/i.test((x.textContent||'').trim()))x.textContent='Version 9.0';});
+  document.querySelectorAll('.hero strong').forEach(function(x){if(/Zeiterfassung/i.test(x.textContent||''))x.textContent='Zeiterfassung - 9.0';});
   try{window.DG_APP_VERSION=V;window.DG_RELEASE=V;if(window.DG3)DG3.version=V;}catch(_e){}
 }
 function clearOldCaches(){try{['dg60_backend','dg602_backend','dg51_backend'].forEach(function(k){sessionStorage.removeItem(k);});}catch(_e){}}
@@ -5120,9 +5120,9 @@ const basePayroll=window.makePayrollSection520;
 if(typeof basePayroll==='function')window.makePayrollSection520=function(){const r=basePayroll.apply(this,arguments);paintDue();return r;};
 
 function stamp(){
-  document.title='DG Zeiterfassung '+V;
-  document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim()))x.textContent='Version '+V;});
-  document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(x.textContent||''))x.textContent='Zeiterfassung - '+V;});
+  document.title='DG Zeiterfassung 9.0';
+  document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim()))x.textContent='Version 9.0';});
+  document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(x.textContent||''))x.textContent='Zeiterfassung - 9.0';});
   try{window.DG_APP_VERSION=V;window.DG_RELEASE=V;if(window.DG3)DG3.version=V;}catch(_e){}
 }
 function install(){
@@ -8446,12 +8446,12 @@ const S=window.DG9_RUNTIME=window.DG9_RUNTIME||{booted:false,lastAuto:0,syncProm
 
 function byId(id){return document.getElementById(id);}
 function stamp(){
-  document.title='DG Zeiterfassung '+VERSION;
+  document.title='DG Zeiterfassung 9.0';
   document.querySelectorAll('.login-card .muted.small').forEach(function(x){
-    if(/^Version\s+/i.test(String(x.textContent||'').trim()))x.textContent='Version '+VERSION;
+    if(/^Version\s+/i.test(String(x.textContent||'').trim()))x.textContent='Version 9.0';
   });
   document.querySelectorAll('.hero strong').forEach(function(x){
-    if(/Zeiterfassung/i.test(String(x.textContent||'')))x.textContent='Zeiterfassung - '+VERSION;
+    if(/Zeiterfassung/i.test(String(x.textContent||'')))x.textContent='Zeiterfassung - 9.0';
   });
   try{window.DG_APP_VERSION=VERSION;window.DG_RELEASE=VERSION;if(window.DG3)DG3.version=VERSION;}catch(_e){}
 }
