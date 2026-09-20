@@ -4698,9 +4698,23 @@ async function getEmployeesFromSnapshot() {
   return names;
 }
 
+
+function directMinimumWageRead(body){
+  const date=berlinDateOnly(body&&body.date||new Date());
+  const table=[
+    {from:'2025-01-01',amount:12.82},
+    {from:'2026-01-01',amount:13.90},
+    {from:'2027-01-01',amount:14.60}
+  ];
+  let current=null;
+  for(const row of table)if(row.from<=date&&(!current||row.from>current.from))current=row;
+  return current?{date,from:current.from,amount:Number(current.amount)||0}:{date,from:'',amount:0};
+}
+
 async function proxyLegacy(req, res, body) {
   const action = String(body && body.action || '');
   if (action === 'ping') return handlePing(req,res);
+  if (action === 'getMinimumWage') return json(res,200,{ok:true,data:directMinimumWageRead(body),source:'postgres-static'},req);
   if (action === 'getEmployees') {
     try {
       const dirty = await isEmployeeSnapshotDirty();
