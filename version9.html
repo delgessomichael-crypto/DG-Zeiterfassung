@@ -14,7 +14,7 @@
 <link rel="preconnect" href="https://script.google.com"/>
 <link rel="dns-prefetch" href="//script.google.com"/>
 <link rel="preload" href="./app-5.0.css?v=20260918-800-prod1" as="style"/>
-<link rel="preload" href="./app-9.0.js?v=20260920-900-prod1" as="script"/>
+<link rel="preload" href="./app-9.0.js?v=20260920-900-prod2" as="script"/>
 <link rel="manifest" href="manifest.json"/>
 <link href="dg_icon_192.png" rel="icon"/>
 <link href="dg_icon_192.png" rel="apple-touch-icon"/>
@@ -51,7 +51,7 @@
 </div>
 <div class="hero">
 <img alt="Del Gesso Gebäudetechnik" class="logo" src="dg_icon_512.png"/>
-<div class="head-row"><div><strong>Zeiterfassung - 8.0</strong><br/><span id="employeeLabel"></span></div><button class="btn danger" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
+<div class="head-row"><div><strong>Zeiterfassung - 9.0</strong><br/><span id="employeeLabel"></span></div><button class="btn danger" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
 </div>
 <div class="tabs"><button class="tab active" id="employeeTab" onclick="showEmployee()">Mitarbeiter</button><button class="tab boss-tab" id="bossTab" onclick="showBoss()">Büro</button></div>
 <section id="employeeView">
@@ -237,13 +237,13 @@
 (function(){
   if(!('serviceWorker' in navigator))return;
   window.addEventListener('load',function(){
-    navigator.serviceWorker.register('./sw-9.0-prod.js?v=20260920-900-prod2',{updateViaCache:'none'})
+    navigator.serviceWorker.register('./sw-9.0-prod.js?v=20260920-900-prod3',{updateViaCache:'none'})
       .then(function(r){return r.update();})
       .catch(function(e){console.warn('DG Offline-Cache nicht bereit',e);});
   },{once:true});
 })();
 </script>
 
-<script defer src="./app-9.0.js?v=20260920-900-prod1"></script>
+<script defer src="./app-9.0.js?v=20260920-900-prod2"></script>
 </body>
 </html>
