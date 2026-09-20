@@ -2977,28 +2977,46 @@ window.d3CheckBackend=d3CheckBackend=async function(force){
   try{const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]>5||(p[0]===5&&p[1]>=1);DG3.backend=ok?found:'';if(ok){sset51('dg51_backend',{ts:now51(),version:found});$('d3Notice')?.remove();return true;}d3Notice('App 5.2.5 benötigt Google-GS 5.2.0.2.2 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');return false;}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false;}
 };
 
-/* Keine Wrapper-Kaskade mehr beim Hauptstart: nur wirklich benoetigte Daten. */
+/* Keine Wrapper-Kaskade mehr beim Hauptstart: nur wirklich benoetigte Daten.
+   DG 9.0 FINAL: aktive Hauptansicht wird dauerhaft gespeichert und bei Reload wiederhergestellt. */
+const DG90_MAIN_VIEW='dg90_main_view';
+function dg90SaveMainView(view){
+  try{
+    localStorage.setItem(DG90_MAIN_VIEW,view);
+    localStorage.setItem('dg60_view',view);
+    sessionStorage.setItem('dg60_view',view);
+  }catch(_e){}
+}
+function dg90ReadMainView(){
+  try{
+    return localStorage.getItem(DG90_MAIN_VIEW)||localStorage.getItem('dg60_view')||sessionStorage.getItem('dg60_view')||localStorage.getItem('dg530_view')||sessionStorage.getItem('dg530_view')||'employee';
+  }catch(_e){return 'employee';}
+}
 window.showEmployee=showEmployee=function(){
   const wasBoss=$('bossView')&&!$('bossView').classList.contains('hidden');
+  dg90SaveMainView('employee');
   $('employeeView').classList.remove('hidden');$('bossView').classList.add('hidden');$('employeeTab').classList.add('active');$('bossTab').classList.remove('active');
   setTimeout(()=>{if(typeof d35InstallInspectionButton==='function')d35InstallInspectionButton();},0);
   if(wasBoss&&navigator.onLine)Promise.allSettled([loadDay(false),loadCalendarEvents(false)]);
 };
 window.showBoss=showBoss=function(){
-  if(!canAccessBoss()){showEmployee();setMessage('entryStatus','Kein Zugriff auf Büro.','error');return;}
+  if(!canAccessBoss()){dg90SaveMainView('employee');showEmployee();setMessage('entryStatus','Kein Zugriff auf Büro.','error');return;}
+  dg90SaveMainView('boss');
   $('employeeView').classList.add('hidden');$('bossView').classList.remove('hidden');$('employeeTab').classList.remove('active');$('bossTab').classList.add('active');
   const c=jget51('dg51_dashboard');if(c&&c.data)renderDashboard51(c.data);
   if(navigator.onLine){if(!DG3.backend)d3CheckBackend(false);d3Dashboard(false);}
 };
 window.openMain=openMain=function(){
-  const a=auth();$('loginScreen').classList.add('hidden');$('mainScreen').classList.remove('hidden');$('employeeLabel').textContent='Angemeldet: '+a.employee;$('date').value=localDate();$('bossTab').classList.toggle('hidden',!canAccessBoss());
-  $('employeeView').classList.remove('hidden');$('bossView').classList.add('hidden');$('employeeTab').classList.add('active');$('bossTab').classList.remove('active');
+  const a=auth();$('loginScreen').classList.add('hidden');$('mainScreen').classList.remove('hidden');$('employeeLabel').textContent='Angemeldet: '+a.employee;$('date').value=localDate();
+  const bossAllowed=canAccessBoss();$('bossTab').classList.toggle('hidden',!bossAllowed);
+  const wanted=dg90ReadMainView();
+  if(bossAllowed&&wanted==='boss')showBoss();else showEmployee();
   DG3.reports={};DG3.inquiries=[];DG3.orders=[];$('regieResult')?.replaceChildren();$('d3RunningList')?.replaceChildren();
   if(!DG3.backend)d3CheckBackend(false);
   if(!employeeDirectory.length)loadEmployeeDirectory(false);
   requestAnimationFrame(()=>{if(customerPad)customerPad.resize();if(employeePad)employeePad.resize();});
   updateConnection();
-  Promise.allSettled([loadDay(false),loadCalendarEvents(false)]);
+  if(wanted!=='boss'||!bossAllowed)Promise.allSettled([loadDay(false),loadCalendarEvents(false)]);
   setTimeout(()=>{if(typeof d35InstallInspectionButton==='function')d35InstallInspectionButton();},0);
 };
 
