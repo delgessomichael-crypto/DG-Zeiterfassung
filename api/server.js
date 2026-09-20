@@ -297,6 +297,24 @@ CREATE TABLE IF NOT EXISTS vacation_entitlements_shadow (
   PRIMARY KEY(employee_name,vacation_year)
 );
 
+CREATE TABLE IF NOT EXISTS time_bank_shadow (
+  id TEXT PRIMARY KEY,
+  employee_name TEXT NOT NULL,
+  hours NUMERIC(10,2) NOT NULL DEFAULT 0,
+  booking_type TEXT,
+  booking_year INTEGER NOT NULL DEFAULT 0,
+  booking_month INTEGER NOT NULL DEFAULT 0,
+  reference TEXT,
+  reason TEXT,
+  created_at_text TEXT,
+  created_iso TEXT,
+  created_by TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS time_bank_shadow_employee_idx
+  ON time_bank_shadow(employee_name);
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
@@ -347,6 +365,7 @@ async function initDb() {
   await initMaintenanceShadows();
   await initAbsencesShadow();
   await initVacationEntitlementsShadow();
+  await initTimeBankShadow();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -951,6 +970,94 @@ function shadowActive(raw){
 }
 
 
+
+
+async function initTimeBankShadow(){
+  if(!pool)return;
+  const existing=await pool.query('SELECT COUNT(*)::int AS n FROM time_bank_shadow');
+  if((existing.rows[0]?.n||0)>0)return;
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:Zeitguthaben']
+  );
+  let inserted=0;
+  for(const row of q.rows){
+    const payload=row.payload||{};
+    if(Number(payload.sourceRow||row.source_key)<=1)continue;
+    const cells=Array.isArray(payload.cells)?payload.cells:[];
+    const id=textCell(cells,0).trim();if(!id)continue;
+    await pool.query(
+      `INSERT INTO time_bank_shadow(
+        id,employee_name,hours,booking_type,booking_year,booking_month,reference,reason,
+        created_at_text,created_by
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      ON CONFLICT(id) DO NOTHING`,
+      [id,textCell(cells,1),Number(textCell(cells,2))||0,textCell(cells,3),
+       Number(textCell(cells,4))||0,Number(textCell(cells,5))||0,textCell(cells,6),
+       textCell(cells,7),textCell(cells,8),textCell(cells,9)]
+    );
+    inserted++;
+  }
+  console.log('SHADOW time_bank initialized rows='+inserted);
+}
+
+async function replaceTimeBankEmployeeShadow(data){
+  if(!pool||!data||!data.employee||!Array.isArray(data.transactions))return;
+  const employee=String(data.employee);
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    await client.query('DELETE FROM time_bank_shadow WHERE employee_name=$1',[employee]);
+    for(const t of data.transactions){
+      const id=String(t&&t.id||'').trim();if(!id)continue;
+      await client.query(
+        `INSERT INTO time_bank_shadow(
+          id,employee_name,hours,booking_type,booking_year,booking_month,reference,reason,
+          created_at_text,created_iso,created_by,shadow_updated_at
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())`,
+        [id,employee,Number(t.hours)||0,String(t.art||''),Number(t.year)||0,Number(t.month)||0,
+         String(t.reference||''),String(t.reason||''),String(t.createdAt||''),
+         String(t.createdIso||''),String(t.createdBy||'')]
+      );
+    }
+    await client.query('COMMIT');
+  }catch(e){
+    await client.query('ROLLBACK');throw e;
+  }finally{client.release();}
+}
+
+async function verifyTimeBankShadow(data){
+  if(!pool||!data||!data.employee||!Array.isArray(data.transactions))return;
+  const employee=String(data.employee);
+  const q=await pool.query(
+    `SELECT id,hours,booking_type,booking_year,booking_month,reference,reason,created_by
+       FROM time_bank_shadow WHERE employee_name=$1`,
+    [employee]
+  );
+  const pg=new Map(q.rows.map(r=>[String(r.id),r]));
+  let mismatches=0;const seen=new Set();
+  for(const t of data.transactions){
+    const id=normalizeShadowText(t&&t.id);if(!id){mismatches++;continue;}
+    seen.add(id);const p=pg.get(id);if(!p){mismatches++;continue;}
+    const same=
+      Math.abs(Number(t.hours||0)-Number(p.hours||0))<0.01 &&
+      normalizeShadowText(t.art)===normalizeShadowText(p.booking_type) &&
+      Number(t.year||0)===Number(p.booking_year||0) &&
+      Number(t.month||0)===Number(p.booking_month||0) &&
+      normalizeShadowText(t.reference)===normalizeShadowText(p.reference) &&
+      normalizeShadowText(t.reason)===normalizeShadowText(p.reason) &&
+      normalizeShadowText(t.createdBy)===normalizeShadowText(p.created_by);
+    if(!same)mismatches++;
+  }
+  for(const id of pg.keys())if(!seen.has(id))mismatches++;
+  const googleBalance=Math.max(0,data.transactions.reduce((s,t)=>s+Number(t.hours||0),0));
+  const pgBalance=Math.max(0,q.rows.reduce((s,t)=>s+Number(t.hours||0),0));
+  if(Math.abs(Number(data.balance||0)-googleBalance)>=0.01)mismatches++;
+  if(Math.abs(Number(data.balance||0)-pgBalance)>=0.01)mismatches++;
+  console.log('SHADOW_VERIFY time_bank employee_rows='+data.transactions.length+' postgres='+pg.size+' mismatches='+mismatches);
+  await saveShadowVerifyStat('time_bank',data.transactions.length,pg.size,mismatches);
+}
 
 async function initVacationEntitlementsShadow(){
   if(!pool)return;
@@ -1964,6 +2071,11 @@ async function proxyLegacy(req, res, body) {
         if (action==='getAbsences') verifyAbsencesShadow(verifyData).catch(e=>console.error('absence shadow verify failed',e.message));
         if (action==='getVacationAccount') verifyVacationAccountShadow(verifyData).catch(e=>console.error('vacation entitlement shadow verify failed',e.message));
         if (action==='getVacationAccounts') verifyVacationAccountsShadow(verifyData,body.year).catch(e=>console.error('vacation entitlements shadow verify failed',e.message));
+        if (action==='getTimeBankAccount') {
+          replaceTimeBankEmployeeShadow(verifyData)
+            .then(()=>verifyTimeBankShadow(verifyData))
+            .catch(e=>console.error('time bank shadow refresh failed',e.message));
+        }
       }
       if (isCacheableAction(action)) {
         writeCachedResponse(action, body, raw, upstream.status).catch(e=>console.error('response cache write failed',e.message));
@@ -2089,7 +2201,8 @@ async function health() {
         pool.query('SELECT COUNT(*)::int AS n FROM maintenance_repairs_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM maintenance_manual_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM absences_shadow'),
-        pool.query('SELECT COUNT(*)::int AS n FROM vacation_entitlements_shadow')
+        pool.query('SELECT COUNT(*)::int AS n FROM vacation_entitlements_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM time_bank_shadow')
       ]);
       shadowCounts = {
         manualOrders: counts[0].rows[0]?.n||0,
@@ -2103,7 +2216,8 @@ async function health() {
         maintenanceRepairs: counts[8].rows[0]?.n||0,
         maintenanceManual: counts[9].rows[0]?.n||0,
         absences: counts[10].rows[0]?.n||0,
-        vacationEntitlements: counts[11].rows[0]?.n||0
+        vacationEntitlements: counts[11].rows[0]?.n||0,
+        timeBank: counts[12].rows[0]?.n||0
       };
       const verifyQ=await pool.query(
         'SELECT shadow_name,google_count,postgres_count,mismatches,checked_at FROM shadow_verify_stats ORDER BY shadow_name'
@@ -2141,6 +2255,7 @@ async function health() {
     maintenanceShadow: pool ? 'enabled' : 'disabled',
     absencesShadow: pool ? 'enabled' : 'disabled',
     vacationEntitlementsShadow: pool ? 'enabled' : 'disabled',
+    timeBankShadow: pool ? 'enabled' : 'disabled',
     shadowCounts,
     shadowVerify,
     writeStats
@@ -2271,7 +2386,7 @@ initDb()
     console.log('MIGRATION VERIFY: sheets='+sheets.length+' sourceRows='+sourceRows+' importedRows='+importedRows+' mismatches='+mismatches.length+(mismatches.length?' ['+mismatches.join(', ')+']':''));
     const h = await health();
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
-    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements);
+    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank);
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
   })
