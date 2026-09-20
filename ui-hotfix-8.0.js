@@ -2903,3 +2903,109 @@ function install(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
+
+
+/* DG Zeiterfassung 8.0 - UI Hotfix 28
+   Wartungskunden: nächste Wartung in "Alle Kunden", zusätzliche Kundensuche
+   neben Geräte-ID und einheitlich blaue Wartungsnavigation. */
+(function(){
+'use strict';
+const V='8.0-ui28';
+const q=id=>document.getElementById(id);
+const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const MONTHS=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+
+function dueLabel(v){
+  const m=/^(\d{4})-(\d{2})$/.exec(String(v||''));
+  return m?MONTHS[Math.max(0,Math.min(11,Number(m[2])-1))]+' '+m[1]:String(v||'');
+}
+function nextDueFromCustomer(c){
+  const dues=[];
+  (c&&c.objects||[]).forEach(o=>(o.devices||[]).forEach(d=>{
+    const v=String(d&&d.nextMaintenanceDue||'').trim();
+    if(/^\d{4}-\d{2}$/.test(v))dues.push(v);
+  }));
+  dues.sort();
+  return dues[0]||'';
+}
+async function fetchCustomer(id){
+  if(typeof window.api!=='function')throw new Error('Backend nicht bereit.');
+  const p={action:'getMaintenanceCustomer',id:String(id||''),force:true};
+  return window.api(typeof window.chefPayload==='function'?window.chefPayload(p):p);
+}
+async function decorateAllCustomers(){
+  const host=q('d50MaintenanceAll');if(!host)return;
+  const rows=[...host.querySelectorAll('.d50-customer-row[data-id]')];
+  if(!rows.length)return;
+  const queue=rows.slice();let cursor=0;
+  async function worker(){
+    while(cursor<queue.length){
+      const row=queue[cursor++];if(!row||row.dataset.dg28Due==='1')continue;
+      row.dataset.dg28Due='1';
+      let due='';
+      try{due=nextDueFromCustomer(await fetchCustomer(row.dataset.id));}catch(_e){}
+      let box=row.querySelector('.dg28-next-due');
+      if(!box){box=document.createElement('span');box.className='dg28-next-due';row.appendChild(box);}
+      box.innerHTML=due?'<b>Nächste Wartung:</b> '+esc(dueLabel(due)):'<b>Nächste Wartung:</b> nicht hinterlegt';
+    }
+  }
+  await Promise.all([worker(),worker(),worker()]);
+}
+function wrapAllCustomers(){
+  const base=window.d50OpenAllCustomers;if(typeof base!=='function'||base.__dg28)return false;
+  const wrapped=async function(){
+    const r=await base.apply(this,arguments);
+    await decorateAllCustomers();
+    return r;
+  };
+  wrapped.__dg28=true;window.d50OpenAllCustomers=wrapped;return true;
+}
+
+function ensureCustomerSearch(){
+  const top=q('d39MaintenanceTop');if(!top||q('dg28CustomerSearch'))return;
+  const device=top.querySelector('.d39-id-search');
+  const box=document.createElement('div');box.id='dg28CustomerSearch';box.className='d39-id-search dg28-customer-search';
+  box.innerHTML='<label for="dg28CustomerQuery">Kunde suchen</label><div><input id="dg28CustomerQuery" placeholder="Name, Ort oder Adresse"><button type="button" id="dg28CustomerSearchBtn" class="btn primary">Suchen</button></div><div id="dg28CustomerSearchResult"></div>';
+  if(device)device.insertAdjacentElement('afterend',box);else top.appendChild(box);
+  const run=async()=>{
+    const host=q('dg28CustomerSearchResult'),query=String(q('dg28CustomerQuery')?.value||'').trim();
+    if(!host)return;
+    if(!query){host.innerHTML='<div class="status warn">Bitte einen Kundennamen oder Suchbegriff eingeben.</div>';return;}
+    host.innerHTML='<div class="status info">Kunden werden gesucht …</div>';
+    try{
+      const p={action:'searchMaintenanceCustomers',query,force:true};
+      const rows=await window.api(typeof window.chefPayload==='function'?window.chefPayload(p):p);
+      host.innerHTML=(rows||[]).map(x=>'<button type="button" class="dg28-customer-hit" data-id="'+esc(x.id)+'"><strong>'+esc(x.name||'')+'</strong><span>'+Number(x.objectCount||0)+' Objekt(e) · '+Number(x.deviceCount||0)+' Gerät(e)</span><small>'+esc(x.billingCity||'')+'</small></button>').join('')||'<div class="status warn">Kein Wartungskunde gefunden.</div>';
+      host.querySelectorAll('.dg28-customer-hit').forEach(b=>b.addEventListener('click',async()=>{
+        if(typeof window.d37MaintenanceTab==='function')window.d37MaintenanceTab('manage');
+        if(typeof window.d37OpenCustomer==='function')await window.d37OpenCustomer(b.dataset.id);
+      }));
+    }catch(e){host.innerHTML='<div class="status error">'+esc(e&&e.message?e.message:e)+'</div>';}
+  };
+  q('dg28CustomerSearchBtn')?.addEventListener('click',run);
+  q('dg28CustomerQuery')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();run();}});
+}
+function css(){
+  if(q('dg28Css'))return;
+  const s=document.createElement('style');s.id='dg28Css';
+  s.textContent=''
+   +'#d37MaintenanceNav button{background:#31589e!important;border-color:#31589e!important;color:#fff!important;font-weight:900!important}'
+   +'#d37MaintenanceNav button:hover{background:#27467f!important;border-color:#27467f!important;color:#fff!important}'
+   +'#d37MaintenanceNav button.active{background:#1f3f7d!important;border-color:#1f3f7d!important;color:#fff!important;box-shadow:0 0 0 2px rgba(49,88,158,.18)!important}'
+   +'.dg28-next-due{display:block!important;margin-top:5px!important;font-size:14px!important;color:#31589e!important;font-weight:700!important}'
+   +'.dg28-customer-search{margin-top:12px!important}'
+   +'.dg28-customer-hit{display:grid!important;grid-template-columns:minmax(220px,1.5fr) minmax(180px,1fr) minmax(120px,.7fr)!important;gap:14px!important;width:100%!important;text-align:left!important;align-items:center!important;padding:12px 14px!important;margin-top:8px!important;border:1px solid #d7deea!important;border-radius:12px!important;background:#fff!important;color:#111827!important}'
+   +'.dg28-customer-hit:hover{background:#eef4ff!important;border-color:#9cb4e7!important}'
+   +'.dg28-customer-hit strong{color:#111827!important}.dg28-customer-hit span,.dg28-customer-hit small{color:#64748b!important}'
+   +'@media(max-width:700px){.dg28-customer-hit{grid-template-columns:1fr!important}}';
+  document.head.appendChild(s);
+}
+function enforce(){css();wrapAllCustomers();ensureCustomerSearch();if(q('d50MaintenanceAll')&&!q('d50MaintenanceAll')?.classList.contains('hidden'))decorateAllCustomers();}
+function install(){
+  enforce();
+  const mo=new MutationObserver(()=>setTimeout(enforce,0));
+  mo.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class']});
+  document.documentElement.dataset.dgUi28=V;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+})();
