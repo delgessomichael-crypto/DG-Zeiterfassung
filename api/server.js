@@ -2138,8 +2138,8 @@ async function upsertTimeEntryFromRegie(r){
       transmitted_at_text,material_used,material,customer_signature_url,photo_count,
       photo_file_ids,photo_urls,billing_status,billed_at_text,billed_by,object_id,
       job_status,is_supplement,supplement_created_at_text,maintenance,next_maintenance_due,
-      shadow_updated_at
-    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,now())
+      offer_id,offer_changed_at_text,offer_changed_by,shadow_updated_at
+    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,now())
     ON CONFLICT(id) DO UPDATE SET
       employee_name=EXCLUDED.employee_name,entry_date=EXCLUDED.entry_date,
       customer=EXCLUDED.customer,start_time=EXCLUDED.start_time,end_time=EXCLUDED.end_time,
@@ -2152,6 +2152,9 @@ async function upsertTimeEntryFromRegie(r){
       job_status=EXCLUDED.job_status,is_supplement=EXCLUDED.is_supplement,
       supplement_created_at_text=EXCLUDED.supplement_created_at_text,
       maintenance=EXCLUDED.maintenance,next_maintenance_due=EXCLUDED.next_maintenance_due,
+      offer_id=CASE WHEN EXCLUDED.offer_id<>'' THEN EXCLUDED.offer_id ELSE time_entries_shadow.offer_id END,
+      offer_changed_at_text=CASE WHEN EXCLUDED.offer_changed_at_text<>'' THEN EXCLUDED.offer_changed_at_text ELSE time_entries_shadow.offer_changed_at_text END,
+      offer_changed_by=CASE WHEN EXCLUDED.offer_changed_by<>'' THEN EXCLUDED.offer_changed_by ELSE time_entries_shadow.offer_changed_by END,
       shadow_updated_at=now()`,
     [String(r.id),String(r.employee||''),String(r.date||''),String(r.customer||''),
      String(r.start||''),String(r.end||''),Number(r.hours)||0,String(r.activity||''),
@@ -2160,7 +2163,8 @@ async function upsertTimeEntryFromRegie(r){
      String(r.photoFileIds||''),String(r.photoUrls||''),String(r.status||r.billingStatus||'Offen'),
      String(r.billedAt||''),String(r.billedBy||''),String(r.objectId||''),
      String(r.jobStatus||'Abgeschlossen'),Boolean(r.isSupplement),String(r.supplementCreatedAt||''),
-     Boolean(r.maintenance),String(r.nextMaintenanceDue||'')]
+     Boolean(r.maintenance),String(r.nextMaintenanceDue||''),String(r.offerId||''),
+     String(r.offerChangedAt||r.changedAt||''),String(r.offerChangedBy||r.changedBy||'')]
   );
 }
 
@@ -2175,6 +2179,52 @@ async function syncTimeEntriesFromRegieRead(data){
   for(const r of reports)await upsertTimeEntryFromRegie(r);
   if(reports.length)console.log('SHADOW_REFRESH time_entries_regie rows='+reports.length);
 }
+
+async function syncTimeEntriesFromOfferRead(groups){
+  if(!pool||!Array.isArray(groups))return;
+  let count=0;
+  for(const g of groups){
+    const offerId=String(g&&g.offerId||'');
+    const groupStatus=String(g&&g.offerStatus||g&&g.status||'');
+    for(const r of (Array.isArray(g&&g.reports)?g.reports:[])){
+      const mappedStatus=String(r.offerStatus||groupStatus||'Angebot zu erstellen');
+      await upsertTimeEntryFromRegie({
+        ...r,
+        offerId,
+        jobStatus:mappedStatus,
+        billingStatus:r.billingStatus||r.status||'Offen',
+        offerChangedAt:g.changedAt||r.changedAt||'',
+        offerChangedBy:g.changedBy||r.changedBy||''
+      });
+      if(r.objectId)await upsertObjectShadow(r.objectId,r.customer||g.customer||'');
+      count++;
+    }
+
+    if(offerId){
+      const normalizedStatus=
+        groupStatus==='Angebot zu erstellen'?'Zu erstellen':
+        groupStatus==='Offenes Angebot'?'Offen':
+        groupStatus==='Angebot Angenommen'?'Angenommen':
+        groupStatus==='Angebot Abgelehnt'?'Abgelehnt':
+        groupStatus==='Laufend'?'Laufend':
+        groupStatus==='Verworfen'?'Verworfen':groupStatus;
+      await pool.query(
+        `UPDATE inquiry_offers_shadow SET
+          customer=CASE WHEN $2<>'' THEN $2 ELSE customer END,
+          phone=CASE WHEN $3<>'' THEN $3 ELSE phone END,
+          email=CASE WHEN $4<>'' THEN $4 ELSE email END,
+          description=CASE WHEN $5<>'' THEN $5 ELSE description END,
+          status=CASE WHEN $6<>'' THEN $6 ELSE status END,
+          shadow_updated_at=now()
+          WHERE offer_id=$1`,
+        [offerId,String(g.customer||''),String(g.phone||''),String(g.email||''),
+         String(g.description||''),normalizedStatus]
+      );
+    }
+  }
+  if(count)console.log('SHADOW_REFRESH time_entries_offer rows='+count);
+}
+
 
 async function mirrorTimeEntryWrite(action,body,parsed){
   if(!pool)return;
@@ -6971,7 +7021,11 @@ async function proxyLegacy(req, res, body) {
             .catch(e=>console.error('inquiry reminders shadow refresh/verify failed',e.message));
         }
         if (action==='getOfferReminders') verifyOfferRemindersShadow(verifyData,Boolean(body.includeDone)).catch(e=>console.error('offer reminder shadow verify failed',e.message));
-        if (action==='getOfferReports') saveExactViewShadow('getOfferReports',offerReportsViewKey(body),verifyData).catch(e=>console.error('offer reports exact view save failed',e.message));
+        if (action==='getOfferReports') {
+          syncTimeEntriesFromOfferRead(verifyData)
+            .then(()=>saveExactViewShadow('getOfferReports',offerReportsViewKey(body),verifyData))
+            .catch(e=>console.error('offer reports shadow refresh/save failed',e.message));
+        }
         if (action==='getOfferStatistics') saveExactViewShadow('getOfferStatistics',offerStatisticsViewKey(),verifyData).catch(e=>console.error('offer statistics exact view save failed',e.message));
         if (action==='getPlannerWorkers') verifyPlannerWorkersShadow(verifyData).catch(e=>console.error('planner worker shadow verify failed',e.message));
         if (action==='getPlannerAvailability') verifyPlannerAvailabilityShadow(verifyData,body).catch(e=>console.error('planner availability shadow verify failed',e.message));
