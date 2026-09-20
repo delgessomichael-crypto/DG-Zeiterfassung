@@ -3,7 +3,7 @@
 (function(){
 'use strict';
 const V='9.0';
-const BACKEND='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
+const BACKEND='https://dg-app-10-api-production.up.railway.app/';
 const $=id=>document.getElementById(id);
 let resultObserver=null,installing=false;
 
