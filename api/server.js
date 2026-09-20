@@ -2131,8 +2131,9 @@ async function mirrorTimeEntryWrite(action,body,parsed){
     return;
   }
 
-  if(action==='markRegieObjectsBilled'){
-    const ids=Array.isArray(data.objectIds)?data.objectIds.map(String):[];
+  if(action==='markRegieObjectsBilled'||action==='markRegieObjectBilled'){
+    const ids=Array.isArray(data.objectIds)?data.objectIds.map(String):
+      [String(data.objectId||body.objectId||'')].filter(Boolean);
     if(ids.length){
       await pool.query(
         `UPDATE time_entries_shadow SET
@@ -2144,7 +2145,7 @@ async function mirrorTimeEntryWrite(action,body,parsed){
     return;
   }
 
-  if(action==='setRegieObjectJobStatus'){
+  if(action==='setRegieObjectJobStatus'||action==='markRegieObjectCompleted'){
     const ids=Array.isArray(data.objectIds)?data.objectIds.map(String):
       [String(data.objectId||body.objectId||'')].filter(Boolean);
     if(ids.length){
@@ -2347,6 +2348,30 @@ async function mirrorDayClosureWrite(action,body,parsed){
     await upsertDayClosureShadow(body.employee,body.date,{
       closed:true,grossTotal:data.total,pauseMinutes:data.pauseMinutes,netTotal:data.netTotal!==undefined?data.netTotal:data.total
     },'Tagesabschluss');
+  }else if(action==='manualCloseBossDay'){
+    if(data.alreadyClosed)return;
+    const employee=String(data.employee||body.targetEmployee||'').trim();
+    const date=String(data.date||body.date||'').trim();
+    if(!employee||!date)return;
+    const [own,assigned]=await Promise.all([
+      pool.query(
+        'SELECT COALESCE(SUM(hours),0)::numeric AS h FROM time_entries_shadow WHERE employee_name=$1 AND entry_date=$2',
+        [employee,date]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(a.hours),0)::numeric AS h
+           FROM assignments_shadow a
+           JOIN time_entries_shadow t ON t.id=a.source_entry_id
+          WHERE a.employee_name=$1 AND COALESCE(a.status,'Zugeordnet')<>'Ersetzt' AND t.entry_date=$2`,
+        [employee,date]
+      )
+    ]);
+    const gross=Math.round((Number(own.rows[0]?.h||0)+Number(assigned.rows[0]?.h||0))*100)/100;
+    const pause=gross>=6?1:0;
+    await upsertDayClosureShadow(employee,date,{
+      closed:true,grossTotal:gross,pauseMinutes:Math.round(pause*60),
+      netTotal:Number(data.total!==undefined?data.total:Math.max(0,gross-pause))
+    },'Büro: manueller Abschluss durch '+String(body.employee||''));
   }else if(action==='refreshClosedDay'){
     await upsertDayClosureShadow(body.employee,body.date,data,'Nachtrag / Tagesabschluss aktualisiert');
   }
@@ -6157,7 +6182,7 @@ async function proxyLegacy(req, res, body) {
           .catch(e=>console.error('planner availability status readiness invalidate failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
-          ['closeDay','refreshClosedDay'].includes(action)) {
+          ['closeDay','refreshClosedDay','manualCloseBossDay'].includes(action)) {
         mirrorDayClosureWrite(action,body,parsed).catch(e=>console.error('day closure shadow mirror failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'day_data:%'")
           .catch(e=>console.error('day data closure readiness invalidate failed',e.message));
@@ -6168,7 +6193,7 @@ async function proxyLegacy(req, res, body) {
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['saveEntry','deleteEntry','updateEmployeeEntry','updateBossDayEntry','deleteBossDayEntry','markRegieReportBilled',
-           'updateRegieReport','markRegieObjectsBilled','setRegieObjectJobStatus','setRegieReportsOfferStatus',
+           'updateRegieReport','markRegieObjectsBilled','markRegieObjectBilled','setRegieObjectJobStatus','markRegieObjectCompleted','setRegieReportsOfferStatus',
            'moveOfferBackToCreate','saveOfferCreatedWithReminder','acceptOfferAsRunning','discardOfferPermanently'].includes(action)) {
         mirrorTimeEntryWrite(action,body,parsed).catch(e=>console.error('time entries shadow mirror failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'week_data:%'")
