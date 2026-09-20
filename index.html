@@ -14,7 +14,7 @@
 <link rel="preconnect" href="https://dg-app-10-api-production.up.railway.app"/>
 <link rel="dns-prefetch" href="//dg-app-10-api-production.up.railway.app"/>
 <link rel="preload" href="./app-5.0.css?v=20260918-800-prod1" as="style"/>
-<link rel="preload" href="./core-9.0-final.js?v=20260920-900-final3" as="script"/>
+<link rel="preload" href="./core-9.0-final.js?v=20260920-900-final3" as="script" fetchpriority="high"/>
 <link rel="manifest" href="manifest.json"/>
 <link href="dg_icon_192.png" rel="icon"/>
 <link href="dg_icon_192.png" rel="apple-touch-icon"/>
@@ -24,7 +24,7 @@
 <div class="screen" id="loginScreen">
 <div class="login-wrap">
 <div class="login-card">
-<img alt="Del Gesso Gebäudetechnik" class="logo" src="dg_icon_512.png"/>
+<img alt="Del Gesso Gebäudetechnik" class="logo" src="dg_icon_192.png"/>
 <h2 class="center">Mitarbeiter-Anmeldung</h2><div class="center muted small" style="margin-top:-8px;margin-bottom:10px">Version 9.0</div>
 <div class="status" id="loginNet"></div>
 <label for="loginEmployee">Mitarbeiter</label>
@@ -50,7 +50,7 @@
 <div class="hidden" id="queueDetails" style="margin-top:10px"></div>
 </div>
 <div class="hero">
-<img alt="Del Gesso Gebäudetechnik" class="logo" src="dg_icon_512.png"/>
+<img alt="Del Gesso Gebäudetechnik" class="logo" src="dg_icon_192.png"/>
 <div class="head-row"><div><strong>Zeiterfassung - 9.0</strong><br/><span id="employeeLabel"></span></div><button class="btn danger" onclick="logout()">Mitarbeiter ändern / abmelden</button></div>
 </div>
 <div class="tabs"><button class="tab active" id="employeeTab" onclick="showEmployee()">Mitarbeiter</button><button class="tab boss-tab" id="bossTab" onclick="showBoss()">Büro</button></div>
@@ -251,10 +251,10 @@
 })();
 </script>
 
-<script defer src="./core-9.0-final.js?v=20260920-900-final3"></script>
-<script defer src="./customerflow-9.0-final.js?v=20260920-900-final1"></script>
-<script defer src="./payroll-9.0-final.js?v=20260920-900-final1"></script>
-<script defer src="./ui-9.0-final.js?v=20260920-900-final1"></script>
+<script defer fetchpriority="high" src="./core-9.0-final.js?v=20260920-900-final3"></script>
+<script defer fetchpriority="low" src="./customerflow-9.0-final.js?v=20260920-900-final1"></script>
+<script defer fetchpriority="low" src="./payroll-9.0-final.js?v=20260920-900-final1"></script>
+<script defer fetchpriority="low" src="./ui-9.0-final.js?v=20260920-900-final1"></script>
 <script>
 (function(){
 'use strict';
