@@ -1567,6 +1567,78 @@ async function verifyObjectReportsShadow(data,body){
   console.log('SHADOW_VERIFY '+key+' google='+(a&&a.reportCount||0)+' postgres='+(b&&b.reportCount||0)+' mismatches='+mismatches);
   await saveShadowVerifyStat(key,a&&a.reportCount||0,b&&b.reportCount||0,mismatches);
 }
+
+function regieBillingRiskVerifyKey(body){
+  const ids=Array.isArray(body&&body.objectIds)?body.objectIds.map(String).filter(Boolean).sort():[];
+  return 'regie_billing_risk:'+crypto.createHash('sha256').update(ids.join('|')).digest('hex').slice(0,16);
+}
+async function postgresRegieBillingRisk(body){
+  const selectedIds=[...new Set((Array.isArray(body&&body.objectIds)?body.objectIds:[]).map(String).filter(Boolean))];
+  if(!selectedIds.length)return null;
+  const q=await pool.query(
+    `SELECT id,object_id,customer,entry_date,billing_status,job_status,source_payload,shadow_updated_at
+       FROM time_entries_shadow
+      ORDER BY CASE WHEN COALESCE(source_payload->>'sourceRow','') ~ '^[0-9]+$'
+        THEN (source_payload->>'sourceRow')::int ELSE 2147483647 END,shadow_updated_at ASC,id ASC`
+  );
+  const selectedSet=new Set(selectedIds),selectedCustomers=[];
+  for(const r of q.rows){
+    const oid=String(r.object_id||'');
+    if(!selectedSet.has(oid))continue;
+    const customer=String(r.customer||'');
+    if(customer)selectedCustomers.push(customer);
+  }
+  if(!selectedCustomers.length)return null;
+  const customerKeys=[...new Set(selectedCustomers.map(shadowObjectKey).filter(Boolean))];
+  const groups=new Map();
+  for(const r of q.rows){
+    const oid=String(r.object_id||'');
+    if(!oid||selectedSet.has(oid))continue;
+    if(String(r.billing_status||'Offen')!=='Offen')continue;
+    const customer=String(r.customer||''),key=shadowObjectKey(customer);
+    if(!key)continue;
+    const related=customerKeys.some(selectedKey=>
+      key===selectedKey || key.includes(selectedKey) || selectedKey.includes(key)
+    );
+    if(!related)continue;
+    let g=groups.get(oid);
+    if(!g){
+      g={objectId:oid,customer,jobStatus:String(r.job_status||'Abgeschlossen'),firstDate:'',lastDate:'',reportCount:0};
+      groups.set(oid,g);
+    }
+    const date=berlinDateOnly(r.entry_date);
+    if(date&&(!g.firstDate||date<g.firstDate))g.firstDate=date;
+    if(date&&(!g.lastDate||date>g.lastDate))g.lastDate=date;
+    g.reportCount++;
+    if(String(r.job_status||'Abgeschlossen')==='Laufend')g.jobStatus='Laufend';
+  }
+  return {matches:[...groups.values()]};
+}
+function canonicalRegieBillingRisk(data){
+  return {
+    matches:(Array.isArray(data&&data.matches)?data.matches:[]).map(x=>({
+      objectId:String(x.objectId||''),customer:String(x.customer||''),jobStatus:String(x.jobStatus||'Abgeschlossen'),
+      firstDate:String(x.firstDate||''),lastDate:String(x.lastDate||''),reportCount:Number(x.reportCount||0)
+    })).sort((a,b)=>a.objectId.localeCompare(b.objectId))
+  };
+}
+async function verifyRegieBillingRiskShadow(data,body){
+  if(!pool||!data)return;
+  const pg=await postgresRegieBillingRisk(body);if(!pg)return;
+  const a=canonicalRegieBillingRisk(data),b=canonicalRegieBillingRisk(pg);
+  const mismatches=JSON.stringify(a)===JSON.stringify(b)?0:1,key=regieBillingRiskVerifyKey(body);
+  console.log('SHADOW_VERIFY '+key+' google='+a.matches.length+' postgres='+b.matches.length+' mismatches='+mismatches);
+  await saveShadowVerifyStat(key,a.matches.length,b.matches.length,mismatches);
+}
+async function directRegieBillingRiskRead(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const ids=Array.isArray(body&&body.objectIds)?body.objectIds.map(String).filter(Boolean):[];
+  if(!ids.length)return null;
+  const key=regieBillingRiskVerifyKey(body);
+  if(!(await shadowReadyForDirectRead(key)))return null;
+  return postgresRegieBillingRisk(body);
+}
+
 async function directObjectReportsRead(body){
   const session=await localSessionForBody(body,true);
   if(!session)return null;
@@ -4954,6 +5026,7 @@ async function tryDirectPostgresRead(action,body){
   if(action==='findMaintenanceDeviceByInternalId')return directMaintenanceDeviceByInternalIdRead(body);
   if(action==='getObjectInternalNote')return directObjectInternalNoteRead(body);
   if(action==='getObjectInternalNotes')return directObjectInternalNotesRead(body);
+  if(action==='checkRegieBillingRisk')return directRegieBillingRiskRead(body);
   if(action==='getObjectReports')return directObjectReportsRead(body);
   if(action==='getRegieReports')return directRegieReportsRead(body);
   if(action==='getTimeBankAccount')return directTimeBankAccountRead(body);
@@ -5018,7 +5091,7 @@ async function proxyLegacy(req, res, body) {
       console.error('Postgres employee read failed; falling back to Google:', e.message);
     }
   }
-  if (['getEmployeeAdminData','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','getObjectReports','getRegieReports','getTimeBankAccount','getMyTimeBank','getVacationAccount','getVacationAccounts'].includes(action)) {
+  if (['getEmployeeAdminData','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getTimeBankAccount','getMyTimeBank','getVacationAccount','getVacationAccounts'].includes(action)) {
     try {
       const direct=await tryDirectPostgresRead(action,body);
       if (direct!==null) {
@@ -5103,6 +5176,7 @@ async function proxyLegacy(req, res, body) {
           verifyConflictReviewsShadow(verifyData,body.year,body.month).catch(e=>console.error('conflict review shadow verify failed',e.message));
         }
         if (action==='getMonthPayrollAudit') verifyPayrollProtocols(verifyData,body.year,body.month).catch(e=>console.error('payroll protocol shadow verify failed',e.message));
+        if (action==='checkRegieBillingRisk') verifyRegieBillingRiskShadow(verifyData,body).catch(e=>console.error('regie billing risk shadow verify failed',e.message));
         if (action==='getDayData') {
           syncDayStatusFromDayRead(body,verifyData).catch(e=>console.error('day status shadow day refresh failed',e.message));
           syncDayClosureFromDayRead(body,verifyData).catch(e=>console.error('day closure shadow day refresh failed',e.message));
@@ -5214,6 +5288,8 @@ async function proxyLegacy(req, res, body) {
            'updateRegieReport','markRegieObjectsBilled','setRegieObjectJobStatus','setRegieReportsOfferStatus',
            'moveOfferBackToCreate','saveOfferCreatedWithReminder','acceptOfferAsRunning','discardOfferPermanently'].includes(action)) {
         mirrorTimeEntryWrite(action,body,parsed).catch(e=>console.error('time entries shadow mirror failed',e.message));
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'regie_billing_risk:%'")
+          .catch(e=>console.error('regie billing risk readiness invalidate failed',e.message));
         invalidateShadowVerify('maintenance_contracts').catch(e=>console.error('maintenance contracts time readiness invalidate failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
@@ -5410,6 +5486,9 @@ async function health() {
         regieReportsVerified:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'regie_reports:%' AND mismatches=0"
         )).rows[0]?.n||0,
+        regieBillingRiskVerified:(await pool.query(
+          "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'regie_billing_risk:%' AND mismatches=0"
+        )).rows[0]?.n||0,
         vacationVerifiedKeys:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'vacation_full:%' AND mismatches=0"
         )).rows[0]?.n||0,
@@ -5589,7 +5668,7 @@ initDb()
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
     if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' maintenance_attachments='+h.shadowCounts.maintenanceAttachments+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus+' day_closures='+h.shadowCounts.dayClosures+' time_entries='+h.shadowCounts.timeEntries+' objects='+h.shadowCounts.objects+' regie_merges='+h.shadowCounts.regieMerges+' object_notes='+h.shadowCounts.objectNotes);
     console.log('RAILWAY_SESSIONS active='+Number(h.activeRailwaySessions||0));
-    if(h.directReadReady)console.log('DIRECT_READ_READY employee_admin='+Boolean(h.directReadReady.employeeAdmin)+' manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders)+' offer_reminders='+Boolean(h.directReadReady.offerReminders)+' planner_workers='+Boolean(h.directReadReady.plannerWorkers)+' planner_availability='+Number(h.directReadReady.plannerAvailabilityVerified||0)+' absences='+Boolean(h.directReadReady.absences)+' absence_overview='+Number(h.directReadReady.absenceOverviewVerified||0)+' sickness_alerts='+Boolean(h.directReadReady.sicknessAlerts)+' maintenance_search_queries='+Number(h.directReadReady.maintenanceSearchVerifiedQueries||0)+' maintenance_customers='+Number(h.directReadReady.maintenanceCustomersVerified||0)+' maintenance_contracts='+Boolean(h.directReadReady.maintenanceContracts)+' maintenance_overview='+Boolean(h.directReadReady.maintenanceOverview)+' maintenance_archive_queries='+Number(h.directReadReady.maintenanceArchiveVerifiedQueries||0)+' maintenance_device_ids='+Number(h.directReadReady.maintenanceDeviceIdsVerified||0)+' object_note_reads='+Number(h.directReadReady.objectNoteReadsVerified||0)+' object_reports='+Number(h.directReadReady.objectReportsVerified||0)+' regie_reports='+Number(h.directReadReady.regieReportsVerified||0)+' vacation_keys='+Number(h.directReadReady.vacationVerifiedKeys||0)+' timebank_employees='+Number(h.directReadReady.timeBankVerifiedEmployees||0)+' my_timebank_employees='+Number(h.directReadReady.myTimeBankVerifiedEmployees||0));
+    if(h.directReadReady)console.log('DIRECT_READ_READY employee_admin='+Boolean(h.directReadReady.employeeAdmin)+' manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders)+' offer_reminders='+Boolean(h.directReadReady.offerReminders)+' planner_workers='+Boolean(h.directReadReady.plannerWorkers)+' planner_availability='+Number(h.directReadReady.plannerAvailabilityVerified||0)+' absences='+Boolean(h.directReadReady.absences)+' absence_overview='+Number(h.directReadReady.absenceOverviewVerified||0)+' sickness_alerts='+Boolean(h.directReadReady.sicknessAlerts)+' maintenance_search_queries='+Number(h.directReadReady.maintenanceSearchVerifiedQueries||0)+' maintenance_customers='+Number(h.directReadReady.maintenanceCustomersVerified||0)+' maintenance_contracts='+Boolean(h.directReadReady.maintenanceContracts)+' maintenance_overview='+Boolean(h.directReadReady.maintenanceOverview)+' maintenance_archive_queries='+Number(h.directReadReady.maintenanceArchiveVerifiedQueries||0)+' maintenance_device_ids='+Number(h.directReadReady.maintenanceDeviceIdsVerified||0)+' object_note_reads='+Number(h.directReadReady.objectNoteReadsVerified||0)+' object_reports='+Number(h.directReadReady.objectReportsVerified||0)+' regie_reports='+Number(h.directReadReady.regieReportsVerified||0)+' regie_billing_risk='+Number(h.directReadReady.regieBillingRiskVerified||0)+' vacation_keys='+Number(h.directReadReady.vacationVerifiedKeys||0)+' timebank_employees='+Number(h.directReadReady.timeBankVerifiedEmployees||0)+' my_timebank_employees='+Number(h.directReadReady.myTimeBankVerifiedEmployees||0));
     if(Array.isArray(h.shadowReadiness)&&h.shadowReadiness.length)console.log('SHADOW_READINESS '+h.shadowReadiness.map(x=>x.shadowName+'='+x.status+'('+x.mismatches+')').join(' | '));
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
