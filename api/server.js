@@ -268,6 +268,25 @@ CREATE TABLE IF NOT EXISTS maintenance_manual_shadow (
   shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS absences_shadow (
+  id TEXT PRIMARY KEY,
+  employee_name TEXT,
+  absence_type TEXT,
+  start_date TEXT,
+  end_date TEXT,
+  created_at_text TEXT,
+  created_by TEXT,
+  active BOOLEAN NOT NULL DEFAULT true,
+  sickness_case_id TEXT,
+  sickness_mode TEXT,
+  employer_pay_through TEXT,
+  payer TEXT,
+  sickness_case_days INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
+  credited_hours NUMERIC(10,2) NOT NULL DEFAULT 0,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
@@ -316,6 +335,7 @@ async function initDb() {
   await initPlannerWorkersShadow();
   await initPlannerEventsShadow();
   await initMaintenanceShadows();
+  await initAbsencesShadow();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -917,6 +937,89 @@ function textCell(cells,index) {
 function shadowActive(raw){
   const s=String(raw==null?'':raw).trim().toLowerCase();
   return !['nein','no','false','0','inaktiv'].includes(s);
+}
+
+
+async function initAbsencesShadow(){
+  if(!pool)return;
+  const existing=await pool.query('SELECT COUNT(*)::int AS n FROM absences_shadow');
+  if((existing.rows[0]?.n||0)>0)return;
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:Abwesenheiten']
+  );
+  let inserted=0;
+  for(const row of q.rows){
+    const payload=row.payload||{};
+    if(Number(payload.sourceRow||row.source_key)<=1)continue;
+    const cells=Array.isArray(payload.cells)?payload.cells:[];
+    const id=textCell(cells,0).trim();if(!id)continue;
+    await pool.query(
+      `INSERT INTO absences_shadow(
+        id,employee_name,absence_type,start_date,end_date,created_at_text,created_by,active,
+        sickness_case_id,sickness_mode,employer_pay_through,payer,sickness_case_days,note
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+      ON CONFLICT(id) DO NOTHING`,
+      [id,textCell(cells,1),textCell(cells,2),textCell(cells,3),textCell(cells,4),
+       textCell(cells,5),textCell(cells,6),shadowActive(textCell(cells,7)),
+       textCell(cells,8),textCell(cells,9),textCell(cells,10),textCell(cells,11),
+       Math.max(0,Number(textCell(cells,12))||0),textCell(cells,13)]
+    );
+    inserted++;
+  }
+  console.log('SHADOW absences initialized rows='+inserted);
+}
+
+async function mirrorAbsenceWrite(action,body,parsed){
+  if(!pool)return;
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if(!data||data.ok===false)return;
+  if(action==='saveAbsence'){
+    const id=String(data.id||'').trim();if(!id)return;
+    await pool.query(
+      `INSERT INTO absences_shadow(
+        id,employee_name,absence_type,start_date,end_date,created_at_text,created_by,active,credited_hours,shadow_updated_at
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,now())
+      ON CONFLICT(id) DO UPDATE SET
+        employee_name=EXCLUDED.employee_name,absence_type=EXCLUDED.absence_type,
+        start_date=EXCLUDED.start_date,end_date=EXCLUDED.end_date,
+        created_by=EXCLUDED.created_by,active=true,credited_hours=EXCLUDED.credited_hours,
+        shadow_updated_at=now()`,
+      [id,String(body.targetEmployee||''),String(body.type||''),String(body.startDate||''),
+       String(body.endDate||''),new Date().toISOString(),String(body.employee||''),
+       Number(data.creditedHours||0)]
+    );
+  }else if(action==='deleteAbsence'){
+    await pool.query(
+      'UPDATE absences_shadow SET active=false,shadow_updated_at=now() WHERE id=$1',
+      [String(body.id||'')]
+    );
+  }
+}
+
+async function verifyAbsencesShadow(rows){
+  if(!pool||!Array.isArray(rows))return;
+  const q=await pool.query(
+    `SELECT id,employee_name,absence_type,start_date,end_date,credited_hours
+       FROM absences_shadow WHERE active=true`
+  );
+  const pg=new Map(q.rows.map(r=>[String(r.id),r]));
+  let mismatches=0;const seen=new Set();
+  for(const r of rows){
+    const id=normalizeShadowText(r&&r.id);if(!id){mismatches++;continue;}
+    seen.add(id);const p=pg.get(id);if(!p){mismatches++;continue;}
+    const same=
+      normalizeShadowText(r.employee)===normalizeShadowText(p.employee_name) &&
+      normalizeShadowText(r.type)===normalizeShadowText(p.absence_type) &&
+      normalizeShadowText(r.start)===normalizeShadowText(p.start_date) &&
+      normalizeShadowText(r.end)===normalizeShadowText(p.end_date) &&
+      Math.abs(Number(r.creditedHours||0)-Number(p.credited_hours||0))<0.01;
+    if(!same)mismatches++;
+  }
+  for(const id of pg.keys())if(!seen.has(id))mismatches++;
+  console.log('SHADOW_VERIFY absences google='+rows.length+' postgres='+pg.size+' mismatches='+mismatches);
+  await saveShadowVerifyStat('absences',rows.length,pg.size,mismatches);
 }
 
 async function initMaintenanceShadows() {
@@ -1756,6 +1859,7 @@ async function proxyLegacy(req, res, body) {
         if (action==='getPlannerWorkers') verifyPlannerWorkersShadow(verifyData).catch(e=>console.error('planner worker shadow verify failed',e.message));
         if (action==='getPlannerEvents') verifyPlannerEventsShadow(verifyData).catch(e=>console.error('planner event shadow verify failed',e.message));
         if (action==='getMaintenanceCustomer') verifyMaintenanceCustomerShadow(verifyData).catch(e=>console.error('maintenance customer shadow verify failed',e.message));
+        if (action==='getAbsences') verifyAbsencesShadow(verifyData).catch(e=>console.error('absence shadow verify failed',e.message));
       }
       if (isCacheableAction(action)) {
         writeCachedResponse(action, body, raw, upstream.status).catch(e=>console.error('response cache write failed',e.message));
@@ -1790,6 +1894,10 @@ async function proxyLegacy(req, res, body) {
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['saveMaintenanceCustomer','deleteMaintenanceCustomer','deleteMaintenanceDevice','addMaintenanceRepair','addManualMaintenanceCount'].includes(action)) {
         mirrorMaintenanceWrite(action,body,parsed).catch(e=>console.error('maintenance shadow mirror failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false &&
+          ['saveAbsence','deleteAbsence'].includes(action)) {
+        mirrorAbsenceWrite(action,body,parsed).catch(e=>console.error('absence shadow mirror failed',e.message));
       }
       pool.query(
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
@@ -1872,7 +1980,8 @@ async function health() {
         pool.query('SELECT COUNT(*)::int AS n FROM maintenance_objects_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM maintenance_devices_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM maintenance_repairs_shadow'),
-        pool.query('SELECT COUNT(*)::int AS n FROM maintenance_manual_shadow')
+        pool.query('SELECT COUNT(*)::int AS n FROM maintenance_manual_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM absences_shadow')
       ]);
       shadowCounts = {
         manualOrders: counts[0].rows[0]?.n||0,
@@ -1884,7 +1993,8 @@ async function health() {
         maintenanceObjects: counts[6].rows[0]?.n||0,
         maintenanceDevices: counts[7].rows[0]?.n||0,
         maintenanceRepairs: counts[8].rows[0]?.n||0,
-        maintenanceManual: counts[9].rows[0]?.n||0
+        maintenanceManual: counts[9].rows[0]?.n||0,
+        absences: counts[10].rows[0]?.n||0
       };
       const verifyQ=await pool.query(
         'SELECT shadow_name,google_count,postgres_count,mismatches,checked_at FROM shadow_verify_stats ORDER BY shadow_name'
@@ -1920,6 +2030,7 @@ async function health() {
     plannerWorkersShadow: pool ? 'enabled' : 'disabled',
     plannerEventsShadow: pool ? 'enabled' : 'disabled',
     maintenanceShadow: pool ? 'enabled' : 'disabled',
+    absencesShadow: pool ? 'enabled' : 'disabled',
     shadowCounts,
     shadowVerify,
     writeStats
@@ -2050,7 +2161,7 @@ initDb()
     console.log('MIGRATION VERIFY: sheets='+sheets.length+' sourceRows='+sourceRows+' importedRows='+importedRows+' mismatches='+mismatches.length+(mismatches.length?' ['+mismatches.join(', ')+']':''));
     const h = await health();
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
-    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual);
+    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' absences='+h.shadowCounts.absences);
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
   })
