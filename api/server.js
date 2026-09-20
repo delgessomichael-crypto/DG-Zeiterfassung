@@ -1180,7 +1180,7 @@ async function initTimeEntriesShadow(){
       [
         id,textCell(cells,1),textCell(cells,2),textCell(cells,3),textCell(cells,4),
         textCell(cells,5),Number(textCell(cells,6))||0,textCell(cells,7),textCell(cells,8),
-        textCell(cells,9),shadowActive(textCell(cells,10)),textCell(cells,11).toLowerCase()==='ja',
+        textCell(cells,9),['true','ja','1'].includes(textCell(cells,10).trim().toLowerCase()),textCell(cells,11).toLowerCase()==='ja',
         textCell(cells,12),textCell(cells,13),textCell(cells,14),
         Math.max(0,Number(textCell(cells,15))||0),textCell(cells,16),textCell(cells,17),
         textCell(cells,18).toLowerCase()==='ja',textCell(cells,19),textCell(cells,20),
