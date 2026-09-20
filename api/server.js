@@ -408,6 +408,14 @@ const server = http.createServer(async (req, res) => {
 
 initDb()
   .then(() => importWorkbookFromUrlOnce())
+  .then(async () => {
+    const s = await migrationStatusPublic();
+    const sheets = Array.isArray(s.sheets) ? s.sheets : [];
+    const sourceRows = sheets.reduce((n,x)=>n+Number(x.source_rows||0),0);
+    const importedRows = sheets.reduce((n,x)=>n+Number(x.imported_rows||0),0);
+    const mismatches = sheets.filter(x=>Number(x.source_rows||0)!==Number(x.imported_rows||0)).map(x=>x.sheet_name);
+    console.log('MIGRATION VERIFY: sheets='+sheets.length+' sourceRows='+sourceRows+' importedRows='+importedRows+' mismatches='+mismatches.length+(mismatches.length?' ['+mismatches.join(', ')+']':''));
+  })
   .then(() => server.listen(PORT, '0.0.0.0', () => console.log('DG-App-10 API listening on ' + PORT)))
   .catch(err => {
     console.error('Database initialization failed', err);
