@@ -108,14 +108,38 @@ async function cleanupInternalData() {
   await pool.query("DELETE FROM legacy_action_log WHERE created_at < now() - interval '30 days'");
 }
 
+async function logLatencySummary() {
+  if (!pool) return;
+  const q = await pool.query(
+    `SELECT action,COUNT(*)::int AS count,
+            ROUND(AVG(duration_ms)::numeric,0)::int AS avg_ms,
+            MAX(duration_ms)::int AS max_ms
+       FROM legacy_action_log
+      WHERE created_at > now() - interval '15 minutes'
+        AND duration_ms IS NOT NULL
+      GROUP BY action
+      ORDER BY AVG(duration_ms) DESC
+      LIMIT 12`
+  );
+  if (!q.rowCount) return;
+  console.log('LATENCY15 ' + q.rows.map(r =>
+    String(r.action)+'='+String(r.avg_ms)+'ms(avg)/'+String(r.max_ms)+'ms(max)/n'+String(r.count)
+  ).join(' | '));
+}
+
 async function initDb() {
   if (!pool) return;
   await pool.query(schema);
   await cleanupInternalData();
-  const timer = setInterval(() => {
+  const cleanupTimer = setInterval(() => {
     cleanupInternalData().catch(e => console.error('internal cleanup failed', e.message));
   }, 6 * 60 * 60 * 1000);
-  if (typeof timer.unref === 'function') timer.unref();
+  if (typeof cleanupTimer.unref === 'function') cleanupTimer.unref();
+
+  const latencyTimer = setInterval(() => {
+    logLatencySummary().catch(e => console.error('latency summary failed', e.message));
+  }, 5 * 60 * 1000);
+  if (typeof latencyTimer.unref === 'function') latencyTimer.unref();
 }
 
 function cors(req, res) {
@@ -691,6 +715,7 @@ initDb()
     console.log('MIGRATION VERIFY: sheets='+sheets.length+' sourceRows='+sourceRows+' importedRows='+importedRows+' mismatches='+mismatches.length+(mismatches.length?' ['+mismatches.join(', ')+']':''));
     const h = await health();
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
+    await logLatencySummary();
   })
   .then(() => server.listen(PORT, '0.0.0.0', () => console.log('DG-App-10 API listening on ' + PORT)))
   .catch(err => {
