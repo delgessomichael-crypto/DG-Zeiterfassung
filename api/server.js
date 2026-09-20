@@ -59,6 +59,18 @@ CREATE TABLE IF NOT EXISTS migration_sheets (
   PRIMARY KEY(migration_run_id, sheet_name)
 );
 
+CREATE TABLE IF NOT EXISTS response_cache (
+  cache_key TEXT PRIMARY KEY,
+  action TEXT NOT NULL,
+  request_payload JSONB NOT NULL,
+  response_text TEXT NOT NULL,
+  http_status INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS response_cache_action_idx
+  ON response_cache(action, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS legacy_action_log (
   id BIGSERIAL PRIMARY KEY,
   action TEXT NOT NULL,
@@ -241,9 +253,87 @@ async function importWorkbookFromUrlOnce() {
   console.log('Migration snapshot imported: run '+result.runId+', '+result.totalRows+' rows');
 }
 
+const CACHEABLE_ACTIONS = new Set([
+  'getDashboardSummary',
+  'getEmployees',
+  'getOfferStatistics',
+  'getOwnReminders',
+  'getCustomerInquiries',
+  'getManualOrders',
+  'getMaintenanceOverview',
+  'getMaintenanceContracts',
+  'getPlannerWorkers',
+  'getPlannerAvailability',
+  'getPlannerEvents',
+  'getOfferReports',
+  'getOfferReminders',
+  'getObjectReports',
+  'getBossMonthData',
+  'checkRegieBillingRisk'
+]);
+
+const READ_CACHE_TTL_MS = 60 * 60 * 1000;
+
+function normalizedCachePayload(body) {
+  const clone = Object.assign({}, body || {});
+  delete clone.force;
+  delete clone.clientTs;
+  delete clone.timestamp;
+  return clone;
+}
+
+function isCacheableAction(action, body) {
+  return CACHEABLE_ACTIONS.has(action) && !(body && body.force);
+}
+
+async function readCachedResponse(action, body) {
+  if (!pool || !isCacheableAction(action, body)) return null;
+  const payload = normalizedCachePayload(body);
+  const key = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  const q = await pool.query(
+    "SELECT response_text,http_status,created_at FROM response_cache WHERE cache_key=$1 AND created_at > now() - interval '1 hour'",
+    [key]
+  );
+  if (!q.rowCount) return null;
+  return {key,responseText:q.rows[0].response_text,httpStatus:q.rows[0].http_status,createdAt:q.rows[0].created_at};
+}
+
+async function writeCachedResponse(action, body, responseText, httpStatus) {
+  if (!pool || !isCacheableAction(action, body) || Number(httpStatus)!==200) return;
+  let parsed = null;
+  try { parsed = JSON.parse(responseText); } catch (_e) { return; }
+  if (!parsed || parsed.ok === false) return;
+  const payload = normalizedCachePayload(body);
+  const key = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  await pool.query(
+    `INSERT INTO response_cache(cache_key,action,request_payload,response_text,http_status,created_at)
+     VALUES($1,$2,$3::jsonb,$4,$5,now())
+     ON CONFLICT(cache_key) DO UPDATE SET action=EXCLUDED.action,request_payload=EXCLUDED.request_payload,
+       response_text=EXCLUDED.response_text,http_status=EXCLUDED.http_status,created_at=now()`,
+    [key,action,JSON.stringify(payload),responseText,httpStatus]
+  );
+}
+
+async function invalidateReadCache() {
+  if (!pool) return;
+  await pool.query('TRUNCATE response_cache');
+}
+
 async function proxyLegacy(req, res, body) {
   if (!GOOGLE_BACKEND_URL) return json(res, 503, {ok:false,error:'Google backend not configured'}, req);
   const action = String(body && body.action || '');
+  const cached = await readCachedResponse(action, body);
+  if (cached) {
+    cors(req,res);
+    res.writeHead(cached.httpStatus,{
+      'Content-Type':'application/json; charset=utf-8',
+      'Cache-Control':'no-store',
+      'X-DG-Cache':'HIT',
+      'X-DG-Cache-Age':String(Math.max(0,Math.floor((Date.now()-new Date(cached.createdAt).getTime())/1000))),
+      'X-Content-Type-Options':'nosniff'
+    });
+    return res.end(cached.responseText);
+  }
   let upstream, raw, parsed = null;
   try {
     upstream = await fetch(GOOGLE_BACKEND_URL, {
@@ -255,6 +345,11 @@ async function proxyLegacy(req, res, body) {
     raw = await upstream.text();
     try { parsed = JSON.parse(raw); } catch (_e) {}
     if (pool) {
+      if (isCacheableAction(action, body)) {
+        writeCachedResponse(action, body, raw, upstream.status).catch(e=>console.error('response cache write failed',e.message));
+      } else if (action && action !== 'ping' && action !== 'employeeLogin') {
+        invalidateReadCache().catch(e=>console.error('response cache invalidation failed',e.message));
+      }
       pool.query(
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status)
          VALUES($1,$2::jsonb,$3,$4::jsonb,$5)`,
@@ -325,7 +420,8 @@ async function health() {
     database,
     googleBackendConfigured: Boolean(GOOGLE_BACKEND_URL),
     productionWrites: 'Google-GS-9.0',
-    postgresWrites: 'migration-shadow-only'
+    postgresWrites: 'migration-shadow-plus-read-cache',
+    readCacheTtlSeconds: READ_CACHE_TTL_MS / 1000
   };
 }
 
