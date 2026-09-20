@@ -2650,6 +2650,148 @@ async function mirrorAssignmentWrite(action,body,parsed){
 
 
 
+
+function monthDataVerifyKey(body){
+  const employee=String(body&&body.employee||''),year=Number(body&&body.year)||0,month=Number(body&&body.month)||0;
+  return employee&&year&&month?'month_data:'+employee+':'+year+'-'+String(month).padStart(2,'0'):'';
+}
+async function postgresMonthData(body){
+  const employee=String(body&&body.employee||'').trim(),year=Number(body&&body.year)||0,month=Number(body&&body.month)||0;
+  if(!employee||!year||month<1||month>12)return null;
+  const prefix=String(year)+'-'+String(month).padStart(2,'0')+'-';
+  const [own,assigned,statusQ,closureQ,adjQ,bankQ,annual]=await Promise.all([
+    pool.query(
+      `SELECT id,entry_date,customer,start_time,hours,activity,transmitted_at_text,is_supplement,supplement_created_at_text
+         FROM time_entries_shadow
+        WHERE employee_name=$1 AND entry_date LIKE $2 AND entry_date>='2026-09-07'
+        ORDER BY entry_date ASC,start_time ASC,id ASC`,
+      [employee,prefix+'%']
+    ),
+    pool.query(
+      `SELECT a.id AS assignment_id,a.hours AS assignment_hours,a.status AS assignment_status,a.note AS assignment_note,
+              a.created_by AS assigned_by,t.entry_date,t.customer,t.start_time,t.activity,t.transmitted_at_text
+         FROM assignments_shadow a
+         JOIN time_entries_shadow t ON t.id=a.source_entry_id
+        WHERE a.employee_name=$1 AND COALESCE(a.status,'Zugeordnet')<>'Ersetzt'
+          AND t.entry_date LIKE $2 AND t.entry_date>='2026-09-07'
+        ORDER BY t.entry_date ASC,t.start_time ASC,a.id ASC`,
+      [employee,prefix+'%']
+    ),
+    pool.query(
+      `SELECT status_date,status,source,credited_hours FROM day_status_shadow
+        WHERE employee_name=$1 AND status_date LIKE $2 AND status_date>='2026-09-07'
+        ORDER BY status_date ASC`,
+      [employee,prefix+'%']
+    ),
+    pool.query(
+      `SELECT closure_date FROM day_closures_shadow WHERE employee_name=$1 AND closure_date LIKE $2`,
+      [employee,prefix+'%']
+    ),
+    pool.query(
+      `SELECT id,hours,reason,created_at_text,created_by FROM monthly_adjustments_shadow
+        WHERE employee_name=$1 AND adjustment_year=$2 AND adjustment_month=$3`,
+      [employee,year,month]
+    ),
+    pool.query(
+      `SELECT hours,booking_type,booking_year,booking_month,created_at_text,created_iso
+         FROM time_bank_shadow WHERE employee_name=$1`,
+      [employee]
+    ),
+    postgresVacationSummary(employee,year)
+  ]);
+  const closed=new Set(closureQ.rows.map(r=>berlinDateOnly(r.closure_date)));
+  const rawRows=[];
+  for(const r of own.rows){
+    rawRows.push({
+      _start:String(r.start_time||''),date:berlinDateOnly(r.entry_date),customer:String(r.customer||''),
+      hours:Number(r.hours||0),activity:String(r.activity||''),
+      transmittedDate:r.transmitted_at_text?germanDateLabel(r.transmitted_at_text):'',
+      closed:closed.has(berlinDateOnly(r.entry_date)),isAdditionalAssignment:false,assignedBy:'',
+      assignmentStatus:'',assignmentNote:'',isSupplement:Boolean(r.is_supplement),
+      supplementCreatedAt:berlinDateTime(r.supplement_created_at_text||'')
+    });
+  }
+  for(const r of assigned.rows){
+    rawRows.push({
+      _start:String(r.start_time||''),date:berlinDateOnly(r.entry_date),customer:String(r.customer||''),
+      hours:Number(r.assignment_hours||0),activity:String(r.activity||''),
+      transmittedDate:r.transmitted_at_text?germanDateLabel(r.transmitted_at_text):'',
+      closed:closed.has(berlinDateOnly(r.entry_date)),isAdditionalAssignment:true,
+      assignedBy:String(r.assigned_by||''),assignmentStatus:String(r.assignment_status||'Zugeordnet'),
+      assignmentNote:String(r.assignment_note||''),isSupplement:false,supplementCreatedAt:''
+    });
+  }
+  rawRows.sort((a,b)=>(a.date+' '+a._start).localeCompare(b.date+' '+b._start));
+  const rows=rawRows.map(r=>{const x={...r};delete x._start;return x;});
+  const round=x=>Math.round(Number(x||0)*100)/100;
+  const statuses=statusQ.rows.map(r=>({
+    date:berlinDateOnly(r.status_date),status:String(r.status||''),source:String(r.source||''),
+    creditedHours:round(r.credited_hours)
+  }));
+  const grossBy=new Map();
+  for(const r of rows)grossBy.set(r.date,(grossBy.get(r.date)||0)+Number(r.hours||0));
+  const dayTotals=[...grossBy.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([date,value])=>{
+    const gross=round(value),pause=gross>=6?1:0;
+    return {date,grossHours:gross,pauseHours:round(pause),netHours:round(Math.max(0,gross-pause))};
+  });
+  const workTotalGross=round(dayTotals.reduce((s,x)=>s+x.grossHours,0));
+  const automaticPauseTotal=round(dayTotals.reduce((s,x)=>s+x.pauseHours,0));
+  const workTotal=round(workTotalGross-automaticPauseTotal);
+  const statusCredit=round(statuses.reduce((s,x)=>s+Number(x.creditedHours||0),0));
+  let timeBankMonthCredit=0;
+  for(const r of bankQ.rows){
+    const hours=Number(r.hours||0),art=String(r.booking_type||''),by=Number(r.booking_year)||0,bm=Number(r.booking_month)||0;
+    const createdIso=berlinDateOnly(r.created_iso||r.created_at_text||'');
+    if(year===2026&&month===9&&createdIso&&createdIso<'2026-09-07')continue;
+    if(art==='Monatsausgleich'&&by===year&&bm===month)timeBankMonthCredit+=Math.abs(Math.min(0,hours));
+    if(art==='Stunden Gutschreiben'||art==='Stunden abziehen'){
+      const yy=by||Number(createdIso.slice(0,4)),mm=bm||Number(createdIso.slice(5,7));
+      if(yy===year&&mm===month)timeBankMonthCredit+=hours;
+    }
+  }
+  timeBankMonthCredit=round(timeBankMonthCredit);
+  const creditedTotal=round(statusCredit+timeBankMonthCredit);
+  const adjustments=adjQ.rows.filter(r=>{
+    const created=berlinDateOnly(r.created_at_text||'');
+    return !(year===2026&&month===9&&created&&created<'2026-09-07');
+  });
+  const adjustmentTotal=round(adjustments.reduce((s,r)=>s+Number(r.hours||0),0));
+  const monthSummary={
+    vacationDays:statuses.filter(x=>x.status==='Urlaub').length,
+    sickDays:statuses.filter(x=>x.status==='Krank').length,
+    holidayDays:statuses.filter(x=>x.status==='Feiertag').length,
+    compensatoryDays:statuses.filter(x=>x.status==='Freizeitausgleich').length,
+    compensatoryHours:round(statuses.filter(x=>x.status==='Freizeitausgleich').reduce((s,x)=>s+Number(x.creditedHours||0),0)),
+    timeBankMonthCredit,adjustmentTotal
+  };
+  const yearSummary={
+    year,vacationEntitlement:Number(annual.vacationEntitlement||0),vacationUsed:Number(annual.vacationUsed||0),
+    vacationRemaining:Number(annual.vacationRemaining||0),sickDays:Number(annual.sickDays||0),holidayDays:Number(annual.holidayDays||0)
+  };
+  const actualTotal=round(workTotal+creditedTotal+adjustmentTotal);
+  return {
+    rows,total:actualTotal,actualTotal,adjustmentTotal,workTotal,workTotalGross,automaticPauseTotal,dayTotals,
+    creditedTotal,statusCredit,timeBankMonthCredit,timeBankBalance:0,statuses,monthSummary,yearSummary
+  };
+}
+function canonicalMonthData(x){return x?JSON.parse(JSON.stringify(x)):null;}
+async function verifyMonthDataShadow(data,body){
+  if(!pool||!data)return;
+  const pg=await postgresMonthData(body);if(!pg)return;
+  const a=canonicalMonthData(data),b=canonicalMonthData(pg);
+  const mismatches=JSON.stringify(a)===JSON.stringify(b)?0:1,key=monthDataVerifyKey(body);
+  console.log('SHADOW_VERIFY '+key+' mismatches='+mismatches);
+  await saveShadowVerifyStat(key,1,1,mismatches);
+}
+async function directMonthDataRead(body){
+  const session=await localSessionForBody(body,false);if(!session)return null;
+  const employee=String(body.employee||session.employee||'').trim();
+  if(!employee||employee!==session.employee)return null;
+  const key=monthDataVerifyKey(body);if(!key)return null;
+  if(!(await shadowReadyForDirectRead(key)))return null;
+  return postgresMonthData(body);
+}
+
 function dayDataVerifyKey(body,employee){
   const date=berlinDateOnly(body&&body.date||'');
   return date?'day_data:'+String(employee||'')+':'+date:'';
@@ -5324,6 +5466,7 @@ async function tryDirectPostgresRead(action,body){
   if(action==='getRegieReports')return directRegieReportsRead(body);
   if(action==='getTimeBankAccount')return directTimeBankAccountRead(body);
   if(action==='getMyTimeBank')return directMyTimeBankRead(body);
+  if(action==='getMonthData')return directMonthDataRead(body);
   if(action==='getDayData')return directDayDataRead(body);
   if(action==='getWeekData')return directWeekDataRead(body);
   if(action==='getVacationAccount')return directVacationAccountRead(body);
@@ -5386,7 +5529,7 @@ async function proxyLegacy(req, res, body) {
       console.error('Postgres employee read failed; falling back to Google:', e.message);
     }
   }
-  if (['getEmployeeAdminData','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getTimeBankAccount','getMyTimeBank','getDayData','getWeekData','getVacationAccount','getVacationAccounts'].includes(action)) {
+  if (['getEmployeeAdminData','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getTimeBankAccount','getMyTimeBank','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts'].includes(action)) {
     try {
       const direct=await tryDirectPostgresRead(action,body);
       if (direct!==null) {
@@ -5499,7 +5642,11 @@ async function proxyLegacy(req, res, body) {
         }
         if (action==='getObjectInternalNote'||action==='getObjectInternalNotes') verifyObjectNotesShadow(verifyData,body).catch(e=>console.error('object notes shadow verify failed',e.message));
         if (action==='getBossDayClosures') syncAndVerifyBossDayClosures(verifyData,body.year,body.month).catch(e=>console.error('day closure shadow verify failed',e.message));
-        if (action==='getMonthData') syncAndVerifyMonthStatuses(body,verifyData).catch(e=>console.error('day status shadow month refresh failed',e.message));
+        if (action==='getMonthData') {
+          syncAndVerifyMonthStatuses(body,verifyData)
+            .then(()=>verifyMonthDataShadow(verifyData,body))
+            .catch(e=>console.error('month data shadow refresh/verify failed',e.message));
+        }
       }
       if (isCacheableAction(action)) {
         writeCachedResponse(action, body, raw, upstream.status).catch(e=>console.error('response cache write failed',e.message));
@@ -5522,6 +5669,8 @@ async function proxyLegacy(req, res, body) {
           ['saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','saveAbsence','deleteAbsence','endSicknessAbsence'].includes(action)) {
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'day_data:%'")
           .catch(e=>console.error('day data balance readiness invalidate failed',e.message));
+      pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'month_data:%'")
+        .catch(e=>console.error('month data balance readiness invalidate failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['confirmEmployeeAssignment','reportEmployeeAssignmentIssue','deleteEntry'].includes(action)) {
@@ -5531,6 +5680,8 @@ async function proxyLegacy(req, res, body) {
           ['confirmEmployeeAssignment','reportEmployeeAssignmentIssue','deleteEntry'].includes(action)) {
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'week_data:%'")
           .catch(e=>console.error('week data assignment readiness invalidate failed',e.message));
+      pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'month_data:%'")
+        .catch(e=>console.error('month data assignment readiness invalidate failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'day_data:%'")
           .catch(e=>console.error('day data assignment readiness invalidate failed',e.message));
       }
@@ -5580,10 +5731,14 @@ async function proxyLegacy(req, res, body) {
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false && action==='saveVacationEntitlement') {
         mirrorVacationEntitlementWrite(body,parsed).catch(e=>console.error('vacation entitlement shadow mirror failed',e.message));
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'month_data:%'")
+          .catch(e=>console.error('month data vacation readiness invalidate failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['saveMonthlyAdjustment','deleteMonthlyAdjustment'].includes(action)) {
         mirrorMonthlyAdjustmentWrite(action,body,parsed).catch(e=>console.error('monthly adjustment shadow mirror failed',e.message));
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'month_data:%'")
+          .catch(e=>console.error('month data adjustment readiness invalidate failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['markPayrollIssueReviewed','setMonthClosureStatus','setPayrollMonthStatus','completePayrollCycle','forceCompletePayrollCycle'].includes(action)) {
@@ -5596,6 +5751,8 @@ async function proxyLegacy(req, res, body) {
         mirrorSetDayStatus(body,parsed).catch(e=>console.error('day status shadow mirror failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'week_data:%'")
           .catch(e=>console.error('week data status readiness invalidate failed',e.message));
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'month_data:%'")
+          .catch(e=>console.error('month data status readiness invalidate failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'day_data:%'")
           .catch(e=>console.error('day data status readiness invalidate failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'planner_availability:%'")
@@ -5606,6 +5763,8 @@ async function proxyLegacy(req, res, body) {
         mirrorDayClosureWrite(action,body,parsed).catch(e=>console.error('day closure shadow mirror failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'day_data:%'")
           .catch(e=>console.error('day data closure readiness invalidate failed',e.message));
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'month_data:%'")
+          .catch(e=>console.error('month data closure readiness invalidate failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['saveEntry','deleteEntry','updateEmployeeEntry','updateBossDayEntry','deleteBossDayEntry','markRegieReportBilled',
@@ -5614,6 +5773,8 @@ async function proxyLegacy(req, res, body) {
         mirrorTimeEntryWrite(action,body,parsed).catch(e=>console.error('time entries shadow mirror failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'week_data:%'")
           .catch(e=>console.error('week data time readiness invalidate failed',e.message));
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'month_data:%'")
+          .catch(e=>console.error('month data time readiness invalidate failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'day_data:%'")
           .catch(e=>console.error('day data time readiness invalidate failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'regie_billing_risk:%'")
@@ -5831,6 +5992,9 @@ async function health() {
         )).rows[0]?.n||0,
         dayDataVerified:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'day_data:%' AND mismatches=0"
+        )).rows[0]?.n||0,
+        monthDataVerified:(await pool.query(
+          "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'month_data:%' AND mismatches=0"
         )).rows[0]?.n||0
       };
     } catch (e) {
@@ -6002,7 +6166,7 @@ initDb()
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
     if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' maintenance_attachments='+h.shadowCounts.maintenanceAttachments+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus+' day_closures='+h.shadowCounts.dayClosures+' time_entries='+h.shadowCounts.timeEntries+' objects='+h.shadowCounts.objects+' regie_merges='+h.shadowCounts.regieMerges+' object_notes='+h.shadowCounts.objectNotes);
     console.log('RAILWAY_SESSIONS active='+Number(h.activeRailwaySessions||0));
-    if(h.directReadReady)console.log('DIRECT_READ_READY employee_admin='+Boolean(h.directReadReady.employeeAdmin)+' manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders)+' offer_reminders='+Boolean(h.directReadReady.offerReminders)+' planner_workers='+Boolean(h.directReadReady.plannerWorkers)+' planner_availability='+Number(h.directReadReady.plannerAvailabilityVerified||0)+' absences='+Boolean(h.directReadReady.absences)+' absence_overview='+Number(h.directReadReady.absenceOverviewVerified||0)+' sickness_alerts='+Boolean(h.directReadReady.sicknessAlerts)+' maintenance_search_queries='+Number(h.directReadReady.maintenanceSearchVerifiedQueries||0)+' maintenance_customers='+Number(h.directReadReady.maintenanceCustomersVerified||0)+' maintenance_contracts='+Boolean(h.directReadReady.maintenanceContracts)+' maintenance_overview='+Boolean(h.directReadReady.maintenanceOverview)+' maintenance_archive_queries='+Number(h.directReadReady.maintenanceArchiveVerifiedQueries||0)+' maintenance_device_ids='+Number(h.directReadReady.maintenanceDeviceIdsVerified||0)+' object_note_reads='+Number(h.directReadReady.objectNoteReadsVerified||0)+' object_reports='+Number(h.directReadReady.objectReportsVerified||0)+' regie_reports='+Number(h.directReadReady.regieReportsVerified||0)+' regie_billing_risk='+Number(h.directReadReady.regieBillingRiskVerified||0)+' vacation_keys='+Number(h.directReadReady.vacationVerifiedKeys||0)+' timebank_employees='+Number(h.directReadReady.timeBankVerifiedEmployees||0)+' my_timebank_employees='+Number(h.directReadReady.myTimeBankVerifiedEmployees||0)+' week_data='+Number(h.directReadReady.weekDataVerified||0)+' day_data='+Number(h.directReadReady.dayDataVerified||0));
+    if(h.directReadReady)console.log('DIRECT_READ_READY employee_admin='+Boolean(h.directReadReady.employeeAdmin)+' manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders)+' offer_reminders='+Boolean(h.directReadReady.offerReminders)+' planner_workers='+Boolean(h.directReadReady.plannerWorkers)+' planner_availability='+Number(h.directReadReady.plannerAvailabilityVerified||0)+' absences='+Boolean(h.directReadReady.absences)+' absence_overview='+Number(h.directReadReady.absenceOverviewVerified||0)+' sickness_alerts='+Boolean(h.directReadReady.sicknessAlerts)+' maintenance_search_queries='+Number(h.directReadReady.maintenanceSearchVerifiedQueries||0)+' maintenance_customers='+Number(h.directReadReady.maintenanceCustomersVerified||0)+' maintenance_contracts='+Boolean(h.directReadReady.maintenanceContracts)+' maintenance_overview='+Boolean(h.directReadReady.maintenanceOverview)+' maintenance_archive_queries='+Number(h.directReadReady.maintenanceArchiveVerifiedQueries||0)+' maintenance_device_ids='+Number(h.directReadReady.maintenanceDeviceIdsVerified||0)+' object_note_reads='+Number(h.directReadReady.objectNoteReadsVerified||0)+' object_reports='+Number(h.directReadReady.objectReportsVerified||0)+' regie_reports='+Number(h.directReadReady.regieReportsVerified||0)+' regie_billing_risk='+Number(h.directReadReady.regieBillingRiskVerified||0)+' vacation_keys='+Number(h.directReadReady.vacationVerifiedKeys||0)+' timebank_employees='+Number(h.directReadReady.timeBankVerifiedEmployees||0)+' my_timebank_employees='+Number(h.directReadReady.myTimeBankVerifiedEmployees||0)+' week_data='+Number(h.directReadReady.weekDataVerified||0)+' day_data='+Number(h.directReadReady.dayDataVerified||0)+' month_data='+Number(h.directReadReady.monthDataVerified||0));
     if(Array.isArray(h.shadowReadiness)&&h.shadowReadiness.length)console.log('SHADOW_READINESS '+h.shadowReadiness.map(x=>x.shadowName+'='+x.status+'('+x.mismatches+')').join(' | '));
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
