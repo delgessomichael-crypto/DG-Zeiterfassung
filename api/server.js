@@ -3404,6 +3404,115 @@ async function directOwnRemindersRead(body){
 }
 
 
+
+async function employeeActiveMapFromSnapshot(){
+  if(!pool)return new Map();
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:Mitarbeiter']
+  );
+  const out=new Map();
+  for(const row of q.rows){
+    const payload=row.payload||{};
+    if(Number(payload.sourceRow||row.source_key)<=1)continue;
+    const cells=Array.isArray(payload.cells)?payload.cells:[];
+    const name=String(cellValue(cells[0])==null?'':cellValue(cells[0])).trim();
+    if(!name)continue;
+    const raw=String(cellValue(cells[11])==null?'':cellValue(cells[11])).trim().toLowerCase();
+    const active=!raw||['ja','yes','true','1','aktiv'].includes(raw);
+    out.set(name,active);
+  }
+  return out;
+}
+
+async function postgresVacationSummary(employee,year){
+  year=Number(year)||0;
+  const [ent,statuses]=await Promise.all([
+    pool.query(
+      'SELECT entitlement FROM vacation_entitlements_shadow WHERE employee_name=$1 AND vacation_year=$2',
+      [String(employee),year]
+    ),
+    pool.query(
+      `SELECT status,COUNT(DISTINCT status_date)::int AS n
+         FROM day_status_shadow
+        WHERE employee_name=$1 AND status_date LIKE $2
+          AND status IN ('Urlaub','Krank','Feiertag')
+        GROUP BY status`,
+      [String(employee),String(year)+'-%']
+    )
+  ]);
+  const counts={Urlaub:0,Krank:0,Feiertag:0};
+  for(const r of statuses.rows)counts[String(r.status)]=Number(r.n)||0;
+  const entitlement=Number(ent.rows[0]?.entitlement||0);
+  return {
+    employee:String(employee),year,
+    vacationEntitlement:Math.round(entitlement*100)/100,
+    vacationUsed:counts.Urlaub,
+    vacationRemaining:Math.round((entitlement-counts.Urlaub)*100)/100,
+    sickDays:counts.Krank,
+    holidayDays:counts.Feiertag
+  };
+}
+
+async function verifyVacationFullShadow(data){
+  if(!pool||!data)return;
+  const rows=Array.isArray(data)?data:[data];
+  let mismatches=0;
+  for(const r of rows){
+    if(!r||!r.employee||!r.year){mismatches++;continue;}
+    const p=await postgresVacationSummary(r.employee,r.year);
+    const same=
+      Math.abs(Number(r.vacationEntitlement||0)-Number(p.vacationEntitlement||0))<0.01 &&
+      Number(r.vacationUsed||0)===Number(p.vacationUsed||0) &&
+      Math.abs(Number(r.vacationRemaining||0)-Number(p.vacationRemaining||0))<0.01 &&
+      Number(r.sickDays||0)===Number(p.sickDays||0) &&
+      Number(r.holidayDays||0)===Number(p.holidayDays||0);
+    if(!same)mismatches++;
+  }
+  console.log('SHADOW_VERIFY vacation_full google='+rows.length+' postgres='+rows.length+' mismatches='+mismatches);
+  await saveShadowVerifyStat('vacation_full',rows.length,rows.length,mismatches);
+}
+
+async function directAbsencesRead(body){
+  const session=await localSessionForBody(body,true);
+  if(!session)return null;
+  if(!(await shadowReadyForDirectRead('absences')))return null;
+  const q=await pool.query(
+    `SELECT id,employee_name,absence_type,start_date,end_date,credited_hours
+       FROM absences_shadow WHERE active=true
+      ORDER BY start_date DESC,id DESC`
+  );
+  return q.rows.map(r=>({
+    id:String(r.id||''),employee:String(r.employee_name||''),type:String(r.absence_type||''),
+    start:berlinDateOnly(r.start_date),end:berlinDateOnly(r.end_date),
+    creditedHours:Number(r.credited_hours||0)
+  }));
+}
+
+async function directVacationAccountRead(body){
+  const session=await localSessionForBody(body,true);
+  if(!session)return null;
+  if(!(await shadowReadyForDirectRead('vacation_full')))return null;
+  const employee=String(body.targetEmployee||'').trim(),year=Number(body.year)||0;
+  if(!employee||!year)return null;
+  return postgresVacationSummary(employee,year);
+}
+
+async function directVacationAccountsRead(body){
+  const session=await localSessionForBody(body,true);
+  if(!session)return null;
+  if(!(await shadowReadyForDirectRead('vacation_full')))return null;
+  const year=Number(body.year)||0;if(!year)return null;
+  const activeMap=await employeeActiveMapFromSnapshot();
+  const names=[...activeMap.keys()].sort((a,b)=>a.localeCompare(b,'de'));
+  const out=[];
+  for(const name of names){
+    out.push(Object.assign({active:Boolean(activeMap.get(name))},await postgresVacationSummary(name,year)));
+  }
+  return out;
+}
+
 async function directOfferRemindersRead(body){
   const session=await localSessionForBody(body,true);
   if(!session)return null;
@@ -3461,6 +3570,9 @@ async function tryDirectPostgresRead(action,body){
   if(action==='getOwnReminders')return directOwnRemindersRead(body);
   if(action==='getOfferReminders')return directOfferRemindersRead(body);
   if(action==='getPlannerWorkers')return directPlannerWorkersRead(body);
+  if(action==='getAbsences')return directAbsencesRead(body);
+  if(action==='getVacationAccount')return directVacationAccountRead(body);
+  if(action==='getVacationAccounts')return directVacationAccountsRead(body);
   return null;
 }
 
@@ -3505,7 +3617,7 @@ async function proxyLegacy(req, res, body) {
       console.error('Postgres employee read failed; falling back to Google:', e.message);
     }
   }
-  if (['getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers'].includes(action)) {
+  if (['getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getAbsences','getVacationAccount','getVacationAccounts'].includes(action)) {
     try {
       const direct=await tryDirectPostgresRead(action,body);
       if (direct!==null) {
@@ -3555,8 +3667,14 @@ async function proxyLegacy(req, res, body) {
         if (action==='getPlannerEvents') verifyPlannerEventsShadow(verifyData).catch(e=>console.error('planner event shadow verify failed',e.message));
         if (action==='getMaintenanceCustomer') verifyMaintenanceCustomerShadow(verifyData).catch(e=>console.error('maintenance customer shadow verify failed',e.message));
         if (action==='getAbsences') verifyAbsencesShadow(verifyData).catch(e=>console.error('absence shadow verify failed',e.message));
-        if (action==='getVacationAccount') verifyVacationAccountShadow(verifyData).catch(e=>console.error('vacation entitlement shadow verify failed',e.message));
-        if (action==='getVacationAccounts') verifyVacationAccountsShadow(verifyData,body.year).catch(e=>console.error('vacation entitlements shadow verify failed',e.message));
+        if (action==='getVacationAccount') {
+          verifyVacationAccountShadow(verifyData).catch(e=>console.error('vacation entitlement shadow verify failed',e.message));
+          verifyVacationFullShadow(verifyData).catch(e=>console.error('vacation full shadow verify failed',e.message));
+        }
+        if (action==='getVacationAccounts') {
+          verifyVacationAccountsShadow(verifyData,body.year).catch(e=>console.error('vacation entitlements shadow verify failed',e.message));
+          verifyVacationFullShadow(verifyData).catch(e=>console.error('vacation full shadow verify failed',e.message));
+        }
         if (action==='getTimeBankAccount') {
           replaceTimeBankEmployeeShadow(verifyData)
             .then(()=>verifyTimeBankShadow(verifyData))
@@ -3805,7 +3923,9 @@ async function health() {
         manualOrders:await shadowReadyForDirectRead('manual_orders'),
         ownReminders:await shadowReadyForDirectRead('own_reminders'),
         offerReminders:await shadowReadyForDirectRead('offer_reminders'),
-        plannerWorkers:await shadowReadyForDirectRead('planner_workers')
+        plannerWorkers:await shadowReadyForDirectRead('planner_workers'),
+        absences:await shadowReadyForDirectRead('absences'),
+        vacation:await shadowReadyForDirectRead('vacation_full')
       };
     } catch (e) {
       database = 'error';
@@ -3976,7 +4096,7 @@ initDb()
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
     if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus+' day_closures='+h.shadowCounts.dayClosures+' time_entries='+h.shadowCounts.timeEntries+' objects='+h.shadowCounts.objects+' regie_merges='+h.shadowCounts.regieMerges+' object_notes='+h.shadowCounts.objectNotes);
     console.log('RAILWAY_SESSIONS active='+Number(h.activeRailwaySessions||0));
-    if(h.directReadReady)console.log('DIRECT_READ_READY manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders)+' offer_reminders='+Boolean(h.directReadReady.offerReminders)+' planner_workers='+Boolean(h.directReadReady.plannerWorkers));
+    if(h.directReadReady)console.log('DIRECT_READ_READY manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders)+' offer_reminders='+Boolean(h.directReadReady.offerReminders)+' planner_workers='+Boolean(h.directReadReady.plannerWorkers)+' absences='+Boolean(h.directReadReady.absences)+' vacation='+Boolean(h.directReadReady.vacation));
     if(Array.isArray(h.shadowReadiness)&&h.shadowReadiness.length)console.log('SHADOW_READINESS '+h.shadowReadiness.map(x=>x.shadowName+'='+x.status+'('+x.mismatches+')').join(' | '));
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
