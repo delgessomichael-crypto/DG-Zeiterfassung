@@ -481,6 +481,19 @@ CREATE TABLE IF NOT EXISTS object_notes_shadow (
   shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS railway_sessions (
+  token_hash TEXT PRIMARY KEY,
+  employee_name TEXT NOT NULL,
+  chef_access BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT now() + interval '24 hours',
+  revoked_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS railway_sessions_employee_idx
+  ON railway_sessions(employee_name,expires_at);
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
@@ -497,6 +510,7 @@ async function cleanupInternalData() {
   if (!pool) return;
   await pool.query("DELETE FROM response_cache WHERE created_at < now() - interval '24 hours'");
   await pool.query("DELETE FROM legacy_action_log WHERE created_at < now() - interval '30 days'");
+  await pool.query("DELETE FROM railway_sessions WHERE expires_at < now() - interval '7 days' OR revoked_at < now() - interval '7 days'");
 }
 
 async function logLatencySummary() {
@@ -969,6 +983,88 @@ function sanitizeForLog(value) {
 
 function sanitizedLogPayload(body) {
   return sanitizeForLog(body || {});
+}
+
+function tokenHash(value){
+  const v=String(value||'');
+  return v?crypto.createHash('sha256').update(v).digest('hex'):'';
+}
+
+function looksLikeDeviceSessionToken(value){
+  const v=String(value||'').trim();
+  return v.length>=20 && !/^\d{4,10}$/.test(v);
+}
+
+async function registerRailwaySession(employee,token,chefAccess){
+  if(!pool||!employee||!looksLikeDeviceSessionToken(token))return false;
+  await pool.query(
+    `INSERT INTO railway_sessions(
+      token_hash,employee_name,chef_access,created_at,last_seen_at,expires_at,revoked_at
+    ) VALUES($1,$2,$3,now(),now(),now()+interval '24 hours',NULL)
+    ON CONFLICT(token_hash) DO UPDATE SET
+      employee_name=EXCLUDED.employee_name,chef_access=EXCLUDED.chef_access,
+      last_seen_at=now(),expires_at=now()+interval '24 hours',revoked_at=NULL`,
+    [tokenHash(token),String(employee),Boolean(chefAccess)]
+  );
+  return true;
+}
+
+async function revokeRailwaySession(token){
+  if(!pool||!looksLikeDeviceSessionToken(token))return;
+  await pool.query(
+    'UPDATE railway_sessions SET revoked_at=now() WHERE token_hash=$1',
+    [tokenHash(token)]
+  );
+}
+
+async function localSessionForBody(body,requireChef){
+  if(!pool||!body)return null;
+  if(await isEmployeeSnapshotDirty())return null;
+  const employee=String(body.employee||'').trim();
+  const token=String(body.employeePin||body.pin||body.deviceSessionToken||'').trim();
+  if(!employee||!looksLikeDeviceSessionToken(token))return null;
+  const q=await pool.query(
+    `SELECT employee_name,chef_access,expires_at,revoked_at
+       FROM railway_sessions
+      WHERE token_hash=$1 AND employee_name=$2
+        AND revoked_at IS NULL AND expires_at>now()`,
+    [tokenHash(token),employee]
+  );
+  if(!q.rowCount)return null;
+  const row=q.rows[0];
+  if(requireChef&&!row.chef_access)return null;
+  pool.query(
+    'UPDATE railway_sessions SET last_seen_at=now() WHERE token_hash=$1',
+    [tokenHash(token)]
+  ).catch(()=>{});
+  return {employee:String(row.employee_name),chefAccess:Boolean(row.chef_access)};
+}
+
+async function refreshSessionFromSuccessfulRequest(action,body,parsed){
+  if(!pool||!body||!parsed||parsed.ok===false)return;
+  if(action==='employeeLogin'){
+    const employee=String(parsed.employee||body.employee||'').trim();
+    const token=String(parsed.deviceSessionToken||'').trim();
+    if(employee&&token)await registerRailwaySession(employee,token,Boolean(parsed.chefAccess));
+    return;
+  }
+  if(action==='employeeLogout'){
+    await revokeRailwaySession(body.deviceSessionToken);
+    return;
+  }
+  const token=String(body.employeePin||body.pin||'').trim();
+  if(!looksLikeDeviceSessionToken(token))return;
+  const employee=String(body.employee||'').trim();
+  if(!employee)return;
+  // A successful Google-authenticated request proves the token is still valid.
+  // Preserve an existing chef flag; never promote privileges from a normal request.
+  const h=tokenHash(token);
+  const existing=await pool.query(
+    'SELECT chef_access FROM railway_sessions WHERE token_hash=$1 AND employee_name=$2',
+    [h,employee]
+  );
+  const chef=existing.rowCount?Boolean(existing.rows[0].chef_access):false;
+  await registerRailwaySession(employee,token,chef);
 }
 
 function isCacheableAction(action) {
@@ -3282,6 +3378,7 @@ async function proxyLegacy(req, res, body) {
     try { parsed = JSON.parse(raw); } catch (_e) {}
     if (pool) {
       if (upstream.status === 200 && parsed && parsed.ok !== false) {
+        refreshSessionFromSuccessfulRequest(action,body,parsed).catch(e=>console.error('railway session bridge failed',e.message));
         const verifyData=parsed.data!==undefined?parsed.data:parsed;
         if (action==='getManualOrders') verifyManualOrdersShadow(verifyData).catch(e=>console.error('manual order shadow verify failed',e.message));
         if (action==='getOwnReminders') verifyOwnRemindersShadow(verifyData).catch(e=>console.error('own reminder shadow verify failed',e.message));
@@ -3448,6 +3545,7 @@ async function health() {
   let shadowReadiness = [];
   let writeStats = [];
   let dayClosureSourceAudit = null;
+  let activeRailwaySessions = 0;
   if (pool) {
     try {
       const q = await pool.query('SELECT 1 AS ok');
@@ -3530,6 +3628,10 @@ async function health() {
       );
       writeStats=writeQ.rows;
       dayClosureSourceAudit=await auditDayClosureSourceDuplicates();
+      const sessionQ=await pool.query(
+        'SELECT COUNT(*)::int AS n FROM railway_sessions WHERE revoked_at IS NULL AND expires_at>now()'
+      );
+      activeRailwaySessions=sessionQ.rows[0]?.n||0;
     } catch (e) {
       database = 'error';
     }
@@ -3567,7 +3669,8 @@ async function health() {
     shadowVerify,
     shadowReadiness,
     writeStats,
-    dayClosureSourceAudit
+    dayClosureSourceAudit,
+    activeRailwaySessions
   };
 }
 
@@ -3696,6 +3799,7 @@ initDb()
     const h = await health();
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
     if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus+' day_closures='+h.shadowCounts.dayClosures+' time_entries='+h.shadowCounts.timeEntries+' objects='+h.shadowCounts.objects+' regie_merges='+h.shadowCounts.regieMerges+' object_notes='+h.shadowCounts.objectNotes);
+    console.log('RAILWAY_SESSIONS active='+Number(h.activeRailwaySessions||0));
     if(Array.isArray(h.shadowReadiness)&&h.shadowReadiness.length)console.log('SHADOW_READINESS '+h.shadowReadiness.map(x=>x.shadowName+'='+x.status+'('+x.mismatches+')').join(' | '));
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
