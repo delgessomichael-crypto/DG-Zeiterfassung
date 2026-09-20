@@ -281,6 +281,20 @@ async function proxyLegacy(req, res, body) {
   }
 }
 
+async function migrationStatusPublic() {
+  if (!pool) throw new Error('Database not configured');
+  const run = await pool.query(
+    "SELECT id,source_version,mode,started_at,finished_at,status,source_counts,target_counts,notes FROM migration_runs ORDER BY id DESC LIMIT 1"
+  );
+  if (!run.rowCount) return {ok:true,latest:null,sheets:[]};
+  const runId = run.rows[0].id;
+  const sheets = await pool.query(
+    "SELECT sheet_name,source_rows,source_columns,imported_rows,payload_sha256 FROM migration_sheets WHERE migration_run_id=$1 ORDER BY sheet_name",
+    [runId]
+  );
+  return {ok:true,latest:run.rows[0],sheets:sheets.rows};
+}
+
 async function latestMigration() {
   if (!pool) throw new Error('Database not configured');
   const q = await pool.query("SELECT value,updated_at FROM app_meta WHERE key='latest_migration'");
@@ -354,6 +368,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/') {
       const body = await readBody(req);
       return proxyLegacy(req,res,body);
+    }
+
+    if (req.method === 'GET' && url.pathname === '/v1/migration/status') {
+      return json(res, 200, await migrationStatusPublic(), req);
     }
 
     if (req.method === 'GET' && url.pathname === '/health') {
