@@ -360,6 +360,8 @@ const CACHEABLE_ACTIONS = new Set([
 ]);
 
 const READ_CACHE_TTL_MS = 60 * 60 * 1000;
+const READ_CACHE_REFRESH_MS = 50 * 60 * 1000;
+const readRefreshPromises = new Map();
 const cacheStats = new Map();
 
 function bumpCacheStat(action,kind) {
@@ -588,6 +590,43 @@ async function writeCachedResponse(action, body, responseText, httpStatus) {
   );
 }
 
+async function refreshReadCacheInBackground(action, body, cacheKey) {
+  if (!GOOGLE_BACKEND_URL || !isCacheableAction(action)) return;
+  const key = String(cacheKey || crypto.createHash('sha256').update(JSON.stringify(normalizedCachePayload(body))).digest('hex'));
+  if (readRefreshPromises.has(key)) return readRefreshPromises.get(key);
+  const run=(async()=>{
+    const startedAt=Date.now();
+    try{
+      const upstream=await fetch(GOOGLE_BACKEND_URL,{
+        method:'POST',
+        headers:{'Content-Type':'text/plain;charset=utf-8'},
+        body:JSON.stringify(Object.assign({},body||{}, {force:true})),
+        redirect:'follow'
+      });
+      const raw=await upstream.text();
+      let parsed=null;try{parsed=JSON.parse(raw);}catch(_e){}
+      if(upstream.status===200&&parsed&&parsed.ok!==false){
+        await writeCachedResponse(action,body,raw,upstream.status);
+      }
+      if(pool){
+        pool.query(
+          `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
+           VALUES($1,$2::jsonb,$3,$4::jsonb,$5,$6)`,
+          [action,JSON.stringify(Object.assign({},sanitizedLogPayload(body),{source:'refresh-ahead'})),
+           Boolean(parsed&&parsed.ok!==false),parsed?JSON.stringify(parsed):null,
+           upstream.status,Math.max(0,Date.now()-startedAt)]
+        ).catch(()=>{});
+      }
+    }catch(e){
+      console.error('read cache refresh-ahead failed for '+action+':',e.message);
+    }finally{
+      readRefreshPromises.delete(key);
+    }
+  })();
+  readRefreshPromises.set(key,run);
+  return run;
+}
+
 const CACHE_GROUPS = {
   employee: ['getEmployees','getEmployeeAdminData','getVacationAccount','getVacationAccounts','getTimeBankAccount','getAbsences','getAbsenceOverview','getPlannerWorkers','getDashboardSummary51'],
   time: ['getDayData','getMonthData','getBossMonthData','getBossDayClosures','getRegieReports','getAbsences','getAbsenceOverview','getVacationAccount','getVacationAccounts','getTimeBankAccount','getDashboardSummary51'],
@@ -677,12 +716,17 @@ async function proxyLegacy(req, res, body) {
   if (!GOOGLE_BACKEND_URL) return json(res, 503, {ok:false,error:'Google backend not configured'}, req);
   const cached = await readCachedResponse(action, body);
   if (cached) {
+    const ageMs=Math.max(0,Date.now()-new Date(cached.createdAt).getTime());
+    if(ageMs>=READ_CACHE_REFRESH_MS){
+      refreshReadCacheInBackground(action,body,cached.key).catch(()=>{});
+    }
     cors(req,res);
     return sendApiBody(
       req,res,cached.httpStatus,'application/json; charset=utf-8',cached.responseText,
       {
         'X-DG-Cache':'HIT',
-        'X-DG-Cache-Age':String(Math.max(0,Math.floor((Date.now()-new Date(cached.createdAt).getTime())/1000)))
+        'X-DG-Cache-Age':String(Math.floor(ageMs/1000)),
+        'X-DG-Cache-Refresh':ageMs>=READ_CACHE_REFRESH_MS?'background':'none'
       }
     );
   }
@@ -788,7 +832,8 @@ async function health() {
     employeeReadSource,
     employeeSnapshotDirty,
     postgresEmployeeSnapshotCount,
-    readCacheTtlSeconds: READ_CACHE_TTL_MS / 1000
+    readCacheTtlSeconds: READ_CACHE_TTL_MS / 1000,
+    readCacheRefreshAheadSeconds: READ_CACHE_REFRESH_MS / 1000
   };
 }
 
