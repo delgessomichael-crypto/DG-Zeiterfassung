@@ -2617,3 +2617,130 @@ function install(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
+
+
+/* DG Zeiterfassung 8.0 - UI Hotfix 25
+   Gezielter Frische-Fix: Rechnung/Laufende Auftraege laden beim Oeffnen frisch,
+   Wartungsvertraege synchronisieren ueber die aktuelle Wartungsuebersicht,
+   Jahres-Wartungskacheln bleiben im sichtbaren Bereich. */
+(function(){
+'use strict';
+const V='8.0-ui25';
+const q=id=>document.getElementById(id);
+const S=window.DG80_UI25=window.DG80_UI25||{busy:false,timer:null};
+
+function norm(v){return String(v||'').trim().toLowerCase();}
+function clearReadCaches(){
+  try{if(window.DG51&&DG51.readCache&&typeof DG51.readCache.clear==='function')DG51.readCache.clear();}catch(_e){}
+  try{if(window.DG3&&DG3.reads&&typeof DG3.reads.clear==='function')DG3.reads.clear();}catch(_e){}
+}
+async function freshReports(kind){
+  clearReadCaches();
+  if(typeof window.loadRegieReports==='function'){await window.loadRegieReports(kind);return;}
+  if(typeof window.d3Reports==='function'){await window.d3Reports(kind);return;}
+  const loader=window.DG3&&DG3.loaders&&(kind==='Laufend'?DG3.loaders.d3Running:DG3.loaders.d3Completed);
+  if(typeof loader==='function')await loader();
+}
+async function freshMaintenance(){
+  clearReadCaches();
+  if(typeof window.d37LoadMaintenanceOverview==='function'){await window.d37LoadMaintenanceOverview();return;}
+  if(window.DG3&&DG3.loaders&&typeof DG3.loaders.d36Maintenance==='function'){await DG3.loaders.d36Maintenance();return;}
+  if(typeof window.d36LoadMaintenance==='function')await window.d36LoadMaintenance();
+}
+function visibleMaintenanceStats(){
+  const card=q('d36Maintenance'),top=q('d39MaintenanceTop');if(!card||!top)return;
+  const body=card.querySelector(':scope > .dg48-body')||card;
+  const nav=q('d37MaintenanceNav');
+  if(top.parentElement!==body){
+    if(nav&&nav.parentElement===body)body.insertBefore(top,nav);
+    else body.prepend(top);
+  }
+  top.classList.remove('hidden');
+}
+async function syncMaintenance(){
+  if(S.busy)return;
+  S.busy=true;
+  try{await freshMaintenance();visibleMaintenanceStats();}
+  finally{S.busy=false;}
+}
+function installOpenFresh(){
+  const base=window.dg80OfficeOpen;
+  if(typeof base!=='function'||base.__dg25)return false;
+  const wrapped=function(key,options){
+    const r=base.apply(this,arguments);
+    if((key==='completed'||key==='running')&&!(options&&options.dg25SkipFresh)){
+      const kind=key==='running'?'Laufend':'Abgeschlossen';
+      setTimeout(()=>{freshReports(kind).catch(e=>console.warn('DG UI25 Auftrags-Sync',e));},0);
+    }
+    if(key==='maintenance'&&!(options&&options.dg25SkipFresh)){
+      setTimeout(()=>{syncMaintenance().catch(e=>console.warn('DG UI25 Wartungs-Sync',e));},0);
+    }
+    return r;
+  };
+  wrapped.__dg25=true;
+  window.dg80OfficeOpen=wrapped;
+  return true;
+}
+function installManualSyncRepair(){
+  const base=window.dg80ManualAreaSync;
+  if(typeof base!=='function'||base.__dg25)return false;
+  const wrapped=async function(){
+    const title=norm(q('dg80OfficeTitle')?.textContent||'');
+    if(title==='wartungen'||title==='wartungsverträge'||title==='wartungsvertraege'){
+      const btns=[...document.querySelectorAll('.dg24-sync-btn')],stamps=[...document.querySelectorAll('.dg24-sync-stamp')];
+      btns.forEach(b=>{b.disabled=true;b.textContent='Synchronisiert …';});
+      stamps.forEach(s=>s.textContent='Synchronisierung läuft …');
+      try{
+        await syncMaintenance();
+        const now=new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
+        stamps.forEach(s=>s.textContent='zuletzt: '+now);
+      }catch(e){
+        stamps.forEach(s=>s.textContent='Fehler: '+(e&&e.message?e.message:e));
+      }finally{
+        btns.forEach(b=>{b.disabled=false;b.textContent='Jetzt synchronisieren';});
+      }
+      return;
+    }
+    return base.apply(this,arguments);
+  };
+  wrapped.__dg25=true;
+  window.dg80ManualAreaSync=wrapped;
+  return true;
+}
+function repairSyncButtons(){
+  document.querySelectorAll('.dg24-sync-btn').forEach(b=>{
+    if(b.dataset.dg25==='1')return;
+    b.dataset.dg25='1';
+    b.addEventListener('click',e=>{
+      const title=norm(q('dg80OfficeTitle')?.textContent||'');
+      if(title!=='wartungen'&&title!=='wartungsverträge'&&title!=='wartungsvertraege')return;
+      e.preventDefault();e.stopImmediatePropagation();
+      window.dg80ManualAreaSync?.();
+    },true);
+  });
+}
+function demoteOptionalPlacesWarning(){
+  const host=q('d3HealthList');if(!host)return;
+  [...host.querySelectorAll('.status')].forEach(box=>{
+    const t=String(box.textContent||'');
+    if(!/Google Places Key/i.test(t))return;
+    if(!/nicht zentral in Script Properties gespeichert/i.test(t))return;
+    box.classList.remove('warn','error');box.classList.add('info');
+    const strong=box.querySelector('strong');
+    if(strong&&!/optional/i.test(strong.textContent||''))strong.textContent='Google Places Key (optional)';
+    if(!/Adressvorschl/i.test(t))box.appendChild(document.createTextNode(' – betrifft nur die automatische Adressvorschlagsfunktion.'));
+  });
+}
+function observe(){
+  const root=q('bossView')||document.body;
+  const mo=new MutationObserver(()=>{
+    clearTimeout(S.timer);S.timer=setTimeout(()=>{installOpenFresh();installManualSyncRepair();repairSyncButtons();visibleMaintenanceStats();demoteOptionalPlacesWarning();},0);
+  });
+  mo.observe(root,{subtree:true,childList:true,attributes:true,attributeFilter:['class']});
+}
+function install(){
+  installOpenFresh();installManualSyncRepair();repairSyncButtons();visibleMaintenanceStats();demoteOptionalPlacesWarning();observe();
+  document.documentElement.dataset.dgUi25=V;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+})();
