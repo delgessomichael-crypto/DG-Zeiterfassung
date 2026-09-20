@@ -268,6 +268,26 @@ CREATE TABLE IF NOT EXISTS maintenance_manual_shadow (
   shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS maintenance_attachments_shadow (
+  id TEXT PRIMARY KEY,
+  device_id TEXT,
+  customer_id TEXT,
+  object_id TEXT,
+  kind TEXT,
+  name TEXT,
+  mime TEXT,
+  file_size BIGINT NOT NULL DEFAULT 0,
+  file_id TEXT,
+  url TEXT,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at_text TEXT,
+  created_by TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS maintenance_attachments_shadow_device_idx
+  ON maintenance_attachments_shadow(device_id,active);
+
 CREATE TABLE IF NOT EXISTS absences_shadow (
   id TEXT PRIMARY KEY,
   employee_name TEXT,
@@ -543,6 +563,7 @@ async function initDb() {
   await initPlannerWorkersShadow();
   await initPlannerEventsShadow();
   await initMaintenanceShadows();
+  await initMaintenanceAttachmentsShadow();
   await initAbsencesShadow();
   await initVacationEntitlementsShadow();
   await initTimeBankShadow();
@@ -2563,6 +2584,121 @@ async function verifyAbsencesShadow(rows){
   await saveShadowVerifyStat('absences',rows.length,pg.size,mismatches);
 }
 
+
+async function initMaintenanceAttachmentsShadow(){
+  if(!pool)return;
+  const existing=await pool.query('SELECT COUNT(*)::int AS n FROM maintenance_attachments_shadow');
+  if((existing.rows[0]?.n||0)>0)return;
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:Wartungsanhaenge']
+  );
+  let inserted=0;
+  for(const row of q.rows){
+    const payload=row.payload||{};
+    if(Number(payload.sourceRow||row.source_key)<=1)continue;
+    const cells=Array.isArray(payload.cells)?payload.cells:[];
+    const id=textCell(cells,0).trim();if(!id)continue;
+    await pool.query(
+      `INSERT INTO maintenance_attachments_shadow(
+        id,device_id,customer_id,object_id,kind,name,mime,file_size,file_id,url,
+        active,created_at_text,created_by
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      ON CONFLICT(id) DO NOTHING`,
+      [id,textCell(cells,1),textCell(cells,2),textCell(cells,3),textCell(cells,4),
+       textCell(cells,5),textCell(cells,6),Math.max(0,Number(textCell(cells,7))||0),
+       textCell(cells,8),textCell(cells,9),shadowActive(textCell(cells,10)),
+       textCell(cells,11),textCell(cells,12)]
+    );
+    inserted++;
+  }
+  console.log('SHADOW maintenance_attachments initialized rows='+inserted);
+}
+
+async function mirrorMaintenanceAttachmentsFromCustomer(data){
+  if(!pool||!data||!data.id)return;
+  const customerId=String(data.id);
+  const liveIds=[];
+  for(const o of (Array.isArray(data.objects)?data.objects:[])){
+    const objectId=String(o.id||'');
+    for(const d of (Array.isArray(o.devices)?o.devices:[])){
+      const deviceId=String(d.id||'');
+      for(const a of (Array.isArray(d.attachments)?d.attachments:[])){
+        const id=String(a.id||'').trim();if(!id)continue;
+        liveIds.push(id);
+        await pool.query(
+          `INSERT INTO maintenance_attachments_shadow(
+            id,device_id,customer_id,object_id,kind,name,mime,file_size,file_id,url,
+            active,created_at_text,created_by,shadow_updated_at
+          ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,$11,$12,now())
+          ON CONFLICT(id) DO UPDATE SET
+            device_id=EXCLUDED.device_id,customer_id=EXCLUDED.customer_id,object_id=EXCLUDED.object_id,
+            kind=EXCLUDED.kind,name=EXCLUDED.name,mime=EXCLUDED.mime,file_size=EXCLUDED.file_size,
+            file_id=CASE WHEN EXCLUDED.file_id<>'' THEN EXCLUDED.file_id ELSE maintenance_attachments_shadow.file_id END,
+            url=EXCLUDED.url,active=true,created_at_text=EXCLUDED.created_at_text,
+            created_by=EXCLUDED.created_by,shadow_updated_at=now()`,
+          [id,deviceId,customerId,objectId,String(a.kind||''),String(a.name||''),
+           String(a.mime||''),Math.max(0,Number(a.size)||0),String(a.fileId||''),
+           String(a.url||''),String(a.createdAt||''),String(a.createdBy||'')]
+        );
+      }
+    }
+  }
+  if(liveIds.length){
+    await pool.query(
+      `UPDATE maintenance_attachments_shadow SET active=false,shadow_updated_at=now()
+        WHERE customer_id=$1 AND NOT (id = ANY($2::text[]))`,
+      [customerId,liveIds]
+    );
+  }else{
+    await pool.query(
+      'UPDATE maintenance_attachments_shadow SET active=false,shadow_updated_at=now() WHERE customer_id=$1',
+      [customerId]
+    );
+  }
+}
+
+async function verifyMaintenanceAttachmentsFromCustomer(data){
+  if(!pool||!data||!data.id)return;
+  const google=[];
+  for(const o of (Array.isArray(data.objects)?data.objects:[])){
+    for(const d of (Array.isArray(o.devices)?o.devices:[])){
+      for(const a of (Array.isArray(d.attachments)?d.attachments:[]))google.push(a);
+    }
+  }
+  const q=await pool.query(
+    'SELECT id,kind,name,mime,file_size,url FROM maintenance_attachments_shadow WHERE customer_id=$1 AND active=true',
+    [String(data.id)]
+  );
+  const pg=new Map(q.rows.map(r=>[String(r.id),r]));
+  let mismatches=0;
+  for(const a of google){
+    const p=pg.get(String(a.id));if(!p){mismatches++;continue;}
+    if(normalizeShadowText(a.kind)!==normalizeShadowText(p.kind)||
+       normalizeShadowText(a.name)!==normalizeShadowText(p.name)||
+       normalizeShadowText(a.mime)!==normalizeShadowText(p.mime)||
+       Number(a.size||0)!==Number(p.file_size||0)||
+       normalizeShadowText(a.url)!==normalizeShadowText(p.url))mismatches++;
+    pg.delete(String(a.id));
+  }
+  mismatches+=pg.size;
+  console.log('SHADOW_VERIFY maintenance_attachments google='+google.length+' postgres='+q.rows.length+' mismatches='+mismatches);
+  await saveShadowVerifyStat('maintenance_attachments:'+String(data.id),google.length,q.rows.length,mismatches);
+}
+
+async function mirrorDeleteMaintenanceAttachment(body,parsed){
+  if(!pool)return;
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if(!data||data.ok===false)return;
+  const id=String(data.id||body.id||'').trim();
+  if(!id)return;
+  await pool.query(
+    'UPDATE maintenance_attachments_shadow SET active=false,shadow_updated_at=now() WHERE id=$1',
+    [id]
+  );
+}
+
 async function initMaintenanceShadows() {
   if (!pool) return;
   const targets=[
@@ -3735,7 +3871,12 @@ async function proxyLegacy(req, res, body) {
         if (action==='getOfferReminders') verifyOfferRemindersShadow(verifyData,Boolean(body.includeDone)).catch(e=>console.error('offer reminder shadow verify failed',e.message));
         if (action==='getPlannerWorkers') verifyPlannerWorkersShadow(verifyData).catch(e=>console.error('planner worker shadow verify failed',e.message));
         if (action==='getPlannerEvents') verifyPlannerEventsShadow(verifyData).catch(e=>console.error('planner event shadow verify failed',e.message));
-        if (action==='getMaintenanceCustomer') verifyMaintenanceCustomerShadow(verifyData).catch(e=>console.error('maintenance customer shadow verify failed',e.message));
+        if (action==='getMaintenanceCustomer') {
+          mirrorMaintenanceAttachmentsFromCustomer(verifyData)
+            .then(()=>verifyMaintenanceAttachmentsFromCustomer(verifyData))
+            .catch(e=>console.error('maintenance attachment shadow refresh failed',e.message));
+          verifyMaintenanceCustomerShadow(verifyData).catch(e=>console.error('maintenance customer shadow verify failed',e.message));
+        }
         if (action==='getAbsences') verifyAbsencesShadow(verifyData).catch(e=>console.error('absence shadow verify failed',e.message));
         if (action==='getVacationAccount') {
           verifyVacationAccountShadow(verifyData).catch(e=>console.error('vacation entitlement shadow verify failed',e.message));
@@ -3803,6 +3944,13 @@ async function proxyLegacy(req, res, body) {
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['saveMaintenanceCustomer','deleteMaintenanceCustomer','deleteMaintenanceDevice','addMaintenanceRepair','addManualMaintenanceCount'].includes(action)) {
         mirrorMaintenanceWrite(action,body,parsed).catch(e=>console.error('maintenance shadow mirror failed',e.message));
+        if(action==='saveMaintenanceCustomer'){
+          const md=parsed&&parsed.data!==undefined?parsed.data:parsed;
+          mirrorMaintenanceAttachmentsFromCustomer(md).catch(e=>console.error('maintenance attachment write mirror failed',e.message));
+        }
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false && action==='deleteMaintenanceAttachment') {
+        mirrorDeleteMaintenanceAttachment(body,parsed).catch(e=>console.error('maintenance attachment delete mirror failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['saveAbsence','deleteAbsence'].includes(action)) {
@@ -3925,6 +4073,7 @@ async function health() {
         pool.query('SELECT COUNT(*)::int AS n FROM maintenance_devices_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM maintenance_repairs_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM maintenance_manual_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM maintenance_attachments_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM absences_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM vacation_entitlements_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM time_bank_shadow'),
@@ -3951,20 +4100,21 @@ async function health() {
         maintenanceDevices: counts[7].rows[0]?.n||0,
         maintenanceRepairs: counts[8].rows[0]?.n||0,
         maintenanceManual: counts[9].rows[0]?.n||0,
-        absences: counts[10].rows[0]?.n||0,
-        vacationEntitlements: counts[11].rows[0]?.n||0,
-        timeBank: counts[12].rows[0]?.n||0,
-        monthlyAdjustments: counts[13].rows[0]?.n||0,
-        monthClosures: counts[14].rows[0]?.n||0,
-        payrollReviews: counts[15].rows[0]?.n||0,
-        payrollClosures: counts[16].rows[0]?.n||0,
-        conflictReviews: counts[17].rows[0]?.n||0,
-        dayStatus: counts[18].rows[0]?.n||0,
-        dayClosures: counts[19].rows[0]?.n||0,
-        timeEntries: counts[20].rows[0]?.n||0,
-        objects: counts[21].rows[0]?.n||0,
-        regieMerges: counts[22].rows[0]?.n||0,
-        objectNotes: counts[23].rows[0]?.n||0
+        maintenanceAttachments: counts[10].rows[0]?.n||0,
+        absences: counts[11].rows[0]?.n||0,
+        vacationEntitlements: counts[12].rows[0]?.n||0,
+        timeBank: counts[13].rows[0]?.n||0,
+        monthlyAdjustments: counts[14].rows[0]?.n||0,
+        monthClosures: counts[15].rows[0]?.n||0,
+        payrollReviews: counts[16].rows[0]?.n||0,
+        payrollClosures: counts[17].rows[0]?.n||0,
+        conflictReviews: counts[18].rows[0]?.n||0,
+        dayStatus: counts[19].rows[0]?.n||0,
+        dayClosures: counts[20].rows[0]?.n||0,
+        timeEntries: counts[21].rows[0]?.n||0,
+        objects: counts[22].rows[0]?.n||0,
+        regieMerges: counts[23].rows[0]?.n||0,
+        objectNotes: counts[24].rows[0]?.n||0
       };
       const verifyQ=await pool.query(
         'SELECT shadow_name,google_count,postgres_count,mismatches,checked_at FROM shadow_verify_stats ORDER BY shadow_name'
@@ -4173,7 +4323,7 @@ initDb()
     console.log('MIGRATION VERIFY: sheets='+sheets.length+' sourceRows='+sourceRows+' importedRows='+importedRows+' mismatches='+mismatches.length+(mismatches.length?' ['+mismatches.join(', ')+']':''));
     const h = await health();
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
-    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus+' day_closures='+h.shadowCounts.dayClosures+' time_entries='+h.shadowCounts.timeEntries+' objects='+h.shadowCounts.objects+' regie_merges='+h.shadowCounts.regieMerges+' object_notes='+h.shadowCounts.objectNotes);
+    if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' maintenance_attachments='+h.shadowCounts.maintenanceAttachments+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus+' day_closures='+h.shadowCounts.dayClosures+' time_entries='+h.shadowCounts.timeEntries+' objects='+h.shadowCounts.objects+' regie_merges='+h.shadowCounts.regieMerges+' object_notes='+h.shadowCounts.objectNotes);
     console.log('RAILWAY_SESSIONS active='+Number(h.activeRailwaySessions||0));
     if(h.directReadReady)console.log('DIRECT_READ_READY manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders)+' offer_reminders='+Boolean(h.directReadReady.offerReminders)+' planner_workers='+Boolean(h.directReadReady.plannerWorkers)+' absences='+Boolean(h.directReadReady.absences)+' vacation_keys='+Number(h.directReadReady.vacationVerifiedKeys||0)+' timebank_employees='+Number(h.directReadReady.timeBankVerifiedEmployees||0)+' my_timebank_employees='+Number(h.directReadReady.myTimeBankVerifiedEmployees||0));
     if(Array.isArray(h.shadowReadiness)&&h.shadowReadiness.length)console.log('SHADOW_READINESS '+h.shadowReadiness.map(x=>x.shadowName+'='+x.status+'('+x.mismatches+')').join(' | '));
