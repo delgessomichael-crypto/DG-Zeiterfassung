@@ -5476,11 +5476,11 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 
 
 /* ===== PAYROLL ===== */
-/* DG Zeiterfassung 8.0 - Payroll UI Final
+/* DG Zeiterfassung 9.0 - Payroll UI Final
    Selected month status, force close button, correct top tile due date. */
 (function(){
 'use strict';
-const V='8.0';
+const V='9.0';
 const BACKEND='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
 const $=id=>document.getElementById(id);
 let resultObserver=null,installing=false;
@@ -5734,12 +5734,12 @@ function observe(){
 function install(){
   if(installing)return;installing=true;
   try{
-    document.documentElement.dataset.dgVersion='8.0';
+    document.documentElement.dataset.dgVersion='9.0';
     ensureCss();ensurePayrollSectionUi();bind();wrap();observe();
     refreshPayrollSection();refreshBossMonthState();refreshTopTile();
-    document.title='DG Zeiterfassung 8.0';
-    document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version 8.0';});
-    document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - 8.0';});
+    document.title='DG Zeiterfassung 9.0';
+    document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version 9.0';});
+    document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - 9.0';});
   }finally{installing=false;}
 }
 window.dg80PayrollInstall=install;
