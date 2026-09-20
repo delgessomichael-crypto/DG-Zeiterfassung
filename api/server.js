@@ -3403,9 +3403,64 @@ async function directOwnRemindersRead(body){
   return rows;
 }
 
+
+async function directOfferRemindersRead(body){
+  const session=await localSessionForBody(body,true);
+  if(!session)return null;
+  if(!(await shadowReadyForDirectRead('offer_reminders')))return null;
+  const includeDone=Boolean(body.includeDone);
+  const q=await pool.query(
+    `SELECT r.id,r.offer_id,r.customer,r.offer_number,r.phone,r.email,r.description,
+            r.created_at_text,r.due_date_text,r.status,r.result,r.changed_at_text,r.changed_by,
+            COALESCE(SUM(t.hours),0)::numeric AS total_hours
+       FROM offer_reminders_shadow r
+       LEFT JOIN time_entries_shadow t ON t.offer_id=r.offer_id
+      ${includeDone?'':"WHERE COALESCE(r.status,'Offen')='Offen'"}
+      GROUP BY r.id,r.offer_id,r.customer,r.offer_number,r.phone,r.email,r.description,
+               r.created_at_text,r.due_date_text,r.status,r.result,r.changed_at_text,r.changed_by`
+  );
+  const today=berlinDateOnly(new Date());
+  const rows=q.rows.map(r=>{
+    const due=berlinDateOnly(r.due_date_text);
+    return {
+      id:String(r.id||''),offerId:String(r.offer_id||''),customer:String(r.customer||''),
+      offerNumber:String(r.offer_number||''),phone:String(r.phone||''),email:String(r.email||''),
+      description:String(r.description||''),createdAt:berlinDateTime(r.created_at_text),
+      dueDate:due,status:String(r.status||'Offen'),result:String(r.result||''),
+      changedAt:berlinDateTime(r.changed_at_text),changedBy:String(r.changed_by||''),
+      isDue:Boolean(due&&due<=today),isOverdue:Boolean(due&&due<today),
+      totalHours:Number(r.total_hours||0)
+    };
+  });
+  rows.sort((a,b)=>{
+    if(a.status!==b.status)return a.status==='Offen'?-1:1;
+    if(a.dueDate!==b.dueDate)return String(a.dueDate).localeCompare(String(b.dueDate));
+    return String(a.customer).localeCompare(String(b.customer),'de');
+  });
+  return rows;
+}
+
+async function directPlannerWorkersRead(body){
+  const session=await localSessionForBody(body,true);
+  if(!session)return null;
+  if(!(await shadowReadyForDirectRead('planner_workers')))return null;
+  const q=await pool.query(
+    `SELECT id,employee_name,display_name,provider,calendar_id,active,sort_order
+       FROM planner_workers_shadow
+      ORDER BY sort_order ASC,display_name ASC`
+  );
+  return q.rows.map(r=>({
+    id:String(r.id||''),employeeName:String(r.employee_name||''),
+    displayName:String(r.display_name||r.employee_name||''),provider:String(r.provider||'google'),
+    calendarId:String(r.calendar_id||''),active:Boolean(r.active),sortOrder:Number(r.sort_order||999)
+  }));
+}
+
 async function tryDirectPostgresRead(action,body){
   if(action==='getManualOrders')return directManualOrdersRead(body);
   if(action==='getOwnReminders')return directOwnRemindersRead(body);
+  if(action==='getOfferReminders')return directOfferRemindersRead(body);
+  if(action==='getPlannerWorkers')return directPlannerWorkersRead(body);
   return null;
 }
 
@@ -3450,7 +3505,7 @@ async function proxyLegacy(req, res, body) {
       console.error('Postgres employee read failed; falling back to Google:', e.message);
     }
   }
-  if (['getManualOrders','getOwnReminders'].includes(action)) {
+  if (['getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers'].includes(action)) {
     try {
       const direct=await tryDirectPostgresRead(action,body);
       if (direct!==null) {
@@ -3748,7 +3803,9 @@ async function health() {
       activeRailwaySessions=sessionQ.rows[0]?.n||0;
       directReadReady={
         manualOrders:await shadowReadyForDirectRead('manual_orders'),
-        ownReminders:await shadowReadyForDirectRead('own_reminders')
+        ownReminders:await shadowReadyForDirectRead('own_reminders'),
+        offerReminders:await shadowReadyForDirectRead('offer_reminders'),
+        plannerWorkers:await shadowReadyForDirectRead('planner_workers')
       };
     } catch (e) {
       database = 'error';
@@ -3919,7 +3976,7 @@ initDb()
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
     if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus+' day_closures='+h.shadowCounts.dayClosures+' time_entries='+h.shadowCounts.timeEntries+' objects='+h.shadowCounts.objects+' regie_merges='+h.shadowCounts.regieMerges+' object_notes='+h.shadowCounts.objectNotes);
     console.log('RAILWAY_SESSIONS active='+Number(h.activeRailwaySessions||0));
-    if(h.directReadReady)console.log('DIRECT_READ_READY manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders));
+    if(h.directReadReady)console.log('DIRECT_READ_READY manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders)+' offer_reminders='+Boolean(h.directReadReady.offerReminders)+' planner_workers='+Boolean(h.directReadReady.plannerWorkers));
     if(Array.isArray(h.shadowReadiness)&&h.shadowReadiness.length)console.log('SHADOW_READINESS '+h.shadowReadiness.map(x=>x.shadowName+'='+x.status+'('+x.mismatches+')').join(' | '));
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
