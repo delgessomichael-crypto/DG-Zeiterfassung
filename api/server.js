@@ -450,7 +450,7 @@ async function refreshGooglePing() {
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
          VALUES('ping',$1::jsonb,true,$2::jsonb,$3,$4)`,
         [JSON.stringify({action:'ping',clientVersion:'9.0',source:'background-check'}),
-         JSON.stringify(parsed), upstream.status, Math.max(0,Date.now()-startedAt)]
+         JSON.stringify(sanitizeForLog(parsed)), upstream.status, Math.max(0,Date.now()-startedAt)]
       )
     ]);
   }
@@ -550,12 +550,19 @@ function normalizedCachePayload(body) {
   return clone;
 }
 
-function sanitizedLogPayload(body) {
-  const clone = Object.assign({}, body || {});
-  for (const key of Object.keys(clone)) {
-    if (SENSITIVE_REQUEST_FIELDS.has(key) && clone[key] !== undefined) clone[key] = '[redacted]';
+function sanitizeForLog(value) {
+  if (Array.isArray(value)) return value.map(sanitizeForLog);
+  if (!value || typeof value !== 'object') return value;
+  const out = {};
+  for (const [key,val] of Object.entries(value)) {
+    if (SENSITIVE_REQUEST_FIELDS.has(key)) out[key] = '[redacted]';
+    else out[key] = sanitizeForLog(val);
   }
-  return clone;
+  return out;
+}
+
+function sanitizedLogPayload(body) {
+  return sanitizeForLog(body || {});
 }
 
 function isCacheableAction(action) {
@@ -766,7 +773,7 @@ async function proxyLegacy(req, res, body) {
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
          VALUES($1,$2::jsonb,$3,$4::jsonb,$5,$6)`,
         [action,JSON.stringify(sanitizedLogPayload(body)),Boolean(parsed && parsed.ok !== false),
-         parsed ? JSON.stringify(parsed) : null,upstream.status,Math.max(0,Date.now()-upstreamStartedAt)]
+         parsed ? JSON.stringify(sanitizeForLog(parsed)) : null,upstream.status,Math.max(0,Date.now()-upstreamStartedAt)]
       ).catch(e=>console.error('legacy action log failed',e.message));
     }
     cors(req,res);
