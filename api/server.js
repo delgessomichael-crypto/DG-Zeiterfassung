@@ -84,6 +84,9 @@ CREATE TABLE IF NOT EXISTS legacy_action_log (
 CREATE INDEX IF NOT EXISTS legacy_action_log_action_idx
   ON legacy_action_log(action, created_at DESC);
 
+CREATE INDEX IF NOT EXISTS legacy_action_log_duration_idx
+  ON legacy_action_log(duration_ms DESC, created_at DESC);
+
 ALTER TABLE legacy_action_log
   ADD COLUMN IF NOT EXISTS duration_ms INTEGER;
 
@@ -99,9 +102,20 @@ VALUES
 ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=now();
 `;
 
+async function cleanupInternalData() {
+  if (!pool) return;
+  await pool.query("DELETE FROM response_cache WHERE created_at < now() - interval '24 hours'");
+  await pool.query("DELETE FROM legacy_action_log WHERE created_at < now() - interval '30 days'");
+}
+
 async function initDb() {
   if (!pool) return;
   await pool.query(schema);
+  await cleanupInternalData();
+  const timer = setInterval(() => {
+    cleanupInternalData().catch(e => console.error('internal cleanup failed', e.message));
+  }, 6 * 60 * 60 * 1000);
+  if (typeof timer.unref === 'function') timer.unref();
 }
 
 function cors(req, res) {
