@@ -881,6 +881,52 @@ async function mirrorOwnReminderWrite(action, body, parsed) {
   }
 }
 
+
+function normalizeShadowText(v){return String(v==null?'':v).trim();}
+
+async function verifyManualOrdersShadow(rows) {
+  if (!pool || !Array.isArray(rows)) return;
+  const q=await pool.query(
+    `SELECT id,customer,address,phone,email,description,source,inquiry_id,status,internal_note
+       FROM manual_orders_shadow`
+  );
+  const pg=new Map(q.rows.map(r=>[String(r.id),r]));
+  let mismatches=0;
+  const seen=new Set();
+  for(const r of rows){
+    const id=normalizeShadowText(r&&r.id);if(!id){mismatches++;continue;}
+    seen.add(id);const p=pg.get(id);if(!p){mismatches++;continue;}
+    const pairs=[
+      [r.customer,p.customer],[r.address,p.address],[r.phone,p.phone],[r.email,p.email],
+      [r.description,p.description],[r.source,p.source],[r.inquiryId,p.inquiry_id],
+      [r.status,p.status],[r.internalNote,p.internal_note]
+    ];
+    if(pairs.some(([a,b])=>normalizeShadowText(a)!==normalizeShadowText(b)))mismatches++;
+  }
+  for(const id of pg.keys())if(!seen.has(id))mismatches++;
+  console.log('SHADOW_VERIFY manual_orders google='+rows.length+' postgres='+pg.size+' mismatches='+mismatches);
+}
+
+async function verifyOwnRemindersShadow(rows) {
+  if (!pool || !Array.isArray(rows)) return;
+  const q=await pool.query(
+    `SELECT id,reminder_text,due_date_text,status,result,internal_note FROM own_reminders_shadow`
+  );
+  const pg=new Map(q.rows.map(r=>[String(r.id),r]));
+  let mismatches=0;const seen=new Set();
+  for(const r of rows){
+    const id=normalizeShadowText(r&&r.id);if(!id){mismatches++;continue;}
+    seen.add(id);const p=pg.get(id);if(!p){mismatches++;continue;}
+    const pairs=[
+      [r.text,p.reminder_text],[r.dueDate,p.due_date_text],[r.status,p.status],
+      [r.result,p.result],[r.internalNote,p.internal_note]
+    ];
+    if(pairs.some(([a,b])=>normalizeShadowText(a)!==normalizeShadowText(b)))mismatches++;
+  }
+  for(const id of pg.keys())if(!seen.has(id))mismatches++;
+  console.log('SHADOW_VERIFY own_reminders google='+rows.length+' postgres='+pg.size+' mismatches='+mismatches);
+}
+
 async function mirrorManualOrderWrite(action, body, parsed) {
   if (!pool) return;
   const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
@@ -998,6 +1044,11 @@ async function proxyLegacy(req, res, body) {
     raw = await upstream.text();
     try { parsed = JSON.parse(raw); } catch (_e) {}
     if (pool) {
+      if (upstream.status === 200 && parsed && parsed.ok !== false) {
+        const verifyData=parsed.data!==undefined?parsed.data:parsed;
+        if (action==='getManualOrders') verifyManualOrdersShadow(verifyData).catch(e=>console.error('manual order shadow verify failed',e.message));
+        if (action==='getOwnReminders') verifyOwnRemindersShadow(verifyData).catch(e=>console.error('own reminder shadow verify failed',e.message));
+      }
       if (isCacheableAction(action)) {
         writeCachedResponse(action, body, raw, upstream.status).catch(e=>console.error('response cache write failed',e.message));
       } else if (action && action !== 'ping' && action !== 'employeeLogin') {
