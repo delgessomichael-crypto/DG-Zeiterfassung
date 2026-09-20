@@ -131,6 +131,7 @@ async function initDb() {
   if (!pool) return;
   await pool.query(schema);
   await cleanupInternalData();
+  await loadGooglePingCache();
   const cleanupTimer = setInterval(() => {
     cleanupInternalData().catch(e => console.error('internal cleanup failed', e.message));
   }, 6 * 60 * 60 * 1000);
@@ -140,6 +141,11 @@ async function initDb() {
     logLatencySummary().catch(e => console.error('latency summary failed', e.message));
   }, 5 * 60 * 1000);
   if (typeof latencyTimer.unref === 'function') latencyTimer.unref();
+
+  const pingTimer = setInterval(() => {
+    refreshGooglePing().catch(e => console.error('scheduled Google ping failed', e.message));
+  }, GOOGLE_PING_TTL_MS);
+  if (typeof pingTimer.unref === 'function') pingTimer.unref();
 }
 
 function cors(req, res) {
@@ -328,6 +334,86 @@ const CACHEABLE_ACTIONS = new Set([
 ]);
 
 const READ_CACHE_TTL_MS = 60 * 60 * 1000;
+const GOOGLE_PING_TTL_MS = 60 * 60 * 1000;
+let googlePingCache = null;
+
+async function loadGooglePingCache() {
+  if (!pool) return;
+  const q = await pool.query("SELECT value FROM app_meta WHERE key='google_backend_ping'");
+  if (!q.rowCount) return;
+  const v = q.rows[0].value;
+  if (v && v.raw && v.checkedAt) googlePingCache = v;
+}
+
+function googlePingFresh() {
+  if (!googlePingCache || !googlePingCache.checkedAt) return false;
+  const t = new Date(googlePingCache.checkedAt).getTime();
+  return Number.isFinite(t) && Date.now() - t < GOOGLE_PING_TTL_MS;
+}
+
+async function refreshGooglePing() {
+  if (!GOOGLE_BACKEND_URL) throw new Error('Google backend not configured');
+  const startedAt = Date.now();
+  const payload = {action:'ping',clientVersion:'9.0'};
+  const upstream = await fetch(GOOGLE_BACKEND_URL, {
+    method:'POST',
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body:JSON.stringify(payload),
+    redirect:'follow'
+  });
+  const raw = await upstream.text();
+  let parsed = null;
+  try { parsed = JSON.parse(raw); } catch (_e) {}
+  if (!upstream.ok || !parsed || parsed.ok === false) {
+    throw new Error('Google ping failed: HTTP '+upstream.status);
+  }
+  const value = {
+    raw,
+    httpStatus: upstream.status,
+    contentType: upstream.headers.get('content-type') || 'application/json; charset=utf-8',
+    checkedAt: new Date().toISOString()
+  };
+  googlePingCache = value;
+  if (pool) {
+    await Promise.all([
+      pool.query(
+        `INSERT INTO app_meta(key,value) VALUES('google_backend_ping',$1::jsonb)
+         ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
+        [JSON.stringify(value)]
+      ),
+      pool.query(
+        `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
+         VALUES('ping',$1::jsonb,true,$2::jsonb,$3,$4)`,
+        [JSON.stringify({action:'ping',clientVersion:'9.0',source:'background-check'}),
+         JSON.stringify(parsed), upstream.status, Math.max(0,Date.now()-startedAt)]
+      )
+    ]);
+  }
+  return value;
+}
+
+function sendGooglePingCache(req,res,value) {
+  cors(req,res);
+  res.writeHead(Number(value.httpStatus||200),{
+    'Content-Type':value.contentType||'application/json; charset=utf-8',
+    'Cache-Control':'no-store',
+    'X-DG-Ping-Cache':'HIT',
+    'X-DG-Ping-Age':String(Math.max(0,Math.floor((Date.now()-new Date(value.checkedAt).getTime())/1000))),
+    'X-Content-Type-Options':'nosniff'
+  });
+  return res.end(value.raw);
+}
+
+async function handlePing(req,res) {
+  if (googlePingFresh()) return sendGooglePingCache(req,res,googlePingCache);
+  try {
+    const value = await refreshGooglePing();
+    return sendGooglePingCache(req,res,value);
+  } catch (e) {
+    console.error('Google background ping failed:', e.message);
+    return json(res,502,{ok:false,error:'Google backend unavailable: '+e.message},req);
+  }
+}
 
 const EMPLOYEE_MUTATION_ACTIONS = new Set([
   'saveEmployeeAdmin',
@@ -458,6 +544,7 @@ async function getEmployeesFromSnapshot() {
 
 async function proxyLegacy(req, res, body) {
   const action = String(body && body.action || '');
+  if (action === 'ping') return handlePing(req,res);
   if (action === 'getEmployees') {
     try {
       const dirty = await isEmployeeSnapshotDirty();
@@ -717,7 +804,12 @@ initDb()
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
     await logLatencySummary();
   })
-  .then(() => server.listen(PORT, '0.0.0.0', () => console.log('DG-App-10 API listening on ' + PORT)))
+  .then(() => server.listen(PORT, '0.0.0.0', () => {
+    console.log('DG-App-10 API listening on ' + PORT);
+    if (!googlePingFresh()) {
+      setTimeout(() => refreshGooglePing().catch(e => console.error('startup Google ping failed', e.message)), 0);
+    }
+  }))
   .catch(err => {
     console.error('Database initialization failed', err);
     process.exit(1);
