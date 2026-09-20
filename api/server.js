@@ -6290,7 +6290,8 @@ async function health() {
         pool.query('SELECT COUNT(*)::int AS n FROM time_entries_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM objects_shadow'),
         pool.query('SELECT COUNT(*)::int AS n FROM regie_merges_shadow'),
-        pool.query('SELECT COUNT(*)::int AS n FROM object_notes_shadow')
+        pool.query('SELECT COUNT(*)::int AS n FROM object_notes_shadow'),
+        pool.query('SELECT COUNT(*)::int AS n FROM regie_attachments_shadow')
       ]);
       shadowCounts = {
         manualOrders: counts[0].rows[0]?.n||0,
