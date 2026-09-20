@@ -1,8 +1,7 @@
-/* DG ZEITERFASSUNG 9.0 - CLEAN PRODUCTION BUNDLE
-   Stand: 20.09.2026
-   Ein JavaScript-Bundle fuer Kern, Kundenfluss, Lohn und finale UI.
-   Entfernt: doppelte DG-3.7/DG-5.0-Bloecke, alte UI-Hotfixes 14/15,
-   Fokus-Experimente 21/22 sowie mehrfache Startup-/Login-Recovery-Pfade.
+/* DG ZEITERFASSUNG 9.0 - FINAL RAW APP
+   Functional freeze of the last proven 8.0 production state (UI28).
+   All employee and office features from before the 9.0 change are retained.
+   Startup/login are owned by launcher-9.0.js; backend target is Google-GS 9.0.
 */
 
 /* DG 8.0 FINAL CLEAN - einheitlicher Produktionsstand */
@@ -10,9 +9,9 @@
 'use strict';
 const V='9.0';
 function stamp(){
-  if(document.title!=='DG Zeiterfassung '+V)document.title='DG Zeiterfassung 9.0';
-  document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim())&&x.textContent!=='Version '+V)x.textContent='Version 9.0';});
-  document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(x.textContent||'')&&x.textContent!=='Zeiterfassung - '+V)x.textContent='Zeiterfassung - 9.0';});
+  if(document.title!=='DG Zeiterfassung '+V)document.title='DG Zeiterfassung '+V;
+  document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim())&&x.textContent!=='Version '+V)x.textContent='Version '+V;});
+  document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(x.textContent||'')&&x.textContent!=='Zeiterfassung - '+V)x.textContent='Zeiterfassung - '+V;});
   try{window.DG_APP_VERSION=V;window.DG_RELEASE=V;if(window.DG3)DG3.version=V;}catch(_e){}
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',stamp,{once:true});else stamp();
@@ -1966,6 +1965,153 @@ const baseStartup37=window.d3Startup;
 if(typeof baseStartup37==='function')window.d3Startup=d3Startup=function(){const r=baseStartup37.apply(this,arguments);setTimeout(()=>{d37MaintenanceShell();d37RepairPlannerAssignment();},0);return r;};
 })();
 
+/* DG 3.7: Wartungskunden, Objekte, Geräte, Wartungsarchiv und Kalender-Verfügbarkeitsprüfung. */
+(function(){
+'use strict';
+const S=window.DG37=window.DG37||{workers:[],previewEvents:[],previewDate:'',customer:null,overview:null,plannerLink:null,plannerEditId:''};
+const esc37=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const val=id=>String($(id)?.value||'').trim();
+const monthLabel=k=>{if(!/^\d{4}-\d{2}$/.test(k||''))return k||'';const [y,m]=k.split('-').map(Number);return new Intl.DateTimeFormat('de-DE',{month:'long',year:'numeric'}).format(new Date(y,m-1,1));};
+const fmtDevice=d=>[d.deviceType,d.otherDescription,d.manufacturer,d.model].filter(Boolean).join(' · ');
+function d37Notice(msg,type='info'){if(typeof d3Notice==='function')d3Notice(msg,type);else alert(msg);}
+
+/* ---------- Kalender: Mitarbeiterwahl + Tagesvorschau ---------- */
+async function d37Workers(){
+  if(S.workers.length)return S.workers;
+  S.workers=(await api(chefPayload({action:'getPlannerWorkers'}))||[]).filter(x=>x.active);
+  return S.workers;
+}
+function d37SelectedWorkerIds(){return [...document.querySelectorAll('#dg62Share .dg62cb:checked')].map(x=>x.value);}
+function d37EnsurePlannerPreview(){
+  const share=$('dg62Share');if(!share)return null;
+  let p=$('d37PlannerPreview');if(!p){p=document.createElement('div');p.id='d37PlannerPreview';p.className='d37-planner-preview';share.insertAdjacentElement('afterend',p);}return p;
+}
+async function d37RepairPlannerAssignment(){
+  const share=$('dg62Share');if(!share)return;
+  let workers=[];try{workers=await d37Workers();}catch(e){workers=[];}
+  if(!share.querySelector('.dg62cb')&&workers.length){
+    const selected=new Set((S.pendingWorkerIds||[]).map(String));
+    share.innerHTML=workers.map(w=>'<label><input type="checkbox" class="dg62cb" value="'+esc37(w.id)+'" '+(selected.has(String(w.id))?'checked':'')+'>'+esc37(w.displayName||w.employeeName)+'</label>').join('');
+    const hint=$('dg62ShareHint');if(hint)hint.textContent='Mitarbeiter auswählen. Darunter wird der Kalender des gewählten Tages eingeblendet.';
+  }
+  [...share.querySelectorAll('.dg62cb')].forEach(cb=>{if(cb.dataset.d37)return;cb.dataset.d37='1';cb.addEventListener('change',d37PreviewPlannerDay);});
+  ['dg62ED','dg62Start','dg62End'].forEach(id=>{const e=$(id);if(e&&!e.dataset.d37){e.dataset.d37='1';e.addEventListener('change',d37PreviewPlannerDay);}});
+  d37EnsurePlannerPreview();await d37PreviewPlannerDay();
+}
+function d37Overlap(e,start,end){if(!start||!end)return false;return String(e.start||'')<end&&String(e.end||'')>start;}
+async function d37PreviewPlannerDay(){
+  const host=d37EnsurePlannerPreview();if(!host)return;
+  const date=val('dg62ED'),ids=d37SelectedWorkerIds(),start=val('dg62Start'),end=val('dg62End');
+  if(!date){host.innerHTML='<div class="muted small">Bitte zuerst einen Tag auswählen.</div>';return;}
+  if(!ids.length){host.innerHTML='<div class="d37-preview-empty">Noch kein Mitarbeiter ausgewählt. Nach Auswahl erscheint hier dessen Kalender für '+esc37(formatDateDE(date))+'.</div>';return;}
+  host.innerHTML='<div class="status info">Kalender '+esc37(formatDateDE(date))+' wird geladen …</div>';
+  try{
+    const [workers,events]=await Promise.all([d37Workers(),api(chefPayload({action:'getPlannerEvents',startDate:date,endDate:date}))]);
+    S.previewEvents=(events||[]);S.previewDate=date;
+    host.innerHTML='<div class="d37-preview-title">Kalender am '+esc37(formatDateDE(date))+'</div><div class="d37-preview-grid">'+ids.map(id=>{
+      const w=workers.find(x=>String(x.id)===String(id))||{displayName:id};
+      const ev=(events||[]).filter(x=>(x.employeeIds||[]).map(String).includes(String(id))&&String(x.id)!==String(S.plannerEditId||''));
+      const conflicts=ev.filter(x=>d37Overlap(x,start,end));
+      return '<div class="d37-preview-worker '+(conflicts.length?'conflict':'')+'"><strong>'+esc37(w.displayName||w.employeeName)+'</strong>'+(ev.length?ev.map(x=>'<div class="d37-preview-event '+(d37Overlap(x,start,end)?'conflict':'')+'"><b>'+esc37(x.start)+'–'+esc37(x.end)+'</b> '+esc37(x.customer||'Termin')+(x.type==='Wartung'?' <span>🔧</span>':'')+'<div class="small muted">'+esc37(x.task||'')+'</div></div>').join(''):'<div class="d37-free">Keine Termine – Zeitraum frei.</div>')+(conflicts.length?'<div class="d37-conflict-note">⚠ Überschneidung mit der gewählten Uhrzeit.</div>':'')+'</div>';
+    }).join('')+'</div>';
+  }catch(e){host.innerHTML='<div class="status error">Kalender konnte nicht geladen werden: '+esc37(e.message)+'</div>';}
+}
+function d37PlannerConflicts(){const ids=d37SelectedWorkerIds(),date=val('dg62ED'),start=val('dg62Start'),end=val('dg62End');if(date!==S.previewDate)return [];return (S.previewEvents||[]).filter(e=>String(e.id)!==String(S.plannerEditId||'')&&(e.employeeIds||[]).some(id=>ids.includes(String(id)))&&d37Overlap(e,start,end));}
+const baseNew37=window.dg62New;
+if(typeof baseNew37==='function')window.dg62New=function(){S.plannerEditId='';S.pendingWorkerIds=[];S.plannerLink=null;const r=baseNew37.apply(this,arguments);setTimeout(d37RepairPlannerAssignment,0);return r;};
+const baseEdit37=window.dg62Edit;
+if(typeof baseEdit37==='function')window.dg62Edit=function(id){S.plannerEditId=String(id||'');const r=baseEdit37.apply(this,arguments);setTimeout(d37RepairPlannerAssignment,0);return r;};
+const baseSave37=window.dg62Save;
+if(typeof baseSave37==='function')window.dg62Save=async function(){const conflicts=d37PlannerConflicts();if(conflicts.length&&!confirm('Achtung: Der gewählte Zeitraum überschneidet sich mit '+conflicts.length+' vorhandenem Termin(en) des ausgewählten Mitarbeiters. Trotzdem speichern?'))return;return baseSave37.apply(this,arguments);};
+const baseApi37=window.api;
+if(typeof baseApi37==='function')window.api=api=async function(payload){
+  if(payload&&payload.action==='savePlannerEvent'&&payload.item&&payload.item.type==='Wartung'&&S.plannerLink){Object.assign(payload.item,{maintenanceCustomerId:S.plannerLink.customerId||'',maintenanceObjectId:S.plannerLink.objectId||'',maintenanceDeviceId:S.plannerLink.deviceId||''});}
+  const r=await baseApi37.apply(this,arguments);
+  if(payload&&payload.action==='savePlannerEvent')S.plannerLink=null;
+  return r;
+};
+
+/* ---------- Wartungskunden: Formular ---------- */
+function d37BlankCustomer(){return{id:'',name:'',billingStreet:'',billingZip:'',billingCity:'',email:'',phone:'',objects:[d37BlankObject()]};}
+function d37BlankObject(){return{id:'',name:'',street:'',zip:'',city:'',notes:'',devices:[d37BlankDevice()]};}
+function d37BlankDevice(){return{id:'',deviceType:'Gas Brennwert',otherDescription:'',manufacturer:'',model:'',serialNumber:'',year:'',tenantName:'',tenantPhone:'',tenantEmail:'',sparePartManufacturer:'',sparePartSerialNumber:'',internalNotes:'',nextMaintenanceDue:'',repairs:[]};}
+function d37Field(label,key,value='',type='text',extra=''){return '<label>'+label+'</label><input data-d37="'+key+'" type="'+type+'" value="'+esc37(value)+'" '+extra+'>';}
+function d37DeviceHtml(d,oi,di){
+  const repairs=(d.repairs||[]).map(r=>'<div class="d37-repair"><b>'+esc37(formatDateDE(r.date||''))+'</b> · '+esc37(r.description||'')+(r.createdBy?'<div class="small muted">Erfasst von '+esc37(r.createdBy)+'</div>':'')+'</div>').join('');
+  const history=(d.history||[]).map(r=>'<div class="d37-repair"><b>'+esc37(formatDateDE(r.date||''))+'</b> · '+esc37(r.description||'')+'<div class="small muted">'+esc37(r.employee||'')+' · '+Number(r.hours||0).toFixed(2).replace('.',',')+' Std.'+(r.nextMaintenanceDue?' · nächste Wartung '+esc37(monthLabel(r.nextMaintenanceDue)):'')+'</div></div>').join('');
+  return '<div class="d37-device" data-device-index="'+di+'" data-device-id="'+esc37(d.id||'')+'"><div class="d37-subhead"><strong>Gerät '+(di+1)+'</strong><button type="button" class="btn danger d37-mini" onclick="return d37RemoveDevice('+oi+','+di+')">Gerät entfernen</button></div><div class="d37-grid3">'
+    +'<div><label>Geräteart</label><select data-d37="deviceType" onchange="d37ToggleOther(this)">'+['Gas Atmosphärisch','Gas Brennwert','Öl Atmosphärisch','Öl Brennwert','Hebeanlage','Sonstiges'].map(x=>'<option '+(d.deviceType===x?'selected':'')+'>'+x+'</option>').join('')+'</select></div>'
+    +'<div class="d37-other '+(d.deviceType==='Sonstiges'?'':'hidden')+'">'+d37Field('Beschreibung bei Sonstiges','otherDescription',d.otherDescription)+'</div>'
+    +'<div>'+d37Field('Hersteller','manufacturer',d.manufacturer)+'</div><div>'+d37Field('Typ / Modell','model',d.model)+'</div><div>'+d37Field('Seriennummer','serialNumber',d.serialNumber)+'</div><div>'+d37Field('Baujahr','year',d.year,'number','min="1900" max="2200"')+'</div>'
+    +'<div>'+d37Field('Ersatzteil-Hersteller','sparePartManufacturer',d.sparePartManufacturer)+'</div><div>'+d37Field('Ersatzteil-Seriennummer','sparePartSerialNumber',d.sparePartSerialNumber)+'</div><div>'+d37Field('Nächste Wartung fällig','nextMaintenanceDue',d.nextMaintenanceDue,'month')+'</div></div>'
+    +'<div class="d37-section-label">Mieter / Ansprechpartner am Gerät <span class="muted small">(optional)</span></div><div class="d37-grid3"><div>'+d37Field('Name','tenantName',d.tenantName)+'</div><div>'+d37Field('Telefon','tenantPhone',d.tenantPhone,'tel')+'</div><div>'+d37Field('E-Mail','tenantEmail',d.tenantEmail,'email')+'</div></div>'
+    +'<label>Interne Vermerke</label><textarea data-d37="internalNotes">'+esc37(d.internalNotes||'')+'</textarea>'
+    +(d.id?'<div class="d37-repair-box"><div class="d37-subhead"><strong>Wartungsberichte</strong></div>'+(history||'<div class="muted small">Noch keine abgeschlossenen Wartungen hinterlegt.</div>')+'<div class="d37-subhead" style="margin-top:12px"><strong>Reparaturen außerhalb des Wartungsvertrags</strong><button type="button" class="btn secondary d37-mini" onclick="return d37AddRepair(\''+esc37(d.id)+'\')">+ Reparatur eintragen</button></div>'+(repairs||'<div class="muted small">Noch keine Reparaturen hinterlegt.</div>')+'</div>':'')
+    +'</div>';
+}
+function d37ObjectHtml(o,oi){return '<div class="d37-object" data-object-index="'+oi+'" data-object-id="'+esc37(o.id||'')+'"><div class="d37-subhead"><h3>Objekt '+(oi+1)+'</h3><button type="button" class="btn danger d37-mini" onclick="return d37RemoveObject('+oi+')">Objekt entfernen</button></div><div class="d37-grid2"><div>'+d37Field('Objektbezeichnung','objectName',o.name)+'</div><div>'+d37Field('Straße / Hausnummer','street',o.street)+'</div><div>'+d37Field('PLZ','zip',o.zip)+'</div><div>'+d37Field('Ort','city',o.city)+'</div></div><label>Objekt-Vermerk</label><textarea data-d37="objectNotes">'+esc37(o.notes||'')+'</textarea><div class="d37-devices">'+(o.devices||[]).map((d,di)=>d37DeviceHtml(d,oi,di)).join('')+'</div><button type="button" class="btn secondary" onclick="return d37AddDevice('+oi+')">+ Weiteres Gerät an diesem Objekt</button></div>';}
+function d37RenderCustomerForm(hostId,model,mode){
+  const host=$(hostId);if(!host)return;S.customer=JSON.parse(JSON.stringify(model||d37BlankCustomer()));
+  host.innerHTML='<div class="d37-customer-form" data-host="'+esc37(hostId)+'" data-mode="'+esc37(mode)+'"><input type="hidden" class="d37CustomerId" value="'+esc37(S.customer.id||'')+'"><div class="d37-section-label">1. Kundendaten / Rechnungsempfänger</div><div class="d37-grid2"><div>'+d37Field('Name / Firma','customerName',S.customer.name)+'</div><div>'+d37Field('E-Mail','customerEmail',S.customer.email,'email')+'</div><div>'+d37Field('Telefon','customerPhone',S.customer.phone,'tel')+'</div><div>'+d37Field('Rechnungsadresse – Straße / Hausnummer','billingStreet',S.customer.billingStreet)+'</div><div>'+d37Field('Rechnungsadresse – PLZ','billingZip',S.customer.billingZip)+'</div><div>'+d37Field('Rechnungsadresse – Ort','billingCity',S.customer.billingCity)+'</div></div><div class="d37-section-label">2. Ausführungsorte / Objekte</div><div id="d37Objects">'+(S.customer.objects||[]).map(d37ObjectHtml).join('')+'</div><button type="button" class="btn secondary" onclick="return d37AddObject()">+ Weiteres Objekt hinzufügen</button><div class="d37CustomerStatus"></div><button type="button" class="btn success d37-save-customer" onclick="return d37SaveCustomer(\''+mode+'\')">'+(mode==='edit'?'Kundendaten speichern':'Kunde und Wartungsgeräte anlegen')+'</button></div>';
+}
+function d37ReadField(root,key){const e=root.querySelector('[data-d37="'+key+'"]');return e?String(e.value||'').trim():'';}
+function d37ActiveCustomerForm(){return document.querySelector('#d37MaintenanceManage:not(.hidden) .d37-customer-form')||document.querySelector('#d37MaintenanceCreate:not(.hidden) .d37-customer-form')||document.querySelector('.d37-customer-form');}
+function d37CollectCustomer(validate=true,root){
+  root=root||d37ActiveCustomerForm();if(!root)return null;
+  const c={id:String(root.querySelector('.d37CustomerId')?.value||'').trim(),name:d37ReadField(root,'customerName'),email:d37ReadField(root,'customerEmail'),phone:d37ReadField(root,'customerPhone'),billingStreet:d37ReadField(root,'billingStreet'),billingZip:d37ReadField(root,'billingZip'),billingCity:d37ReadField(root,'billingCity'),objects:[]};
+  [...root.querySelectorAll('.d37-object')].forEach(or=>{const o={id:or.dataset.objectId||'',name:d37ReadField(or,'objectName'),street:d37ReadField(or,'street'),zip:d37ReadField(or,'zip'),city:d37ReadField(or,'city'),notes:d37ReadField(or,'objectNotes'),devices:[]};[...or.querySelectorAll(':scope > .d37-devices > .d37-device')].forEach(dr=>{const d={id:dr.dataset.deviceId||'',deviceType:d37ReadField(dr,'deviceType'),otherDescription:d37ReadField(dr,'otherDescription'),manufacturer:d37ReadField(dr,'manufacturer'),model:d37ReadField(dr,'model'),serialNumber:d37ReadField(dr,'serialNumber'),year:d37ReadField(dr,'year'),tenantName:d37ReadField(dr,'tenantName'),tenantPhone:d37ReadField(dr,'tenantPhone'),tenantEmail:d37ReadField(dr,'tenantEmail'),sparePartManufacturer:d37ReadField(dr,'sparePartManufacturer'),sparePartSerialNumber:d37ReadField(dr,'sparePartSerialNumber'),internalNotes:d37ReadField(dr,'internalNotes'),nextMaintenanceDue:d37ReadField(dr,'nextMaintenanceDue')};o.devices.push(d);});c.objects.push(o);});
+  if(validate){
+    if(!c.name||!c.billingStreet||!c.billingZip||!c.billingCity)throw new Error('Bitte Name und vollständige Rechnungsadresse eintragen.');
+    if(!c.objects.length)throw new Error('Mindestens ein Ausführungsobjekt ist erforderlich.');
+    c.objects.forEach((o,oi)=>{if(!o.name||!o.street||!o.zip||!o.city)throw new Error('Objekt '+(oi+1)+': Bezeichnung und vollständige Adresse fehlen.');if(!o.devices.length)throw new Error('Objekt '+(oi+1)+': Mindestens ein Wartungsgerät anlegen.');o.devices.forEach((d,di)=>{if(!d.deviceType)throw new Error('Objekt '+(oi+1)+', Gerät '+(di+1)+': Geräteart fehlt.');if(d.deviceType==='Sonstiges'&&!d.otherDescription)throw new Error('Objekt '+(oi+1)+', Gerät '+(di+1)+': Bei „Sonstiges“ ist die Beschreibung Pflicht.');if(!/^\d{4}-\d{2}$/.test(d.nextMaintenanceDue||''))throw new Error('Objekt '+(oi+1)+', Gerät '+(di+1)+': Nächste Wartung mit Monat und Jahr eintragen.');});});
+  }
+  return c;
+}
+function d37SyncModel(){try{S.customer=d37CollectCustomer(false)||S.customer;}catch(_e){}return S.customer;}
+window.d37ToggleOther=function(sel){const dev=sel.closest('.d37-device'),other=dev?.querySelector('.d37-other');if(other)other.classList.toggle('hidden',sel.value!=='Sonstiges');};
+window.d37AddObject=function(){const form=d37ActiveCustomerForm(),c=d37SyncModel();c.objects=c.objects||[];c.objects.push(d37BlankObject());d37RenderCustomerForm(form?.dataset.host||'d37CustomerCreateHost',c,form?.dataset.mode||'create');return false;};
+window.d37RemoveObject=function(i){const form=d37ActiveCustomerForm(),c=d37SyncModel();if(c.objects.length<=1)return alert('Mindestens ein Objekt muss vorhanden bleiben.');c.objects.splice(i,1);d37RenderCustomerForm(form?.dataset.host||'d37CustomerCreateHost',c,form?.dataset.mode||'create');return false;};
+window.d37AddDevice=function(i){const form=d37ActiveCustomerForm(),c=d37SyncModel();c.objects[i].devices.push(d37BlankDevice());d37RenderCustomerForm(form?.dataset.host||'d37CustomerCreateHost',c,form?.dataset.mode||'create');return false;};
+window.d37RemoveDevice=function(oi,di){const form=d37ActiveCustomerForm(),c=d37SyncModel();if(c.objects[oi].devices.length<=1)return alert('Mindestens ein Gerät muss an diesem Objekt vorhanden bleiben.');c.objects[oi].devices.splice(di,1);d37RenderCustomerForm(form?.dataset.host||'d37CustomerCreateHost',c,form?.dataset.mode||'create');return false;};
+window.d37SaveCustomer=async function(mode){const form=d37ActiveCustomerForm(),st=form?.querySelector('.d37CustomerStatus');try{const item=d37CollectCustomer(true,form);if(st){st.className='d37CustomerStatus status info';st.textContent='Kundendaten werden gespeichert …';}const saved=await api(chefPayload({action:'saveMaintenanceCustomer',item}));S.customer=saved;d37RenderCustomerForm(mode==='edit'?'d37CustomerEditHost':'d37CustomerCreateHost',saved,'edit');const fresh=d37ActiveCustomerForm()?.querySelector('.d37CustomerStatus');if(fresh){fresh.className='d37CustomerStatus status ok';fresh.textContent='✓ Kunde, Objekte und Geräte gespeichert.';}await d37LoadMaintenanceOverview();}catch(e){if(st){st.className='d37CustomerStatus status error';st.textContent=e.message;}else d37Notice(e.message,'error');}return false;};
+window.d37AddRepair=function(deviceId){if(typeof d3Form!=='function')return;d3Form('Reparatur außerhalb Wartungsvertrag',[{name:'date',label:'Datum',type:'date'},{name:'description',label:'Ausgeführte Reparatur',type:'textarea'}],{date:localDate(),description:''},async v=>{if(!v.description.trim())throw new Error('Bitte Reparatur beschreiben.');await api(chefPayload({action:'addMaintenanceRepair',deviceId,date:v.date,description:v.description}));if(S.customer?.id){const fresh=await api(chefPayload({action:'getMaintenanceCustomer',id:S.customer.id}));d37RenderCustomerForm('d37CustomerEditHost',fresh,'edit');}});};
+
+/* ---------- Wartungsbereich ---------- */
+function d37MaintenanceShell(){
+  const card=$('d36Maintenance');if(!card)return;
+  const body=card.querySelector(':scope > .dg48-body');if(!body||$('d37MaintenanceNav'))return;
+  body.innerHTML='<div id="d37MaintenanceNav" class="d37-maint-nav"><button type="button" data-tab="overview" onclick="return d37MaintenanceTab(\'overview\')">Wartungsübersicht</button><button type="button" data-tab="create" onclick="return d37MaintenanceTab(\'create\')">Kunde anlegen</button><button type="button" data-tab="manage" onclick="return d37MaintenanceTab(\'manage\')">Kunde verwalten</button><button type="button" data-tab="archive" onclick="return d37MaintenanceTab(\'archive\')">Wartungsarchiv</button></div><div id="d37MaintenanceOverview" class="d37-maint-panel"></div><div id="d37MaintenanceCreate" class="d37-maint-panel hidden"><div id="d37CustomerCreateHost"></div></div><div id="d37MaintenanceManage" class="d37-maint-panel hidden"><div class="d37-search"><input id="d37CustomerSearch" placeholder="Kunde, Objekt, Adresse, Gerät oder Seriennummer suchen"><button type="button" class="btn primary" onclick="return d37SearchCustomers()">Suchen</button></div><div id="d37CustomerSearchResults"></div><div id="d37CustomerEditHost" class="hidden"></div></div><div id="d37MaintenanceArchive" class="d37-maint-panel hidden"><div class="d37-search"><input id="d37ArchiveSearch" placeholder="Archiv durchsuchen"><button type="button" class="btn primary" onclick="return d37LoadArchive()">Suchen</button></div><div id="d37ArchiveList"></div></div>';
+  d37RenderCustomerForm('d37CustomerCreateHost',d37BlankCustomer(),'create');
+  DG3.loaders.d36Maintenance=window.d37LoadMaintenanceOverview;
+}
+window.d37MaintenanceTab=function(tab){
+  document.querySelectorAll('#d37MaintenanceNav [data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+  const map={overview:'d37MaintenanceOverview',create:'d37MaintenanceCreate',manage:'d37MaintenanceManage',archive:'d37MaintenanceArchive'};Object.entries(map).forEach(([k,id])=>$(id)?.classList.toggle('hidden',k!==tab));
+  if(tab==='overview')d37LoadMaintenanceOverview();if(tab==='manage')d37SearchCustomers();if(tab==='archive')d37LoadArchive();return false;
+};
+window.d37LoadMaintenanceOverview=async function(){
+  d37MaintenanceShell();const host=$('d37MaintenanceOverview');if(!host)return;
+  host.innerHTML='<div class="status info">Wartungen werden geladen …</div>';
+  try{const data=await api(chefPayload({action:'getMaintenanceOverview'}));S.overview=data||{};d3Count('maintenance',Number(data.currentMonthOpen||0));
+    const months=(data.months||[]);host.innerHTML='<div class="d37-overview-head"><div><h3>Wartungen '+esc37(data.windowLabel||'')+'</h3><div class="muted small">Die Kachel zählt nur im aktuellen Monat noch offene, nicht terminierte Wartungen.</div></div><div class="d37-open-count"><span>Aktueller Monat offen</span><strong>'+Number(data.currentMonthOpen||0)+'</strong></div></div><div class="d37-months">'+months.map(m=>'<button type="button" class="d37-month '+(m.current?'current':'')+'" onclick="return d37ShowMonth(\''+esc37(m.key)+'\')"><span>'+esc37(m.label||monthLabel(m.key))+'</span><strong>'+Number(m.openCount||0)+'</strong><small>'+Number(m.scheduledCount||0)+' terminiert</small></button>').join('')+'</div><div id="d37MonthDetail"></div>';const cur=months.find(x=>x.current)||months[Math.min(3,Math.max(0,months.length-1))];if(cur)d37ShowMonth(cur.key);
+  }catch(e){host.innerHTML='<div class="status error">'+esc37(e.message)+'</div>';d3Count('maintenance','!');}
+};
+window.d37ShowMonth=function(key){const m=(S.overview?.months||[]).find(x=>x.key===key),host=$('d37MonthDetail');if(!m||!host)return false;document.querySelectorAll('.d37-month').forEach(b=>b.classList.toggle('selected',(b.textContent||'').includes(m.label||monthLabel(key))));host.innerHTML='<h3>'+esc37(m.label||monthLabel(key))+'</h3>'+((m.items||[]).map(x=>'<div class="report-card d37-maint-item"><div class="d3-head"><strong>🔧 '+esc37(x.customerName)+'</strong><span class="badge">'+(x.scheduled?'Terminiert':'Offen')+'</span></div><div><b>'+esc37(x.objectName)+'</b> · '+esc37(x.address||'')+'</div><div class="report-meta">'+esc37(fmtDevice(x))+(x.serialNumber?' · Seriennr. '+esc37(x.serialNumber):'')+'</div><div class="report-meta">Fällig: '+esc37(monthLabel(x.nextMaintenanceDue))+'</div>'+(x.scheduled?'<div class="status ok">Termin '+esc37(formatDateDE(x.plannedDate))+' · '+esc37((x.employeeNames||[]).join(', '))+'</div>':'<button type="button" class="btn success" onclick="return d37PlanMaintenance(\''+esc37(x.customerId)+'\',\''+esc37(x.objectId)+'\',\''+esc37(x.deviceId)+'\')">Wartung terminieren</button>')+'</div>').join('')||'<div class="status ok">In diesem Monat sind keine Wartungen fällig.</div>');return false;};
+window.d37PlanMaintenance=function(customerId,objectId,deviceId){const all=(S.overview?.months||[]).flatMap(m=>m.items||[]),x=all.find(r=>r.deviceId===deviceId);if(!x)return alert('Wartungsgerät bitte neu laden.');S.plannerLink={customerId,objectId,deviceId};window.dg62New();setTimeout(async()=>{S.plannerLink={customerId,objectId,deviceId};$('d36PlannerType').value='Wartung';$('dg62Customer').value=x.customerName||'';$('dg62Address').value=x.address||'';$('dg62Task').value='Wartung '+fmtDevice(x)+(x.serialNumber?' · Seriennummer '+x.serialNumber:'');if(x.nextMaintenanceDue&&/^\d{4}-\d{2}$/.test(x.nextMaintenanceDue)){$('dg62ED').value=x.nextMaintenanceDue+'-01';}await d37RepairPlannerAssignment();$('dg62MT').textContent='Wartung terminieren';},0);return false;};
+window.d37SearchCustomers=async function(){const host=$('d37CustomerSearchResults');if(!host)return false;try{const rows=await api(chefPayload({action:'searchMaintenanceCustomers',query:val('d37CustomerSearch')}));host.innerHTML=(rows||[]).map(x=>'<button type="button" class="d37-search-result" onclick="return d37OpenCustomer(\''+esc37(x.id)+'\')"><strong>'+esc37(x.name)+'</strong><span>'+Number(x.objectCount||0)+' Objekt(e) · '+Number(x.deviceCount||0)+' Gerät(e)</span><small>'+esc37(x.billingCity||'')+'</small></button>').join('')||'<div class="muted">Keine Kunden gefunden.</div>';}catch(e){host.innerHTML='<div class="status error">'+esc37(e.message)+'</div>';}return false;};
+window.d37OpenCustomer=async function(id){try{const c=await api(chefPayload({action:'getMaintenanceCustomer',id}));S.customer=c;$('d37CustomerEditHost').classList.remove('hidden');d37RenderCustomerForm('d37CustomerEditHost',c,'edit');$('d37CustomerEditHost').scrollIntoView({behavior:'instant',block:'start'});}catch(e){d37Notice(e.message,'error');}return false;};
+window.d37LoadArchive=async function(){const host=$('d37ArchiveList');if(!host)return false;host.innerHTML='<div class="status info">Archiv wird geladen …</div>';try{const rows=await api(chefPayload({action:'getMaintenanceArchive',query:val('d37ArchiveSearch')}));host.innerHTML=(rows||[]).map((x,i)=>'<div class="report-card '+(i%2?'d3-alt':'')+'"><div class="d3-head"><strong>'+esc37(x.kind==='Repair'?'🔧 Reparatur':'🧾 Wartungsbericht')+' · '+esc37(x.customerName)+'</strong><span class="badge">'+esc37(formatDateDE(x.date))+'</span></div><div>'+esc37(x.objectName||'')+' · '+esc37(x.deviceLabel||'')+'</div><div class="report-meta">'+esc37(x.description||'')+'</div>'+(x.employee?'<div class="small muted">Mitarbeiter: '+esc37(x.employee)+'</div>':'')+'</div>').join('')||'<div class="status ok">Noch keine Archiv-Einträge.</div>';}catch(e){host.innerHTML='<div class="status error">'+esc37(e.message)+'</div>';}return false;};
+
+/* ---------- Installation / Kachelzählung ---------- */
+const baseInstall37=window.d3InstallOffice;
+if(typeof baseInstall37==='function')window.d3InstallOffice=d3InstallOffice=function(){const r=baseInstall37.apply(this,arguments);d37MaintenanceShell();return r;};
+const baseDashboard37=window.d3Dashboard;
+if(typeof baseDashboard37==='function')window.d3Dashboard=d3Dashboard=async function(){const r=await baseDashboard37.apply(this,arguments);if(canAccessBoss()&&navigator.onLine){try{const o=await api(chefPayload({action:'getMaintenanceOverview'}));d3Count('maintenance',Number(o.currentMonthOpen||0));S.overview=o;}catch(_e){d3Count('maintenance','!');}}return r;};
+const baseOpen37=window.d3Open;
+if(typeof baseOpen37==='function')window.d3Open=d3Open=function(id,child){const r=baseOpen37.apply(this,arguments);if(id==='d36Maintenance')setTimeout(()=>{d37MaintenanceShell();d37LoadMaintenanceOverview();$('d36Maintenance')?.scrollIntoView({behavior:'instant',block:'start'});},0);return r;};
+const baseStartup37=window.d3Startup;
+if(typeof baseStartup37==='function')window.d3Startup=d3Startup=function(){const r=baseStartup37.apply(this,arguments);setTimeout(()=>{d37MaintenanceShell();d37RepairPlannerAssignment();},0);return r;};
+})();
 /* DG 3.7.1: Wartungskachel = Monatsreminder; nach Terminierung/Löschung sofort neu zählen. */
 (function(){
 'use strict';
@@ -2129,6 +2275,103 @@ const openMain39=window.openMain;
 if(typeof openMain39==='function')window.openMain=function(){const r=openMain39.apply(this,arguments);setTimeout(()=>{ensureMaintenanceTop39();const o=(window.DG38&&DG38.overview)||(window.DG37&&DG37.overview);if(o)renderStats39(o);decorateDeviceIds39();},250);return r;};
 const open39=window.d3Open;
 if(typeof open39==='function')window.d3Open=function(){const r=open39.apply(this,arguments);setTimeout(()=>{ensureMaintenanceTop39();const o=(window.DG38&&DG38.overview)||(window.DG37&&DG37.overview);if(o)renderStats39(o);decorateDeviceIds39();},0);return r;};
+})();
+
+/* DG 5.0: final maintenance UX, clean calendar text, customer master list, stable refresh */
+(function(){
+'use strict';
+const V='5.0';
+const esc50=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const months50=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+function due50(v){const m=/^(\d{4})-(\d{2})$/.exec(String(v||''));return m?months50[Number(m[2])-1]+' '+m[1]:String(v||'');}
+function cleanCalendarText50(v){
+  let s=String(v||'').replace(/\r/g,'\n');
+  s=s.replace(/Terminart:\s*(?:Wartung|Auftrag)/gi,' ')
+    .replace(/Was ist zu tun:\s*/gi,' ')
+    .replace(/DG-Termin-ID:\s*[A-Za-z0-9@._-]+/gi,' ')
+    .replace(/Wartung-Kunden-ID:\s*[A-Za-z0-9-]+/gi,' ')
+    .replace(/Wartung-Objekt-ID:\s*[A-Za-z0-9-]+/gi,' ')
+    .replace(/Wartung-(?:Geraet|Gerät)-ID:\s*[A-Za-z0-9-]+/gi,' ')
+    .replace(/Geräte-ID:\s*\d+/gi,' ')
+    .replace(/\s+/g,' ').trim();
+  return s;
+}
+function internalId50(v){const m=String(v||'').match(/Geräte-ID:\s*(\d+)/i);return m?m[1]:'';}
+
+/* Mitarbeiterkalender: ausschließlich lesbarer Auftragstext + sichtbare Geräte-ID. */
+const renderCal50=window.renderCalendarEvents;
+if(typeof renderCal50==='function')window.renderCalendarEvents=function(events){
+  const clean=(Array.isArray(events)?events:[]).map(e=>{
+    const raw=String(e.description||'');
+    return Object.assign({},e,{description:cleanCalendarText50(raw),internalDeviceId:e.internalDeviceId||internalId50(raw)});
+  });
+  const r=renderCal50.call(this,clean);
+  window.__dgCalendarEvents=clean;
+  [...document.querySelectorAll('#calendarEvents .entry')].forEach((card,i)=>{
+    const e=clean[i];if(!e||!e.internalDeviceId||card.querySelector('.d50-device-badge'))return;
+    const b=document.createElement('div');b.className='d50-device-badge';b.textContent='Geräte-ID '+e.internalDeviceId;const strong=card.querySelector('strong');(strong||card).insertAdjacentElement(strong?'afterend':'afterbegin',b);
+  });
+  return r;
+};
+
+/* Wartungskunden: neuer Reiter "Alle Kunden" mit alphabetischem Bestand. */
+function ensureAllCustomers50(){
+  const nav=$('d37MaintenanceNav');if(!nav||$('d50AllCustomersBtn'))return;
+  const b=document.createElement('button');b.type='button';b.id='d50AllCustomersBtn';b.dataset.tab='all';b.textContent='Alle Kunden';b.onclick=()=>d50OpenAllCustomers();nav.appendChild(b);
+  const panel=document.createElement('div');panel.id='d50MaintenanceAll';panel.className='d37-maint-panel hidden';nav.parentElement.appendChild(panel);
+}
+window.d50OpenAllCustomers=async function(){
+  ensureAllCustomers50();document.querySelectorAll('#d37MaintenanceNav [data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab==='all'));
+  document.querySelectorAll('#d37MaintenanceOverview,#d37MaintenanceCreate,#d37MaintenanceManage,#d37MaintenanceArchive,#d50MaintenanceAll').forEach(p=>p.classList.toggle('hidden',p.id!=='d50MaintenanceAll'));
+  const host=$('d50MaintenanceAll');if(!host)return false;
+  host.innerHTML='<div class="status info">Bestandskunden werden geladen …</div>';
+  try{
+    const rows=await api(chefPayload({action:'searchMaintenanceCustomers',query:''}));
+    const sorted=(rows||[]).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'de',{sensitivity:'base'}));
+    host.innerHTML='<h3>Alle Wartungskunden ('+sorted.length+')</h3>'+(sorted.map(x=>'<button type="button" class="d50-customer-row" data-id="'+esc50(x.id)+'"><strong>'+esc50(x.name)+'</strong><span>'+Number(x.objectCount||0)+' Objekt(e) · '+Number(x.deviceCount||0)+' Gerät(e)</span><small>'+esc50(x.billingCity||'')+'</small></button>').join('')||'<div class="status ok">Noch keine Wartungskunden angelegt.</div>');
+    host.querySelectorAll('.d50-customer-row').forEach(btn=>btn.onclick=async()=>{window.d37MaintenanceTab('manage');await window.d37OpenCustomer(btn.dataset.id);});
+  }catch(e){host.innerHTML='<div class="status error">'+esc50(e.message)+'</div>';}
+  return false;
+};
+const tab50=window.d37MaintenanceTab;
+if(typeof tab50==='function')window.d37MaintenanceTab=function(tab){ensureAllCustomers50();if(tab==='all')return d50OpenAllCustomers();return tab50.apply(this,arguments);};
+
+/* Büro-Regiebericht: Wartungs-Kontext vollständig und lesbar. */
+window.d3Single=d3Single=function(r){
+  const task=cleanCalendarText50(r.activity||'');
+  let h='<div class="entry"><strong>'+esc(formatDateDE(r.date))+' - '+esc(r.employee)+' - '+formatHours(r.hours)+' Std.</strong><div>'+esc(r.start)+' - '+esc(r.end)+'</div><div>'+esc(task)+'</div>';
+  if(r.maintenance){
+    h+='<div class="d50-maint-report">';
+    if(r.nextMaintenanceDue)h+='<div class="status ok"><strong>Nächste Wartung fällig:</strong> '+esc50(due50(r.nextMaintenanceDue))+'</div>';
+    if(r.internalDeviceId)h+='<div><strong>Geräte-ID:</strong> '+esc50(r.internalDeviceId)+'</div>';
+    if(r.billingName)h+='<div><strong>Rechnungsempfänger:</strong> '+esc50(r.billingName)+' · '+esc50([r.billingStreet,[r.billingZip,r.billingCity].filter(Boolean).join(' ')].filter(Boolean).join(', '))+'</div>';
+    if(r.billingEmail||r.billingPhone)h+='<div class="report-meta">'+[r.billingEmail?('E-Mail: '+esc50(r.billingEmail)):'',r.billingPhone?('Telefon: '+esc50(r.billingPhone)):''].filter(Boolean).join(' · ')+'</div>';
+    if(r.executionAddress)h+='<div><strong>Ausführungsort:</strong> '+esc50(r.executionObjectName||'')+(r.executionObjectName?' · ':'')+esc50(r.executionAddress)+'</div>';
+    h+='</div>';
+  }
+  if(r.materialUsed)h+='<div>Material: '+esc(r.material)+'</div>';
+  if(r.isSupplement)h+='<div class="status info">Nachtrag '+esc(r.supplementCreatedAt||'')+'</div>';
+  return h+'</div>';
+};
+
+/* Auto-Sync: nie offene Bürobereiche/Formulare neu rendern. Nur Zähler aktualisieren. */
+window.d3Sync=d3Sync=async function(){
+  if(DG3.syncing||DG3.pending||document.hidden||!navigator.onLine||!DG3.ready||!auth().employee||d3Dirty())return;
+  DG3.syncing=true;
+  try{
+    await syncQueue(false);
+    if(d3Visible($('employeeView'))){await loadDay();await loadCalendarEvents();}
+    else await d3Dashboard();
+    if($('d3Sync'))$('d3Sync').textContent='Zuletzt aktualisiert: '+new Date().toLocaleTimeString('de-DE')+' · offene Auswahlbereiche bleiben unverändert.';
+  }catch(e){if($('d3Sync'))$('d3Sync').textContent='Aktualisierung fehlgeschlagen: '+e.message;}
+  finally{DG3.syncing=false;}
+};
+
+try{DG3.version=V;window.DG_APP_VERSION=V;}catch(_e){}
+const oldOpenMain50=window.openMain;
+if(typeof oldOpenMain50==='function')window.openMain=function(){const r=oldOpenMain50.apply(this,arguments);setTimeout(ensureAllCustomers50,200);return r;};
+const oldOpen50=window.d3Open;
+if(typeof oldOpen50==='function')window.d3Open=function(){const r=oldOpen50.apply(this,arguments);setTimeout(ensureAllCustomers50,0);return r;};
 })();
 
 /* DG 5.0: final maintenance UX, clean calendar text, customer master list, stable refresh */
@@ -2996,7 +3239,7 @@ function installDayRenderer520(){if(window.__dg520DayWrapped)return;const old=wi
 function installPayrollUi520(){addCss520();installAdminWrappers520();makePayrollSection520();ensureCorrectionModal520();installDayRenderer520();const sync=()=>{if(byId('dg520Year')&&byId('bossYear'))byId('dg520Year').value=byId('bossYear').value;if(byId('dg520Month')&&byId('bossMonth'))byId('dg520Month').value=byId('bossMonth').value;updateDue520(currentAudit520)};if(byId('bossYear')&&!byId('bossYear').dataset.dg520){byId('bossYear').dataset.dg520='1';byId('bossYear').addEventListener('change',sync)}if(byId('bossMonth')&&!byId('bossMonth').dataset.dg520){byId('bossMonth').dataset.dg520='1';byId('bossMonth').addEventListener('change',sync)}}
 const oldLoadBossMonth520=window.loadBossMonth;if(typeof oldLoadBossMonth520==='function')window.loadBossMonth=async function(){const r=await oldLoadBossMonth520.apply(this,arguments);if(byId('dg520PayrollClose')){byId('dg520Year').value=byId('bossYear').value;byId('dg520Month').value=byId('bossMonth').value;updateDue520(currentAudit520)}return r};
 window.d3CheckBackend=d3CheckBackend=async function(force){try{if(force)sessionStorage.removeItem('dg51_backend');const cached=JSON.parse(sessionStorage.getItem('dg51_backend')||'null');if(!force&&cached&&cached.version&&Date.now()-Number(cached.ts||0)<1800000){const p=String(cached.version).split('.').map(Number),ok=p[0]>5||(p[0]===5&&p[1]>=2);if(ok){DG3.backend=String(cached.version);byId('d3Notice')?.remove();return true}}}catch(_e){}try{const r=await api({action:'ping'}),found=String(r&&r.version||''),p=found.split('.').map(Number),ok=p[0]>5||(p[0]===5&&p[1]>=2);DG3.backend=ok?found:'';if(ok){try{sessionStorage.setItem('dg51_backend',JSON.stringify({ts:Date.now(),version:found}))}catch(_e){}byId('d3Notice')?.remove();return true}d3Notice('App 5.2.5 benötigt Google-GS 5.2.0.2 oder neuer. Gefunden: '+(found||'unbekannt')+'. Speichern ist gesperrt.','warn');return false}catch(e){DG3.backend='';d3Notice('Verbindungsprüfung fehlgeschlagen: '+e.message,'warn');return false}};
-function versionLabels520(){document.title='DG Zeiterfassung 9.0';document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent))x.textContent='Zeiterfassung - 9.0'});document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test(x.textContent.trim()))x.textContent='Version 9.0'});try{DG3.version=V520;window.DG_APP_VERSION=V520}catch(_e){}try{sessionStorage.removeItem('dg51_backend')}catch(_e){}}
+function versionLabels520(){document.title='DG Zeiterfassung 5.2.0';document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent))x.textContent='Zeiterfassung - 5.2.0'});document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test(x.textContent.trim()))x.textContent='Version 5.2.0'});try{DG3.version=V520;window.DG_APP_VERSION=V520}catch(_e){}try{sessionStorage.removeItem('dg51_backend')}catch(_e){}}
 function boot520(){versionLabels520();installPayrollUi520();setTimeout(installPayrollUi520,200);setTimeout(installPayrollUi520,900)}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot520);else boot520();
 })();
 ;
@@ -3110,7 +3353,7 @@ function installOpenDayPatch521(){
 function applyFixes521(){addCss521();ensureDeleteModal521();ensurePayrollTile521();fixMaintenanceAndAdmin521();installDayRenderer521();installOpenDayPatch521();}
 const oldInstallOffice521=window.d3InstallOffice;if(typeof oldInstallOffice521==='function')window.d3InstallOffice=function(){const r=oldInstallOffice521.apply(this,arguments);setTimeout(applyFixes521,0);return r};
 let observer521Timer=0;const observer521=new MutationObserver(()=>{clearTimeout(observer521Timer);observer521Timer=setTimeout(()=>{ensurePayrollTile521();fixMaintenanceAndAdmin521();},120);});
-function boot521(){applyFixes521();const root=q521('bossView');if(root)observer521.observe(root,{childList:true,subtree:true});setTimeout(applyFixes521,250);setTimeout(applyFixes521,1200);setInterval(ensurePayrollTile521,3600000);document.title='DG Zeiterfassung 9.0';document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version 9.0'});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - 9.0'});try{if(window.DG3)DG3.version=V521;window.DG_APP_VERSION=V521}catch(_e){}}
+function boot521(){applyFixes521();const root=q521('bossView');if(root)observer521.observe(root,{childList:true,subtree:true});setTimeout(applyFixes521,250);setTimeout(applyFixes521,1200);setInterval(ensurePayrollTile521,3600000);document.title='DG Zeiterfassung '+V521;document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version '+V521});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - '+V521});try{if(window.DG3)DG3.version=V521;window.DG_APP_VERSION=V521}catch(_e){}}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot521);else boot521();
 })();
 
@@ -3168,7 +3411,7 @@ window.dg522ReviewOne=async function(issueEncoded,empEncoded,date){const issueId
 window.dg522ReleaseEmployee=async function(empEncoded){const employee=decodeURIComponent(empEncoded),issues=employeeIssues522(employee),openIssues=issues.filter(x=>!x.reviewed),p=period522();if(!openIssues.length)return false;if(!confirm(employee+': '+openIssues.length+' Auffälligkeit'+(openIssues.length===1?'':'en')+' als geprüft und korrekt bestätigen?'))return false;try{for(const x of openIssues){await api(chefPayload({action:'markPayrollIssueReviewed',issueId:x.id,targetEmployee:employee,year:p.year,month:p.month,date:x.date||'',note:'Mitarbeiter geprüft / freigegeben in Tagesübersicht'}));rememberReviewed522(x.id)}await refreshAudit522();if(typeof d3Notice==='function')d3Notice('✓ '+employee+' geprüft und freigegeben.','ok')}catch(e){if(typeof d3Notice==='function')d3Notice(e.message,'error');else alert(e.message)}return false};
 function installRenderer522(){if(window.__dg522RendererWrapped||typeof window.renderBossDayClosuresV48!=='function')return;window.__dg522RendererWrapped=true;const old=window.renderBossDayClosuresV48;window.renderBossDayClosuresV48=function(rows){const r=old.apply(this,arguments);lastRows522=rows||[];setTimeout(()=>refreshAudit522(rows),0);return r}}
 function installMonthSelectors522(){['dg48DayYear','dg48DayMonth'].forEach(id=>{const el=$522(id);if(!el||el.dataset.dg522==='1')return;el.dataset.dg522='1';el.addEventListener('change',()=>setTimeout(()=>refreshAudit522(),0))})}
-function boot522(){addCss522();installRenderer522();installMonthSelectors522();document.title='DG Zeiterfassung 9.0';document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version 9.0'});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - 9.0'});try{if(window.DG3)DG3.version=V522;window.DG_APP_VERSION=V522}catch(_e){}setTimeout(installMonthSelectors522,500)}
+function boot522(){addCss522();installRenderer522();installMonthSelectors522();document.title='DG Zeiterfassung '+V522;document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version '+V522});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - '+V522});try{if(window.DG3)DG3.version=V522;window.DG_APP_VERSION=V522}catch(_e){}setTimeout(installMonthSelectors522,500)}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot522);else boot522();
 })();
 
@@ -3252,14 +3495,13 @@ window.d3Sync=d3Sync=async function(force){
 const showBoss525=window.showBoss;
 if(typeof showBoss525==='function')window.showBoss=showBoss=function(){clearStaleReadNotice();return showBoss525.apply(this,arguments)};
 
-function stamp525(){document.title='DG Zeiterfassung 9.0';document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version 9.0'});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - 9.0'});try{DG3.version=V525;window.DG_APP_VERSION=V525}catch(_e){}}
+function stamp525(){document.title='DG Zeiterfassung '+V525;document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version '+V525});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - '+V525});try{DG3.version=V525;window.DG_APP_VERSION=V525}catch(_e){}}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',stamp525);else stamp525();
 })();
 
 
 
-
-/* DG9: core start deferred to final bootstrap. */
+/* DG9: core startup owned by launcher-9.0.js */
 ;
 
 /* ===== CLEAN SOURCE: app-6.0-runtime.js ===== */
@@ -3273,7 +3515,7 @@ const parts=v=>String(v||'').split('.').map(x=>Number(x)||0);
 const backendOk=v=>{const p=parts(v);return (p[0]||0)>=6||(p[0]===5&&p[1]===2&&p[2]===0&&(p[3]||0)>=8);};
 const backend60=v=>(parts(v)[0]||0)>=6;
 
-function stamp(){document.title='DG Zeiterfassung 9.0';document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version 9.0';});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - 9.0';});try{DG3.version=V;window.DG_APP_VERSION=V;}catch(_e){}}
+function stamp(){document.title='DG Zeiterfassung '+V;document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version '+V;});document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - '+V;});try{DG3.version=V;window.DG_APP_VERSION=V;}catch(_e){}}
 function css(){if(q('dg60Css'))return;const s=document.createElement('style');s.id='dg60Css';s.textContent='.dg60-count{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;padding:0 7px;margin-left:7px;border-radius:999px;background:#e2e8f0;color:#334155;font-size:12px;font-weight:900}.dg60-rem-ok{margin-top:8px;padding:8px 10px;border-radius:10px;background:#f0fdf4;color:#166534;font-size:12px;font-weight:800}.dg60-rem-warn{margin-top:8px;padding:8px 10px;border-radius:10px;background:#fff7ed;color:#9a3412;font-size:12px;font-weight:800}#dg60OfficeToolbar{display:flex;justify-content:flex-end;margin:0 0 14px;padding:10px 12px;border:1px solid #d7dee8;border-radius:14px;background:#f8fafc}#dg60OpenWindow{border:0;border-radius:11px;padding:11px 16px;background:#1f5f36;color:#fff;font-weight:800;cursor:pointer}@media(max-width:700px){#dg60OpenWindow{width:100%}}';document.head.appendChild(s);}
 
 /* Ein Backend-Ping hoechstens alle 30 Minuten. 5.2.0.8 bleibt waehrend der Umstellung kompatibel. */
@@ -3414,11 +3656,11 @@ function addCss60(){
 }
 
 function setVisibleVersion60(){
-  document.title='DG Zeiterfassung 9.0';
+  document.title='DG Zeiterfassung '+V60;
   const loginVersion=document.querySelector('#loginScreen .center.muted.small');
-  if(loginVersion)loginVersion.textContent='Version 9.0';
+  if(loginVersion)loginVersion.textContent='Version '+V60;
   const heroVersion=document.querySelector('#mainScreen .hero .head-row strong');
-  if(heroVersion)heroVersion.textContent='Zeiterfassung - 9.0';
+  if(heroVersion)heroVersion.textContent='Zeiterfassung - '+V60;
   try{window.DG_APP_VERSION=V60;if(window.DG3)window.DG3.version=V60;}catch(_e){}
 }
 
@@ -3617,12 +3859,12 @@ function stamp(){
   if(stamping)return;
   stamping=true;
   try{
-    if(document.title!=='DG Zeiterfassung '+V)document.title='DG Zeiterfassung 9.0';
+    if(document.title!=='DG Zeiterfassung '+V)document.title='DG Zeiterfassung '+V;
     document.querySelectorAll('.login-card .muted.small,#loginScreen .center.muted.small').forEach(x=>{
-      if(/^Version /.test((x.textContent||'').trim())&&x.textContent!=='Version '+V)x.textContent='Version 9.0';
+      if(/^Version /.test((x.textContent||'').trim())&&x.textContent!=='Version '+V)x.textContent='Version '+V;
     });
     document.querySelectorAll('.hero strong,#mainScreen .hero .head-row strong').forEach(x=>{
-      if(/Zeiterfassung/.test(x.textContent||'')&&x.textContent!=='Zeiterfassung - '+V)x.textContent='Zeiterfassung - 9.0';
+      if(/Zeiterfassung/.test(x.textContent||'')&&x.textContent!=='Zeiterfassung - '+V)x.textContent='Zeiterfassung - '+V;
     });
     try{window.DG_APP_VERSION=V;if(window.DG3)DG3.version=V;}catch(_e){}
   }finally{stamping=false;}
@@ -3792,9 +4034,9 @@ const TOKEN_KEY='dg_device_session';
 function $(id){return document.getElementById(id);}
 function isBoss(){try{return localStorage.getItem('dg_chef_access')==='1';}catch(_e){return false;}}
 function stamp(){
-  document.title='DG Zeiterfassung 9.0';
-  document.querySelectorAll('.login-card .muted.small').forEach(function(x){if(/^Version\s+/i.test((x.textContent||'').trim()))x.textContent='Version 9.0';});
-  document.querySelectorAll('.hero strong').forEach(function(x){if(/Zeiterfassung/i.test(x.textContent||''))x.textContent='Zeiterfassung - 9.0';});
+  document.title='DG Zeiterfassung '+V;
+  document.querySelectorAll('.login-card .muted.small').forEach(function(x){if(/^Version\s+/i.test((x.textContent||'').trim()))x.textContent='Version '+V;});
+  document.querySelectorAll('.hero strong').forEach(function(x){if(/Zeiterfassung/i.test(x.textContent||''))x.textContent='Zeiterfassung - '+V;});
   try{window.DG_APP_VERSION=V;window.DG_RELEASE=V;if(window.DG3)DG3.version=V;}catch(_e){}
 }
 function clearOldCaches(){try{['dg60_backend','dg602_backend','dg51_backend'].forEach(function(k){sessionStorage.removeItem(k);});}catch(_e){}}
@@ -5120,9 +5362,9 @@ const basePayroll=window.makePayrollSection520;
 if(typeof basePayroll==='function')window.makePayrollSection520=function(){const r=basePayroll.apply(this,arguments);paintDue();return r;};
 
 function stamp(){
-  document.title='DG Zeiterfassung 9.0';
-  document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim()))x.textContent='Version 9.0';});
-  document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(x.textContent||''))x.textContent='Zeiterfassung - 9.0';});
+  document.title='DG Zeiterfassung '+V;
+  document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim()))x.textContent='Version '+V;});
+  document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(x.textContent||''))x.textContent='Zeiterfassung - '+V;});
   try{window.DG_APP_VERSION=V;window.DG_RELEASE=V;if(window.DG3)DG3.version=V;}catch(_e){}
 }
 function install(){
@@ -5136,6 +5378,8 @@ setTimeout(install,180);
 })();
 ;
 
+
+/* DG9: final startup + login recovery are provided by launcher-9.0.js. */
 
 /* DG 8.0 OFFICE SHELL RECOVERY */
 (function(){
@@ -5186,7 +5430,7 @@ window.dg742EnsureOffice=installOffice742;
 })();
 
 
-/* ===== CUSTOMER FLOW ===== */
+/* ===== FINAL 8.0 CUSTOMER FLOW PRESERVED ===== */
 /* DG Zeiterfassung 9.0 - customer matching, multi-location grouping and manual offer requests */
 (function(){
 'use strict';
@@ -5475,7 +5719,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 
 
-/* ===== PAYROLL ===== */
+/* ===== FINAL 8.0 PAYROLL PRESERVED ===== */
 /* DG Zeiterfassung 9.0 - Payroll UI Final
    Selected month status, force close button, correct top tile due date. */
 (function(){
@@ -5734,7 +5978,7 @@ function observe(){
 function install(){
   if(installing)return;installing=true;
   try{
-    document.documentElement.dataset.dgVersion='9.0';
+    document.documentElement.dataset.dgVersion='8.0';
     ensureCss();ensurePayrollSectionUi();bind();wrap();observe();
     refreshPayrollSection();refreshBossMonthState();refreshTopTile();
     document.title='DG Zeiterfassung 9.0';
@@ -5748,7 +5992,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 
 
-/* ===== FINAL UI LAYERS ===== */
+/* ===== FINAL 8.0 UI28 FEATURE SET PRESERVED ===== */
 /* DG Zeiterfassung 9.0 - UI Hotfix 1
    Dashboard tile typography + weekly grouping of employee day closures. */
 (function(){
@@ -5830,7 +6074,6 @@ window.dg80UiHotfixInstall=install;
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 
 })();
-
 
 
 /* DG Zeiterfassung 9.0 - UI Hotfix 2
@@ -6197,7 +6440,6 @@ window.dg80Ui2Install=install;
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 let dg80Ui2Retry=0;(function retryShell(){if(S.installed)return;if(ensureShell())return;if(++dg80Ui2Retry<20)setTimeout(retryShell,100);})();
 })();
-
 
 
 
@@ -6710,7 +6952,6 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&visibleBo
 })();
 
 
-
 /* DG Zeiterfassung 9.0 - UI Hotfix 12
    Dashboard-Handlungsfarben, aktive Kalender, offene Tagesabschluesse,
    Auffaelligkeiten-Pruefzentrale, dynamische Lohnfaelligkeit und Jahreszaehler. */
@@ -6960,7 +7201,6 @@ function install(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
-
 
 
 /* DG Zeiterfassung 9.0 - UI Hotfix 13
@@ -7213,6 +7453,136 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 
 
+/* DG Zeiterfassung 9.0 - UI Hotfix 14
+   Hardened click binding for "Offene Tagesabschluesse". */
+(function(){
+'use strict';
+const V='8.0-ui14';
+function bind(){
+  const root=document.getElementById('bossView');
+  if(!root)return false;
+  const tile=root.querySelector('[data-dg80-final="days"]');
+  if(!tile)return false;
+  if(tile.dataset.dg80Days14!=='1'){
+    tile.dataset.dg80Days14='1';
+    tile.addEventListener('click',function(e){
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      const fn=window.DG80_UI12_openDays;
+      if(typeof fn==='function'){
+        Promise.resolve(fn()).then(function(){
+          const card=document.getElementById('dg80ActionCenter');
+          if(card){
+            card.classList.add('dg80-shell-active');
+            card.style.display='block';
+            setTimeout(function(){try{card.scrollIntoView({behavior:'smooth',block:'start'});}catch(_e){}},0);
+          }
+        }).catch(function(err){
+          alert('Offene Tagesabschlüsse konnten nicht geöffnet werden: '+(err&&err.message?err.message:err));
+        });
+      }else{
+        alert('Die Tagesabschluss-Ansicht ist noch nicht bereit. Bitte die App einmal neu laden.');
+      }
+      return false;
+    },true);
+  }
+  return true;
+}
+function install(){
+  let n=0;(function retry(){if(bind())return;if(++n<50)setTimeout(retry,100);})();
+  const mo=new MutationObserver(function(){bind();});
+  mo.observe(document.body,{subtree:true,childList:true});
+  document.documentElement.dataset.dgUi14=V;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+})();
+
+
+/* DG Zeiterfassung 9.0 - UI Hotfix 15
+   Kalenderzaehler exakt auf aktive Mitarbeiter begrenzen,
+   Stundenlohn-fehlt komplett ignorieren, Tagesabschluss-Button umbenennen. */
+(function(){
+'use strict';
+const V='8.0-ui15';
+const q=id=>document.getElementById(id);
+const norm=v=>String(v==null?'':v).trim().toLowerCase().replace(/\s+/g,' ');
+
+async function apiCall(payload){
+  if(typeof window.api!=='function')throw new Error('Backend nicht bereit.');
+  if(typeof window.chefPayload==='function')return window.api(window.chefPayload(payload));
+  return window.api(payload);
+}
+
+function isWageMissingText(text){
+  const s=norm(text);
+  return s.includes('stundenlohn fehlt')||
+         s.includes('brutto-stundenlohn')||
+         s.includes('brutto stundenlohn')||
+         s.includes('missing_hourly')||
+         s.includes('hourly_wage_missing');
+}
+
+function removeWageWarnings(){
+  document.querySelectorAll('.dg80-ac-table tbody tr,.dg520-issue,.dg522-issue,.dg80-review-issue').forEach(el=>{
+    if(isWageMissingText(el.textContent||''))el.remove();
+  });
+
+  const table=q('dg80ActionCenter')?.querySelector('.dg80-ac-table tbody');
+  if(table){
+    const rows=[...table.querySelectorAll('tr')];
+    const count=rows.length;
+    const c=q('dg80c-anomalies');if(c)c.textContent=String(count);
+    q('bossView')?.querySelector('[data-dg80-final="anomalies"]')?.classList.toggle('dg80-hot',count>0);
+    if(count===0){
+      const wrap=table.closest('.dg80-ac-tablewrap');
+      if(wrap)wrap.outerHTML='<div class="status ok">✓ Keine offenen Auffälligkeiten vorhanden.</div>';
+    }
+  }
+}
+
+function renameDayCloseButtons(){
+  document.querySelectorAll('[data-dg80-close-day]').forEach(b=>{
+    if((b.textContent||'').trim()!=='Tag manuell abschließen')b.textContent='Tag manuell abschließen';
+  });
+}
+
+async function refreshExactCalendarCount(){
+  try{
+    const workers=await apiCall({action:'getPlannerWorkers'});
+    const rows=Array.isArray(workers)?workers:[];
+    const n=rows.filter(w=>w&&(w.active===true||w.active===1||String(w.active).trim()==='1'||String(w.active).trim().toLowerCase()==='true')).length;
+    if(q('dg80c-calendar'))q('dg80c-calendar').textContent=String(n);
+    try{if(window.DG80_UI12)window.DG80_UI12.calendarCount=n;}catch(_e){}
+    return n;
+  }catch(_e){return null;}
+}
+function enforce(){
+  renameDayCloseButtons();
+  removeWageWarnings();
+}
+
+function install(){
+  let tries=0;
+  (function ready(){
+    enforce();
+    if(q('dg80c-calendar'))return;
+    if(++tries<50)setTimeout(ready,100);
+  })();
+
+  const mo=new MutationObserver(()=>{
+    clearTimeout(window.__dg80ui15t);
+    window.__dg80ui15t=setTimeout(enforce,0);
+  });
+  mo.observe(document.body,{subtree:true,childList:true,characterData:true});
+
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)enforce();});
+  setInterval(()=>{if(q('bossView')&&!q('bossView').classList.contains('hidden'))refreshExactCalendarCount();},3600000);
+  document.documentElement.dataset.dgUi15=V;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+})();
+
 
 /* DG Zeiterfassung 9.0 - UI Hotfix 16 FINAL CLEANUP
    Einheitliche Pruefregeln und stabile Dashboard-Zaehler. */
@@ -7332,7 +7702,6 @@ function install(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
-
 
 
 /* DG Zeiterfassung 9.0 - UI Hotfix 17
@@ -7500,7 +7869,6 @@ function install(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
-
 
 
 /* DG Zeiterfassung 9.0 - UI Hotfix 18
@@ -7677,7 +8045,6 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 
 
-
 /* DG Zeiterfassung 9.0 - UI Hotfix 20
    Laufende-Auftraege: eindeutige Aktionsreihenfolge/Farben.
    Strukturierte Einzelberichte. */
@@ -7745,6 +8112,218 @@ function install(){
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
 
+
+/* DG Zeiterfassung 9.0 - UI Hotfix 21
+   Fokusmodus fuer Kachel-Navigation:
+   geoeffneter Bereich erscheint oben, Dashboard-Kacheln werden ausgeblendet,
+   beim Schliessen wird die vorherige Kachelposition wiederhergestellt. */
+(function(){
+'use strict';
+const V='8.0-ui21';
+const q=id=>document.getElementById(id);
+const S=window.DG80_UI21=window.DG80_UI21||{originY:null,focus:false,timer:null,restorePending:false};
+
+function root(){return q('bossView');}
+function dash(){return root()?.querySelector(':scope > .d3-dashboard')||null;}
+function activeShell(){
+  const r=root();if(!r)return null;
+  return r.querySelector(':scope > .dg80-shell-active');
+}
+function toolbarActive(){
+  const b=q('dg80OfficeToolbar');return !!(b&&b.classList.contains('active'));
+}
+function css(){
+  if(q('dg80Ui21Css'))return;
+  const s=document.createElement('style');s.id='dg80Ui21Css';
+  s.textContent=''
+    +'#bossView.dg21-focus>.d3-dashboard{display:none!important}'
+    +'#bossView.dg21-focus>#dg80OfficeToolbar{display:block!important;margin-top:0!important;scroll-margin-top:10px!important}'
+    +'#bossView.dg21-focus>.dg80-shell-active{display:block!important;scroll-margin-top:84px!important}'
+    +'#bossView.dg21-focus{padding-top:0!important}'
+    +'#bossView.dg21-focus #dg80OfficeClose{background:#e5e7eb!important;color:#111827!important}'
+    +'@media(max-width:759px){#bossView.dg21-focus>.dg80-shell-active{scroll-margin-top:72px!important}}';
+  document.head.appendChild(s);
+}
+function rememberOrigin(){
+  if(S.focus)return;
+  S.originY=window.scrollY;
+}
+function scrollOpen(){
+  const bar=q('dg80OfficeToolbar'),panel=activeShell();
+  const target=bar&&toolbarActive()?bar:panel;
+  if(!target)return;
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    try{target.scrollIntoView({behavior:'smooth',block:'start'});}catch(_e){}
+  }));
+}
+function enter(){
+  const r=root();if(!r||S.focus)return;
+  S.focus=true;r.classList.add('dg21-focus');
+  scrollOpen();
+}
+function exit(){
+  const r=root();if(!r||!S.focus||S.restorePending)return;
+  S.restorePending=true;
+  r.classList.remove('dg21-focus');S.focus=false;
+  const y=Number.isFinite(S.originY)?S.originY:null;
+  S.originY=null;
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    if(y!==null){try{window.scrollTo({top:y,behavior:'smooth'});}catch(_e){window.scrollTo(0,y);}}
+    S.restorePending=false;
+  }));
+}
+function sync(){
+  const has=!!activeShell()||toolbarActive();
+  if(has)enter();else exit();
+}
+function install(){
+  css();
+  const r=root();if(!r){setTimeout(install,100);return;}
+  if(r.dataset.dg21==='1')return;r.dataset.dg21='1';
+
+  // Ausgangsposition merken, bevor die bestehende Kachellogik den Bereich oeffnet.
+  r.addEventListener('click',e=>{
+    const t=e.target.closest('.dg80-final-tile,[data-dg80-key],#dg80FinalCalendar');
+    if(t&&!S.focus)rememberOrigin();
+  },true);
+
+  // Auch Untermenues bleiben im Fokusmodus; die urspruengliche Kachelposition bleibt erhalten.
+  const mo=new MutationObserver(()=>{
+    clearTimeout(S.timer);S.timer=setTimeout(sync,0);
+  });
+  mo.observe(r,{subtree:true,childList:true,attributes:true,attributeFilter:['class']});
+
+  // Escape entspricht dem X: Bereich schliessen und zur Kachelauswahl zurueck.
+  document.addEventListener('keydown',e=>{
+    if(e.key!=='Escape'||!S.focus)return;
+    const close=q('dg80OfficeClose');
+    if(close&&toolbarActive()){e.preventDefault();close.click();}
+  });
+
+  sync();
+  document.documentElement.dataset.dgUi21=V;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+})();
+
+
+/* DG Zeiterfassung 9.0 - UI Hotfix 22
+   Robuster Fokusmodus: Kachel anklicken -> Auswahl sofort ausblenden,
+   Inhalt an den Anfang der Bueroseite holen; Schliessen -> exakt zur
+   vorherigen Kachelposition zurueck. */
+(function(){
+'use strict';
+const V='8.0-ui22';
+const q=id=>document.getElementById(id);
+const S=window.DG80_UI22=window.DG80_UI22||{focus:false,originY:0,timer:null,scrollTimers:[]};
+
+function root(){return q('bossView');}
+function dashboard(){const r=root();return r?r.querySelector('.dg80-final-dashboard,.d3-dashboard'):null;}
+function hasOpenContent(){
+  const r=root();if(!r)return false;
+  if(q('dg80OfficeToolbar')?.classList.contains('active'))return true;
+  return !!r.querySelector(':scope > .dg80-shell-active');
+}
+function css(){
+  if(q('dg80Ui22Css'))return;
+  const s=document.createElement('style');s.id='dg80Ui22Css';
+  s.textContent=''
+    +'#bossView.dg22-focus .dg80-final-dashboard{display:none!important}'
+    +'#bossView.dg22-focus>.d3-dashboard{display:none!important}'
+    +'#bossView.dg22-focus>#dg80OfficeToolbar{display:block!important;margin-top:0!important}'
+    +'#bossView.dg22-focus>.dg80-shell-active{display:block!important}'
+    +'#bossView.dg22-focus #dg80OfficeClose{background:#e5e7eb!important;color:#111827!important}';
+  document.head.appendChild(s);
+}
+function clearScrollTimers(){
+  (S.scrollTimers||[]).forEach(t=>clearTimeout(t));S.scrollTimers=[];
+}
+function jumpToOpen(){
+  const r=root();if(!r)return;
+  const run=()=>{
+    const bar=q('dg80OfficeToolbar');
+    const target=(bar&&bar.classList.contains('active'))?bar:(r.querySelector(':scope > .dg80-shell-active')||r);
+    const top=Math.max(0,window.scrollY+target.getBoundingClientRect().top-8);
+    window.scrollTo(0,top);
+  };
+  clearScrollTimers();
+  [0,40,120,260].forEach(ms=>S.scrollTimers.push(setTimeout(run,ms)));
+}
+function enter(){
+  const r=root();if(!r)return;
+  if(!S.focus){
+    S.originY=window.scrollY;
+    S.focus=true;
+  }
+  r.classList.add('dg22-focus');
+  jumpToOpen();
+}
+function exit(){
+  const r=root();if(!r||!S.focus)return;
+  clearScrollTimers();
+  r.classList.remove('dg22-focus');
+  const y=S.originY;
+  S.focus=false;
+  requestAnimationFrame(()=>requestAnimationFrame(()=>window.scrollTo(0,Math.max(0,y||0))));
+}
+function isMainTile(el){
+  return !!el?.closest?.('.dg80-final-tile,[data-dg80-key],#dg80FinalCalendar');
+}
+function isClose(el){
+  return !!el?.closest?.('#dg80OfficeClose,.dg80-group-close');
+}
+function install(){
+  css();
+  const r=root();if(!r){setTimeout(install,100);return;}
+  if(r.dataset.dg22==='1')return;r.dataset.dg22='1';
+
+  // Direkte Steuerung statt nur auf DOM-Aenderungen zu hoffen.
+  r.addEventListener('click',e=>{
+    if(isMainTile(e.target)){
+      if(!S.focus)S.originY=window.scrollY;
+      // Nach der vorhandenen Kachel-Logik den Fokusmodus sicher aktivieren.
+      setTimeout(()=>{if(hasOpenContent()){S.focus=true;r.classList.add('dg22-focus');jumpToOpen();}},0);
+      setTimeout(()=>{if(hasOpenContent()){S.focus=true;r.classList.add('dg22-focus');jumpToOpen();}},80);
+      return;
+    }
+    if(isClose(e.target)){
+      // Erst bestehende Schliesslogik ausfuehren lassen, dann Auswahl zurueckholen.
+      setTimeout(()=>{if(!hasOpenContent())exit();},0);
+      setTimeout(()=>{if(!hasOpenContent())exit();},100);
+    }
+  },true);
+
+  // Untermenue-Klick: Fokus bleibt, geoeffneter Unterbereich wird wieder nach oben geholt.
+  r.addEventListener('click',e=>{
+    if(!S.focus)return;
+    if(e.target.closest('[data-dg80-sub]'))setTimeout(jumpToOpen,50);
+  },true);
+
+  // Fallback fuer programmatisches Oeffnen/Schliessen.
+  const mo=new MutationObserver(()=>{
+    clearTimeout(S.timer);
+    S.timer=setTimeout(()=>{
+      if(hasOpenContent()){
+        if(S.focus){r.classList.add('dg22-focus');}
+      }else if(S.focus){
+        exit();
+      }
+    },20);
+  });
+  mo.observe(r,{subtree:true,childList:true,attributes:true,attributeFilter:['class']});
+
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'&&S.focus){
+      const close=q('dg80OfficeClose');
+      if(close&&q('dg80OfficeToolbar')?.classList.contains('active')){e.preventDefault();close.click();}
+      else exit();
+    }
+  });
+
+  document.documentElement.dataset.dgUi22=V;
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+})();
 
 
 /* DG Zeiterfassung 9.0 - UI Hotfix 23
@@ -7843,7 +8422,6 @@ function install(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
-
 
 
 /* DG Zeiterfassung 9.0 - UI Hotfix 24
@@ -8036,7 +8614,6 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 
 
-
 /* DG Zeiterfassung 9.0 - UI Hotfix 25
    Gezielter Frische-Fix: Rechnung/Laufende Auftraege laden beim Oeffnen frisch,
    Wartungsvertraege synchronisieren ueber die aktuelle Wartungsuebersicht,
@@ -8164,7 +8741,6 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 
 
-
 /* DG Zeiterfassung 9.0 - UI Hotfix 26
    Manuell ausgefuehrte Wartung: Kundendaten, Geraetestandort und naechste Wartung
    werden in einem Arbeitsgang angelegt. */
@@ -8264,7 +8840,6 @@ function install(){css();document.documentElement.dataset.dgUi26=V;}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
 
-
 /* DG Zeiterfassung 9.0 - UI Hotfix 27
    Wartungsvertrag: Ausfuehrungsort kann mit einem Haken vollstaendig
    aus dem Rechnungsempfaenger uebernommen werden. */
@@ -8323,7 +8898,6 @@ function install(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
-
 
 
 /* DG Zeiterfassung 9.0 - UI Hotfix 28
@@ -8433,149 +9007,42 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 
 
 
-
-/* ===== DG 9.0 CLEAN RUNTIME =====
-   Single bootstrap, one transport coalescer, one-hour background sync gate.
-   Manual area synchronization still bypasses the background cadence. */
+/* ===== DG 9.0 FINAL PARITY GUARD =====
+   Keeps the exact final 8.0 employee/office feature set mounted under release 9.0. */
 (function(){
 'use strict';
 const VERSION='9.0';
-const BACKEND_URL='https://script.google.com/macros/s/AKfycby2L3SMgh2RoGWsNRUp6o11g4iyZ8bgkSIGaAZPnBXCkJTkDDGF9aydn9vVKMB7kXsO/exec';
-const AUTO_TTL=3600000;
-const S=window.DG9_RUNTIME=window.DG9_RUNTIME||{booted:false,lastAuto:0,syncPromise:null,inflight:new Map(),apiWrapped:false,syncWrapped:false};
-
-function byId(id){return document.getElementById(id);}
 function stamp(){
-  document.title='DG Zeiterfassung 9.0';
-  document.querySelectorAll('.login-card .muted.small').forEach(function(x){
-    if(/^Version\s+/i.test(String(x.textContent||'').trim()))x.textContent='Version 9.0';
-  });
-  document.querySelectorAll('.hero strong').forEach(function(x){
-    if(/Zeiterfassung/i.test(String(x.textContent||'')))x.textContent='Zeiterfassung - 9.0';
-  });
+  document.title='DG Zeiterfassung '+VERSION;
+  const lv=document.querySelector('#loginScreen .center.muted.small');
+  if(lv)lv.textContent='Version '+VERSION;
+  const hv=document.querySelector('#mainScreen .hero .head-row strong');
+  if(hv)hv.textContent='Zeiterfassung - '+VERSION;
   try{window.DG_APP_VERSION=VERSION;window.DG_RELEASE=VERSION;if(window.DG3)DG3.version=VERSION;}catch(_e){}
 }
-function readAction(action){
-  return /^(get|check|search|find)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action);
+function ensureFinalOffice(){
+  try{if(typeof window.dg742EnsureOffice==='function')window.dg742EnsureOffice();}catch(_e){}
+  try{if(typeof window.dg80Ui2Install==='function')window.dg80Ui2Install();}catch(_e){}
+  try{if(typeof window.dg80FinalMount==='function')window.dg80FinalMount(false);}catch(_e){}
 }
-function stableKey(payload){
-  const p=Object.assign({},payload||{});delete p.force;return JSON.stringify(p);
-}
-function clearReadCaches(){
-  S.inflight.clear();
-  try{if(window.DG51&&DG51.readCache&&typeof DG51.readCache.clear==='function')DG51.readCache.clear();}catch(_e){}
-  try{if(window.DG3&&DG3.reads&&typeof DG3.reads.clear==='function')DG3.reads.clear();}catch(_e){}
-}
-window.dg9ClearReadCaches=clearReadCaches;
-
-function installApiCoalescer(){
-  if(S.apiWrapped||typeof window.api!=='function')return;
-  const base=window.api;S.apiWrapped=true;
-  const wrapped=async function(payload){
-    const action=String(payload&&payload.action||'');
-    const read=readAction(action),force=!!(payload&&payload.force);
-    const key=read?stableKey(payload):'';
-    if(read&&!force&&S.inflight.has(key))return S.inflight.get(key);
-    if(!read)clearReadCaches();
-    const run=Promise.resolve().then(()=>base.apply(this,arguments));
-    if(read&&!force)S.inflight.set(key,run);
-    try{return await run;}
-    finally{if(read&&!force&&S.inflight.get(key)===run)S.inflight.delete(key);}
-  };
-  wrapped.__dg9=true;
-  try{window.api=wrapped;if(typeof api!=='undefined')api=wrapped;}catch(_e){window.api=wrapped;}
-}
-
-function installSyncGate(){
-  if(S.syncWrapped||typeof window.d3Sync!=='function')return;
-  const base=window.d3Sync;S.syncWrapped=true;
-  const wrapped=function(force){
-    const now=Date.now();
-    if(!force&&now-S.lastAuto<AUTO_TTL)return S.syncPromise||Promise.resolve();
-    if(S.syncPromise)return S.syncPromise;
-    S.lastAuto=now;
-    try{
-      const r=Promise.resolve(base.apply(this,arguments));
-      S.syncPromise=r.finally(()=>{S.syncPromise=null;});
-      return S.syncPromise;
-    }catch(e){S.syncPromise=null;throw e;}
-  };
-  wrapped.__dg9=true;
-  try{window.d3Sync=wrapped;if(typeof d3Sync!=='undefined')d3Sync=wrapped;}catch(_e){window.d3Sync=wrapped;}
-}
-
-function installBackendCheck(){
-  window.d3CheckBackend=d3CheckBackend=async function(force){
-    const key='dg9_backend',ttl=1800000;
-    if(!force){
-      try{
-        const c=JSON.parse(sessionStorage.getItem(key)||'null');
-        if(c&&String(c.version||'')==='9.0'&&Date.now()-Number(c.ts||0)<ttl){
-          if(window.DG3)DG3.backend=String(c.version);
-          return true;
-        }
-      }catch(_e){}
-    }
-    try{
-      const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),25000);
-      let r;
-      try{
-        r=await fetch(BACKEND_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'ping',clientVersion:VERSION}),signal:ctl.signal,cache:'no-store'});
-      }finally{clearTimeout(timer);}
-      if(!r.ok)throw new Error('HTTP '+r.status);
-      const raw=JSON.parse(await r.text());if(!raw.ok)throw new Error(raw.error||'Serverfehler.');
-      const data=raw.data!==undefined?raw.data:raw,found=String(data&&data.version||raw.version||'');
-      const ok=found==='9.0';
-      if(window.DG3)DG3.backend=ok?found:'';
-      sessionStorage.setItem(key,JSON.stringify({ts:Date.now(),version:found}));
-      const old=byId('d3Notice');
-      if(found==='9.0'){if(old&&/Google-GS|Google-Backend|Versionsstand/i.test(old.textContent||''))old.remove();}
-      else if(typeof window.d3Notice==='function')window.d3Notice('Versionsstand stimmt nicht: App 9.0 erwartet Google-GS 9.0. Aktiv ist '+(found||'unbekannt')+'.','warn');
-      return ok;
-    }catch(e){
-      if(window.DG3)DG3.backend='';
-      if(typeof window.d3Notice==='function')window.d3Notice('Verbindungsprüfung fehlgeschlagen: '+(e&&e.message?e.message:e),'warn');
-      return false;
-    }
-  };
-}
-
-function installManualRefreshBridge(){
-  const base=window.dg80ManualAreaSync;
-  if(typeof base!=='function'||base.__dg9)return;
-  const wrapped=async function(){clearReadCaches();return base.apply(this,arguments);};
-  wrapped.__dg9=true;window.dg80ManualAreaSync=wrapped;
-}
-
-function ensureOffice(){
-  try{
-    if(typeof window.dg742EnsureOffice==='function')window.dg742EnsureOffice();
-    else if(typeof window.d3InstallOffice==='function')window.d3InstallOffice();
-  }catch(e){console.warn('DG9 Büroaufbau',e);}
-}
-
-function boot(){
-  if(S.booted)return;S.booted=true;
+function verify(){
   stamp();
-  installApiCoalescer();
-  installSyncGate();
-  installBackendCheck();
-  installManualRefreshBridge();
-  ensureOffice();
-  try{
-    if(!window.__DG_CORE_STARTED&&typeof window.d3Startup==='function')window.d3Startup();
-  }catch(e){
-    S.booted=false;
-    console.error('DG 9.0 Startfehler',e);
-    const sel=byId('loginEmployee');if(sel)sel.innerHTML='<option value="">Mitarbeiter konnten nicht geladen werden</option>';
-    const st=byId('loginStatus');if(st){st.className='status error';st.textContent='App-Start fehlgeschlagen: '+(e&&e.message?e.message:e);}
-    return;
-  }
-  // Nach allen älteren Installern final stempeln; keine weiteren Startversuche.
-  setTimeout(stamp,0);
-  setTimeout(function(){installApiCoalescer();installSyncGate();installManualRefreshBridge();stamp();},250);
-  document.documentElement.dataset.dgRelease='9.0';
+  const boss=document.getElementById('bossView');
+  if(boss&&!boss.classList.contains('hidden'))ensureFinalOffice();
+  document.documentElement.dataset.dgFinalParity='9.0';
 }
-
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else setTimeout(boot,0);
+const oldBoss=window.showBoss;
+if(typeof oldBoss==='function'&&!oldBoss.__dg9Parity){
+  const wrapped=function(){
+    const r=oldBoss.apply(this,arguments);
+    setTimeout(ensureFinalOffice,0);
+    return r;
+  };
+  wrapped.__dg9Parity=true;
+  window.showBoss=wrapped;
+  try{showBoss=wrapped;}catch(_e){}
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(verify,0),{once:true});else setTimeout(verify,0);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)verify();});
+window.addEventListener('pageshow',()=>verify());
 })();
