@@ -3637,7 +3637,7 @@ window.d3Api=d3Api=async function(payload){
   const action=String(payload&&payload.action||''),read=/^(get|check|search|find)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload||{});
   if(read&&window.DG3&&DG3.reads&&DG3.reads.has(key))return DG3.reads.get(key);
   const run=(async()=>{
-    if(action!=='ping'&&(!window.DG3||!compatible(DG3.backend))){const ok=await d3CheckBackend(true);if(!ok)throw dgError('App '+V+' kann nicht speichern/laden, weil Google-GS '+foundVersion()+' aktiv ist. Benötigt wird Google-GS '+V+'.','version');}
+    if(!['ping','getEmployees'].includes(action)&&(!window.DG3||!compatible(DG3.backend))){const ok=await d3CheckBackend(true);if(!ok)throw dgError('App '+V+' kann nicht speichern/laden, weil Google-GS '+foundVersion()+' aktiv ist. Benötigt wird Google-GS '+V+'.','version');}
     if(window.DG3&&!read)DG3.pending=(DG3.pending||0)+1;
     const controller=new AbortController(),timeoutMs=['getMonthPayrollAudit','createTaxAdvisorPdf','setPayrollMonthStatus','completePayrollCycle'].includes(action)?180000:65000,timer=setTimeout(()=>controller.abort(),timeoutMs);
     try{
