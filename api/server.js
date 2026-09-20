@@ -100,6 +100,25 @@ CREATE TABLE IF NOT EXISTS write_action_stats (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS manual_orders_shadow (
+  id TEXT PRIMARY KEY,
+  customer TEXT,
+  address TEXT,
+  phone TEXT,
+  email TEXT,
+  description TEXT,
+  source TEXT,
+  inquiry_id TEXT,
+  status TEXT,
+  created_at_text TEXT,
+  started_at_text TEXT,
+  completed_at_text TEXT,
+  changed_at_text TEXT,
+  changed_by TEXT,
+  internal_note TEXT,
+  shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
@@ -142,6 +161,7 @@ async function initDb() {
   await pool.query(schema);
   await cleanupInternalData();
   await loadGooglePingCache();
+  await initManualOrdersShadow();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -730,6 +750,92 @@ function cellValue(cell) {
   return cell && Object.prototype.hasOwnProperty.call(cell, 'v') ? cell.v : null;
 }
 
+function textCell(cells,index) {
+  const v=cellValue(cells[index]);
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'object' && v.value !== undefined) return String(v.value);
+  return String(v);
+}
+
+async function initManualOrdersShadow() {
+  if (!pool) return;
+  const existing=await pool.query('SELECT COUNT(*)::int AS n FROM manual_orders_shadow');
+  if ((existing.rows[0]?.n||0)>0) return;
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:AuftragsStamm']
+  );
+  let inserted=0;
+  for (const row of q.rows) {
+    const payload=row.payload||{};
+    if (Number(payload.sourceRow||row.source_key)<=1) continue;
+    const cells=Array.isArray(payload.cells)?payload.cells:[];
+    const id=textCell(cells,0).trim();
+    if(!id) continue;
+    await pool.query(
+      `INSERT INTO manual_orders_shadow(
+        id,customer,address,phone,email,description,source,inquiry_id,status,
+        created_at_text,started_at_text,completed_at_text,changed_at_text,changed_by,internal_note
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+      ON CONFLICT(id) DO NOTHING`,
+      [id,textCell(cells,1),textCell(cells,2),textCell(cells,3),textCell(cells,4),
+       textCell(cells,5),textCell(cells,6),textCell(cells,7),textCell(cells,8),
+       textCell(cells,9),textCell(cells,10),textCell(cells,11),textCell(cells,12),
+       textCell(cells,13),textCell(cells,14)]
+    );
+    inserted++;
+  }
+  console.log('SHADOW manual_orders initialized rows='+inserted);
+}
+
+async function mirrorManualOrderWrite(action, body, parsed) {
+  if (!pool) return;
+  const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
+  if (!data || data.ok===false) return;
+  const now=new Date().toISOString();
+  if (action==='saveManualOrder') {
+    const item=body.item||{};
+    const id=String(data.id||item.id||'').trim();
+    if(!id) return;
+    await pool.query(
+      `INSERT INTO manual_orders_shadow(
+        id,customer,address,phone,email,description,source,inquiry_id,status,
+        created_at_text,started_at_text,completed_at_text,changed_at_text,changed_by,internal_note,shadow_updated_at
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now())
+      ON CONFLICT(id) DO UPDATE SET
+        customer=EXCLUDED.customer,address=EXCLUDED.address,phone=EXCLUDED.phone,email=EXCLUDED.email,
+        description=EXCLUDED.description,source=EXCLUDED.source,inquiry_id=EXCLUDED.inquiry_id,
+        status=EXCLUDED.status,changed_at_text=EXCLUDED.changed_at_text,changed_by=EXCLUDED.changed_by,
+        internal_note=CASE WHEN $16::boolean THEN EXCLUDED.internal_note ELSE manual_orders_shadow.internal_note END,
+        started_at_text=CASE WHEN EXCLUDED.status='Laufend' AND COALESCE(manual_orders_shadow.started_at_text,'')='' THEN EXCLUDED.changed_at_text ELSE manual_orders_shadow.started_at_text END,
+        completed_at_text=CASE WHEN EXCLUDED.status='Abgeschlossen' THEN EXCLUDED.changed_at_text ELSE manual_orders_shadow.completed_at_text END,
+        shadow_updated_at=now()`,
+      [id,String(item.customer||''),String(item.address||''),String(item.phone||''),String(item.email||''),
+       String(item.description||''),String(item.source||'Manuell'),String(item.inquiryId||''),
+       String(item.status||'Offen'),now,String(item.status||'')==='Laufend'?now:'',
+       String(item.status||'')==='Abgeschlossen'?now:'',now,String(body.employee||''),
+       String(item.internalNote||''),item.internalNote!==undefined]
+    );
+  } else if (action==='saveManualOrderNote') {
+    await pool.query(
+      `UPDATE manual_orders_shadow SET internal_note=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now() WHERE id=$1`,
+      [String(body.id||''),String(body.note||''),now,String(body.employee||'')]
+    );
+  } else if (action==='setManualOrderStatus') {
+    const status=String(body.status||'');
+    await pool.query(
+      `UPDATE manual_orders_shadow SET status=$2,changed_at_text=$3,changed_by=$4,
+        started_at_text=CASE WHEN $2='Laufend' AND COALESCE(started_at_text,'')='' THEN $3 ELSE started_at_text END,
+        completed_at_text=CASE WHEN $2='Abgeschlossen' THEN $3 ELSE completed_at_text END,
+        shadow_updated_at=now() WHERE id=$1`,
+      [String(body.id||''),status,now,String(body.employee||'')]
+    );
+  } else if (action==='deleteManualOrder') {
+    await pool.query('DELETE FROM manual_orders_shadow WHERE id=$1',[String(body.id||'')]);
+  }
+}
+
 async function getEmployeesFromSnapshot() {
   if (Array.isArray(employeeNamesCache) && employeeNamesCache.length) return employeeNamesCache.slice();
   if (!pool) return null;
@@ -809,6 +915,10 @@ async function proxyLegacy(req, res, body) {
         markEmployeeSnapshotDirty(action).catch(e=>console.error('employee snapshot dirty flag failed',e.message));
       }
       bumpWriteStat(action, upstream.status === 200 && parsed && parsed.ok !== false).catch(()=>{});
+      if (upstream.status === 200 && parsed && parsed.ok !== false &&
+          ['saveManualOrder','saveManualOrderNote','setManualOrderStatus','deleteManualOrder'].includes(action)) {
+        mirrorManualOrderWrite(action,body,parsed).catch(e=>console.error('manual order shadow mirror failed',e.message));
+      }
       pool.query(
         `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
          VALUES($1,$2::jsonb,$3,$4::jsonb,$5,$6)`,
@@ -893,7 +1003,8 @@ async function health() {
     employeeSnapshotDirty,
     postgresEmployeeSnapshotCount,
     readCacheTtlSeconds: READ_CACHE_TTL_MS / 1000,
-    readCacheRefreshAheadSeconds: READ_CACHE_REFRESH_MS / 1000
+    readCacheRefreshAheadSeconds: READ_CACHE_REFRESH_MS / 1000,
+    manualOrdersShadow: pool ? 'enabled' : 'disabled'
   };
 }
 
