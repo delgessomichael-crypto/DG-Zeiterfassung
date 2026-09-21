@@ -8643,7 +8643,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','savePlannerEvent','deletePlannerEvent','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
+  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','updateEmployeeEntry','deleteEntry','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
@@ -9536,6 +9536,24 @@ async function tryDirectPostgresWrite(action,body){
       }
       const bal=await client.query('SELECT COALESCE(SUM(hours),0)::numeric AS h FROM time_bank_shadow WHERE employee_name=$1',[target]);
       result={ok:true,timeBankBalance:Math.round(Math.max(0,Number(bal.rows[0]?.h||0))*100)/100};
+    }else if(action==='movePlannerWorker'){
+      const id=String(body.id||'').trim(),direction=Number(body.direction)||0;
+      if(!id)throw new Error('Kalender-Mitarbeiter nicht gefunden.');
+      const q=await client.query(
+        'SELECT id,sort_order FROM planner_workers_shadow ORDER BY sort_order ASC,display_name ASC FOR UPDATE'
+      );
+      const idx=q.rows.findIndex(r=>String(r.id||'')===id);
+      if(idx<0)throw new Error('Kalender-Mitarbeiter nicht gefunden.');
+      const ni=idx+(direction<0?-1:1);
+      if(ni>=0&&ni<q.rows.length){
+        const a=q.rows[idx],b=q.rows[ni],tmp=Number(a.sort_order||999);
+        await client.query('UPDATE planner_workers_shadow SET sort_order=$2,shadow_updated_at=now() WHERE id=$1',[String(a.id),Number(b.sort_order||999)]);
+        await client.query('UPDATE planner_workers_shadow SET sort_order=$2,shadow_updated_at=now() WHERE id=$1',[String(b.id),tmp]);
+      }
+      const list=await client.query(
+        'SELECT id,employee_name,display_name,provider,calendar_id,active,sort_order FROM planner_workers_shadow ORDER BY sort_order ASC,display_name ASC'
+      );
+      result=list.rows.map(r=>({id:String(r.id||''),employeeName:String(r.employee_name||''),displayName:String(r.display_name||r.employee_name||''),provider:String(r.provider||'google'),calendarId:String(r.calendar_id||''),active:Boolean(r.active),sortOrder:Number(r.sort_order||999)}));
     }else if(action==='savePlannerEvent'){
       const item=body.item||{},id=String(item.id||'').trim();
       if(!id)throw new Error('Termin-ID fehlt.');
@@ -9822,6 +9840,10 @@ async function tryDirectPostgresWrite(action,body){
       }
     }
     await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'planner_availability:%' OR shadow_name LIKE 'day_data:%' OR shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'month_data:%' OR shadow_name LIKE 'boss_day_closures:%'");
+  }
+  if(action==='movePlannerWorker'){
+    const q=await pool.query('SELECT COUNT(*)::int AS n FROM planner_workers_shadow');
+    const n=Number(q.rows[0]?.n||0);await saveShadowVerifyStat('planner_workers',n,n,0);
   }
   if(['savePlannerEvent','deletePlannerEvent'].includes(action)){
     await Promise.all([
