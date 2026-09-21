@@ -716,6 +716,7 @@ function legacyOutboxTerminalSuccess(action,parsed){
   if(parsed&&parsed.ok!==false)return true;
   const msg=String(parsed&&parsed.error||'').toLowerCase();
   if(['completeOwnReminder','deleteOwnReminder'].includes(action)&&msg.includes('bereits erledigt'))return true;
+  if(action==='deleteManualOrder'&&msg.includes('auftrag nicht gefunden'))return true;
   return false;
 }
 let legacyOutboxFlushRunning=false;
@@ -1816,6 +1817,10 @@ async function mirrorRegieMetadataWrite(action,body,parsed){
     return;
   }
 
+  if(['saveManualOrderNote','setManualOrderStatus','deleteManualOrder'].includes(action)){
+    const q=await pool.query('SELECT COUNT(*)::int AS n FROM manual_orders_shadow');
+    const n=Number(q.rows[0]?.n||0);await saveShadowVerifyStat('manual_orders',n,n,0);
+  }
   if(action==='saveObjectInternalNote'){
     await pool.query(
       `INSERT INTO object_notes_shadow(object_id,note,changed_at_text,changed_by,shadow_updated_at)
@@ -8635,7 +8640,8 @@ function directMinimumWageRead(body){
 
 const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder',
-  'saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed'
+  'saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed',
+  'saveManualOrderNote','setManualOrderStatus','deleteManualOrder'
 ]);
 
 function berlinTodayIso(){
@@ -8696,6 +8702,38 @@ async function tryDirectPostgresWrite(action,body){
             WHERE id=$1`,[id,nowIso,by]
         );
         result={ok:true,id};
+      }
+    }else if(['saveManualOrderNote','setManualOrderStatus','deleteManualOrder'].includes(action)){
+      const id=String(body.id||'').trim();if(!id)throw new Error('Auftrag-ID fehlt.');
+      const q=await client.query(
+        'SELECT status FROM manual_orders_shadow WHERE id=$1 FOR UPDATE',[id]
+      );
+      if(!q.rowCount)throw new Error('Auftrag nicht gefunden.');
+      const oldStatus=String(q.rows[0].status||'Offen');
+      if(action==='saveManualOrderNote'){
+        await client.query(
+          `UPDATE manual_orders_shadow
+              SET internal_note=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now()
+            WHERE id=$1`,[id,String(body.note||''),nowIso,by]
+        );
+        result={ok:true};
+      }else if(action==='setManualOrderStatus'){
+        const status=String(body.status||'');
+        const allowed=['Ohne Termin','Termin zu vereinbaren','Offen','Laufend','Abgeschlossen'];
+        if(!allowed.includes(status))throw new Error('Ungültiger Auftragsstatus.');
+        await client.query(
+          `UPDATE manual_orders_shadow
+              SET status=$2,changed_at_text=$3,changed_by=$4,
+                  started_at_text=CASE WHEN $2='Laufend' AND COALESCE(started_at_text,'')='' THEN $3 ELSE started_at_text END,
+                  completed_at_text=CASE WHEN $2='Abgeschlossen' THEN $3 ELSE completed_at_text END,
+                  shadow_updated_at=now()
+            WHERE id=$1`,[id,status,nowIso,by]
+        );
+        result={ok:true,id,status};
+      }else{
+        if(oldStatus==='Laufend')throw new Error('Laufende Aufträge bitte zuerst auf Offen setzen oder abschließen.');
+        await client.query('DELETE FROM manual_orders_shadow WHERE id=$1',[id]);
+        result={ok:true};
       }
     }else if(action==='saveObjectInternalNote'){
       const objectId=String(body.objectId||'').trim();if(!objectId)throw new Error('Objekt-ID fehlt.');
