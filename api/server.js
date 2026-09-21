@@ -8643,7 +8643,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
+  'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveEmployeeAdmin','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
@@ -8726,6 +8726,14 @@ async function tryDirectPostgresWrite(action,body){
   }
   if(action==='setRegieReportsOfferStatus'){
     if(!String(body&&body.offerId||'').trim())return null;
+  }
+  if(action==='saveEmployeeAdmin'){
+    const item=body&&body.item||{},name=String(item.name||'').trim(),original=String(item.originalName||'').trim();
+    if(!name||!original||name!==original||String(item.pin||'').trim())return null;
+    const q=await pool.query('SELECT payload FROM employee_admin_shadow WHERE employee_name=$1 LIMIT 1',[name]);
+    if(!q.rowCount)return null;
+    const current=q.rows[0].payload||{};
+    if(String(item.calendarId||'').trim()!==String(current.calendarId||''))return null;
   }
   if(action==='saveEntry'){
     const e=body&&body.entry||{};
@@ -9419,6 +9427,52 @@ async function tryDirectPostgresWrite(action,body){
         [employee,year,entitlement,nowIso,by]
       );
       result={ok:true,_vacationEmployee:employee,_vacationYear:year};
+    }else if(action==='saveEmployeeAdmin'){
+      const item=body.item||{},name=String(item.name||'').trim(),original=String(item.originalName||'').trim();
+      if(!name||!original||name!==original)throw new Error('Namensänderungen werden weiterhin über Google verarbeitet.');
+      const q=await client.query('SELECT payload,sort_order FROM employee_admin_shadow WHERE employee_name=$1 FOR UPDATE',[name]);
+      if(!q.rowCount)throw new Error('Mitarbeiter nicht gefunden.');
+      const oldPayload=q.rows[0].payload||{};
+      if(String(item.pin||'').trim())throw new Error('PIN-Änderungen werden weiterhin über Google verarbeitet.');
+      if(String(item.calendarId||'').trim()!==String(oldPayload.calendarId||''))throw new Error('Kalender-ID-Änderungen werden weiterhin über Google geprüft.');
+      const type=String(item.employmentType||'Vollzeit').trim();
+      if(!['Vollzeit','Teilzeit','Aushilfe','Minijob','Azubi'].includes(type))throw new Error('Ungültige Beschäftigungsart.');
+      const nums=['monday','tuesday','wednesday','thursday','friday'].map(k=>Number(item[k]));
+      if(nums.some(v=>!Number.isFinite(v)||v<0||v>24))throw new Error('Tages-Sollstunden müssen zwischen 0 und 24 liegen.');
+      let requestedWeekly=Number(item.weeklyHours);if(!Number.isFinite(requestedWeekly))requestedWeekly=0;
+      if(requestedWeekly<0||requestedWeekly>60)throw new Error('Wochenstunden müssen zwischen 0 und 60 liegen.');
+      if(nums.every(v=>v===0)&&requestedWeekly>0){const d=Math.round((requestedWeekly/5)*100)/100;for(let i=0;i<nums.length;i++)nums[i]=d;}
+      const weekly=Math.round(nums.reduce((s,v)=>s+v,0)*100)/100;
+      const paymentMethod=String(item.paymentMethod||'Überweisung').trim();
+      if(!['Bar','Überweisung'].includes(paymentMethod))throw new Error('Ungültige Auszahlungsart.');
+      const payrollType=item.payrollType!==undefined?String(item.payrollType||'').trim():String(oldPayload.payrollType||'Stundenlohn');
+      if(!['Stundenlohn','Festgehalt'].includes(payrollType))throw new Error('Ungültige Abrechnungsart.');
+      const payrollRelevant=item.payrollRelevant!==undefined?Boolean(item.payrollRelevant):(oldPayload.payrollRelevant!==false);
+      const hourlyWage=Number(String(item.hourlyWage==null?'':item.hourlyWage).replace(',','.'))||0;
+      const monthlySalary=item.monthlySalary!==undefined?(Number(String(item.monthlySalary==null?'':item.monthlySalary).replace(',','.'))||0):Number(oldPayload.monthlySalary||0);
+      const entryDate=berlinDateOnly(item.entryDate||oldPayload.entryDate||''),minimumWage=minimumWageForEmployeeEntryDate(entryDate);
+      if(type!=='Azubi'&&payrollRelevant&&payrollType==='Stundenlohn'){
+        if(!(hourlyWage>0))throw new Error('Bitte den Brutto-Stundenlohn eintragen.');
+        if(minimumWage.amount>0&&hourlyWage+0.0001<minimumWage.amount)throw new Error('Stundenlohn liegt unter dem gesetzlichen Mindestlohn.');
+      }
+      if(payrollRelevant&&payrollType==='Festgehalt'&&!(monthlySalary>0))throw new Error('Bitte das Brutto-Monatsgehalt eintragen.');
+      const email=String(item.email||'').trim();if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new Error('E-Mail-Adresse ist ungültig.');
+      const iban=String(item.iban||'').replace(/\s+/g,'').toUpperCase();
+      if(paymentMethod==='Überweisung'&&iban&&!/^[A-Z]{2}[0-9A-Z]{13,32}$/.test(iban))throw new Error('IBAN ist ungültig.');
+      const holidayCredit=(type==='Aushilfe'||type==='Minijob')?false:Boolean(item.holidayCredit!==false);
+      const payload=Object.assign({},oldPayload,{
+        name,calendarId:String(oldPayload.calendarId||''),employmentType:type,weeklyHours:weekly,
+        monday:nums[0],tuesday:nums[1],wednesday:nums[2],thursday:nums[3],friday:nums[4],holidayCredit,
+        active:item.active===false?false:true,chefAccess:Boolean(item.chefAccess),lastName:String(item.lastName||'').trim(),firstName:String(item.firstName||'').trim(),
+        birthDate:berlinDateOnly(item.birthDate||''),personnelNumber:String(item.personnelNumber||'').trim(),street:String(item.street||'').trim(),
+        postalCode:String(item.postalCode||'').trim(),city:String(item.city||'').trim(),phone:String(item.phone||'').trim(),mobile:String(item.mobile||'').trim(),email,
+        healthInsurance:String(item.healthInsurance||'').trim(),healthInsuranceNumber:String(item.healthInsuranceNumber||'').trim(),socialSecurityNumber:String(item.socialSecurityNumber||'').trim(),
+        taxId:String(item.taxId||'').trim(),bank:String(item.bank||'').trim(),iban,entryDate,exitDate:berlinDateOnly(item.exitDate||''),paymentMethod,
+        emergencyContactName:String(item.emergencyContactName||'').trim(),emergencyContactPhone:String(item.emergencyContactPhone||'').trim(),drivingLicence:String(item.drivingLicence||'').trim(),
+        notes:String(item.notes||'').trim(),hourlyWage,payrollType,monthlySalary,payrollRelevant,minimumWage
+      });
+      await client.query('UPDATE employee_admin_shadow SET payload=$2::jsonb,shadow_updated_at=now() WHERE employee_name=$1',[name,JSON.stringify(payload)]);
+      result={ok:true,employees:await postgresEmployeeAdminData()};
     }else if(action==='saveMonthlyAdjustment'){
       const employee=String(body.targetEmployee||'').trim(),year=Number(body.year)||0,month=Number(body.month)||0;
       const hours=Math.round(Number(body.hours||0)*100)/100,reason=String(body.reason||'').trim();
