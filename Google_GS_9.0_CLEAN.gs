@@ -626,15 +626,24 @@ function findTimeBankReference_(ss, reference) {
   return null;
 }
 
-function appendTimeBankTransaction_(ss, targetEmployee, hours, art, year, month, reference, reason, createdBy) {
+function appendTimeBankTransaction_(ss, targetEmployee, hours, art, year, month, reference, reason, createdBy, transactionId) {
   targetEmployee=clean_(targetEmployee); hours=round2_(Number(hours)||0); art=clean_(art); reference=clean_(reference); reason=clean_(reason);
   if(!targetEmployee || !getEmployeeRecord_(targetEmployee)) throw new Error('Mitarbeiter nicht gefunden.');
   if(!isFinite(hours) || hours===0) throw new Error('Zeitguthaben-Buchung darf nicht 0 Stunden sein.');
+  const sheet=ensureTimeBankSheet_(ss),requestedId=clean_(transactionId);
+  if(requestedId){
+    const values=sheet.getDataRange().getValues();
+    for(let i=1;i<values.length;i++){
+      if(clean_(values[i][0])===requestedId){
+        return {ok:true,id:requestedId,hours:Number(values[i][2])||0,balanceBefore:getTimeBankBalance_(ss,targetEmployee),balanceAfter:getTimeBankBalance_(ss,targetEmployee)};
+      }
+    }
+  }
   if(reference && findTimeBankReference_(ss,reference)) throw new Error('Diese Zeitguthaben-Buchung wurde bereits durchgeführt.');
   const before=getTimeBankBalance_(ss,targetEmployee);
   if(hours<0 && before + hours < -0.001) throw new Error('Nicht genügend Zeitguthaben. Verfügbar: '+formatHours_(before)+' Std.');
-  const id=Utilities.getUuid();
-  ensureTimeBankSheet_(ss).appendRow([id,targetEmployee,hours,art,Number(year)||0,Number(month)||0,reference,reason,new Date(),clean_(createdBy)]);
+  const id=requestedId||Utilities.getUuid();
+  sheet.appendRow([id,targetEmployee,hours,art,Number(year)||0,Number(month)||0,reference,reason,new Date(),clean_(createdBy)]);
   return {ok:true,id:id,hours:hours,balanceBefore:before,balanceAfter:getTimeBankBalance_(ss,targetEmployee)};
 }
 
@@ -649,7 +658,7 @@ function getMyTimeBank(employee, employeePin) {
   return {employee:clean_(employee),balance:getTimeBankBalance_(ss,employee)};
 }
 
-function saveTimeBankManual(employee, employeePin, targetEmployee, hours, art, reason) {
+function saveTimeBankManual(employee, employeePin, targetEmployee, hours, art, reason, transactionId, manualReference) {
   requireChef_(employee,employeePin); hours=Math.abs(Number(hours)||0); art=clean_(art); reason=clean_(reason);
   if(!(hours>0 && hours<=500)) throw new Error('Bitte gültige Stunden eingeben.');
   if(!reason) throw new Error('Bitte einen Grund angeben.');
@@ -660,7 +669,8 @@ function saveTimeBankManual(employee, employeePin, targetEmployee, hours, art, r
   const now=new Date();
   const y=Number(Utilities.formatDate(now,CONFIG.TZ,'yyyy'));
   const m=Number(Utilities.formatDate(now,CONFIG.TZ,'MM'));
-  return appendTimeBankTransaction_(getSpreadsheet_(),targetEmployee,signed,art,y,m,'manual:'+Utilities.getUuid(),reason,employee);
+  const ref=clean_(manualReference)||('manual:'+Utilities.getUuid());
+  return appendTimeBankTransaction_(getSpreadsheet_(),targetEmployee,signed,art,y,m,ref,reason,employee,clean_(transactionId));
 }
 
 function getMonthTimeBankCredit_(ss, employee, year, month) {
@@ -5102,7 +5112,7 @@ function doPost(e) {
       return jsonResponse_({ok:true,data:getMyTimeBank(clean_(data.employee),clean_(data.pin))});
     }
     if (action === 'saveTimeBankManual') {
-      return jsonResponse_({ok:true,data:saveTimeBankManual(clean_(data.employee),clean_(data.employeePin),clean_(data.targetEmployee),Number(data.hours),clean_(data.timeBankAction),clean_(data.reason))});
+      return jsonResponse_({ok:true,data:saveTimeBankManual(clean_(data.employee),clean_(data.employeePin),clean_(data.targetEmployee),Number(data.hours),clean_(data.timeBankAction),clean_(data.reason),clean_(data.transactionId),clean_(data.manualReference))});
     }
     if (action === 'applyTimeBankToMonth') {
       return jsonResponse_({ok:true,data:applyTimeBankToMonth(clean_(data.employee),clean_(data.employeePin),clean_(data.targetEmployee),Number(data.year),Number(data.month),Number(data.hours||0))});
