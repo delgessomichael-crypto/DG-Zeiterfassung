@@ -72,3 +72,34 @@ Current intentional Google-bound reads:
 - maintenance attachment/file retrieval from Google Drive
 
 The boss-month and payroll-audit native paths remain locked until the first September 2026 Google result is observed and matches PostgreSQL exactly. Opening those views once in the app is sufficient to trigger the comparison.
+
+
+## Progress update — 2026-09-21 13:05 CEST
+
+PostgreSQL-first writes now include:
+- own reminder note / reschedule / complete / delete
+- object internal notes
+- payroll issue review and conflict review
+- manual order create/update/status/note/delete where a stable ID exists
+- customer inquiry note/contact/complete/archive
+- inquiry reminder reopen/archive
+- offer reminder reschedule
+- monthly adjustment delete
+- vacation entitlement update
+- employee active/inactive
+- planner worker active/inactive
+- Regie job status (Laufend/Abgeschlossen)
+- employee assignment confirmation / issue report
+
+Write safety:
+- successful local writes are queued to the encrypted legacy Google outbox
+- stale Google exact-view snapshots are removed after local writes without discarding validated native PostgreSQL algorithms
+- extended manual-order offer statuses are mirrored to the currently deployed Google backend via saveManualOrder, so they do not depend on a new Apps Script deployment
+- ID-generating writes remain Google-first until an idempotent cross-system ID strategy is available
+- Drive/calendar side-effect writes remain Google-first
+
+Current health remains:
+- 35 sheets
+- 884 source rows / 884 imported rows
+- 0 migration mismatches
+- legacy outbox currently empty
