@@ -8642,7 +8642,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
-  'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
+  'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveEmployeeAdmin','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
@@ -9527,6 +9527,41 @@ async function tryDirectPostgresWrite(action,body){
       const row=q.rows[0];
       await client.query('DELETE FROM monthly_adjustments_shadow WHERE id=$1',[id]);
       result={ok:true,_employee:String(row.employee_name||''),_year:Number(row.adjustment_year)||0,_month:Number(row.adjustment_month)||0};
+    }else if(action==='createInquiryReminder'){
+      const inquiryId=String(body.id||'').trim(),days=Number(body.days)||0;
+      if(!inquiryId)throw new Error('Anfrage nicht gefunden.');
+      if(days<1||days>10)throw new Error('Reminder muss zwischen 1 und 10 Tagen liegen.');
+      const iq=await client.query(
+        'SELECT customer,phone,email,description,subject,source,status FROM customer_inquiries_shadow WHERE id=$1 FOR UPDATE',[inquiryId]
+      );
+      if(!iq.rowCount)throw new Error('Anfrage nicht gefunden.');
+      const x=iq.rows[0],status=String(x.status||'Neu');
+      if(['Gelöscht','Archiviert','Übernommen','Erledigt'].includes(status))throw new Error('Diese Anfrage ist nicht mehr offen.');
+      const existing=await client.query(
+        `SELECT id FROM inquiry_reminders_shadow WHERE inquiry_id=$1 AND status='Offen' ORDER BY created_at_text DESC NULLS LAST LIMIT 1 FOR UPDATE`,[inquiryId]
+      );
+      const rid=existing.rowCount?String(existing.rows[0].id||''):(String(body.reminderId||'').trim()||('ANFREM-'+crypto.randomUUID()));
+      const due=isoAddDays(berlinTodayIso(),days);
+      if(existing.rowCount){
+        await client.query(
+          `UPDATE inquiry_reminders_shadow SET customer=$2,phone=$3,email=$4,description=$5,source=$6,due_date_text=$7,
+             status='Offen',result='',changed_at_text=$8,changed_by=$9,shadow_updated_at=now() WHERE id=$1`,
+          [rid,String(x.customer||''),String(x.phone||''),String(x.email||''),String(x.description||x.subject||''),String(x.source||''),due,nowIso,by]
+        );
+      }else{
+        await client.query(
+          `INSERT INTO inquiry_reminders_shadow(
+            id,inquiry_id,customer,phone,email,description,source,created_at_text,due_date_text,status,result,changed_at_text,changed_by,shadow_updated_at
+          ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'Offen','',$8,$10,now())`,
+          [rid,inquiryId,String(x.customer||''),String(x.phone||''),String(x.email||''),String(x.description||x.subject||''),String(x.source||''),nowIso,due,by]
+        );
+      }
+      await client.query(
+        `UPDATE customer_inquiries_shadow SET status='Reminder',read_flag=true,changed_at_text=$2,changed_by=$3,shadow_updated_at=now() WHERE id=$1`,
+        [inquiryId,nowIso,by]
+      );
+      legacyPayload=Object.assign({},body,{reminderId:rid});
+      result={ok:true,reminderId:rid,dueDate:due};
     }else if(action==='rescheduleOfferReminder'){
       const rid=String(body.reminderId||'').trim();if(!rid)throw new Error('Reminder-ID fehlt.');
       const rq=await client.query(
@@ -10037,7 +10072,7 @@ async function tryDirectPostgresWrite(action,body){
     const n=Number(q.rows[0]?.n||0);
     await saveShadowVerifyStat('offer_reminders',n,n,0);
   }
-  if(['reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder'].includes(action)){
+  if(['createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder'].includes(action)){
     for(const includeDone of [false,true]){
       const rows=await postgresInquiryReminderView(includeDone),key=inquiryReminderViewKey(includeDone);
       await saveShadowVerifyStat(key,rows.length,rows.length,0);
