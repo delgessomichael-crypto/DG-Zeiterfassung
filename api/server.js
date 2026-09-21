@@ -8661,7 +8661,7 @@ function directMinimumWageRead(body){
 
 const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'createOwnReminder','saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder',
-  'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus','saveOfferCreatedWithReminder',
+  'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus','saveOfferCreatedWithReminder','createInspectionOffer',
   'mergeRegieObjects','saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed','setMonthClosureStatus','setPayrollMonthStatus','completePayrollCycle','forceCompletePayrollCycle',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry','inquiryToOffer',
@@ -8898,6 +8898,66 @@ async function tryDirectPostgresWrite(action,body){
       legacyPayload=Object.assign({},body,{entry:Object.assign({},entry,{employee:by,clientId:id,start,end,hours})});
       result=await postgresDayData({date},by);
       if(dayWasClosed&&isSupplement){result.supplementSaved=true;result.supplementEntryId=id;}
+    }else if(action==='createInspectionOffer'){
+      const item=body.item||{},ev=item.event||{};
+      const customer=String(item.customer||'').trim(),date=berlinDateOnly(item.date||berlinTodayIso());
+      const hours=Math.round(Number(item.hours||0)*100)/100,sourceEventId=String(item.sourceCalendarEventId||ev.id||'').trim();
+      if(!customer)throw new Error('Kunde / Baustelle fehlt.');
+      if(!validIsoDateText(date))throw new Error('Ungültiges Datum.');
+      if(!(hours>0&&hours<=12))throw new Error('Ungültiger Zeitaufwand.');
+      let existing=null;
+      if(sourceEventId){
+        const oq=await client.query(
+          `SELECT offer_id FROM inquiry_offers_shadow
+            WHERE calendar_event_id=$1 AND source='Besichtigung' AND status<>'Verworfen'
+            ORDER BY created_at_text DESC NULLS LAST LIMIT 1 FOR UPDATE`,[sourceEventId]
+        );
+        if(oq.rowCount){
+          const offerId=String(oq.rows[0].offer_id||'');
+          const tq=await client.query(
+            `SELECT id FROM time_entries_shadow WHERE offer_id=$1 AND source_calendar_event_id=$2
+              ORDER BY transmitted_at_text DESC NULLS LAST LIMIT 1`,[offerId,sourceEventId]
+          );
+          existing={offerId,timeEntryId:String(tq.rows[0]?.id||'')};
+        }
+      }
+      if(existing){
+        result={ok:true,existing:true,offerId:existing.offerId,timeEntryId:existing.timeEntryId,
+          customer,hoursBooked:hours,sourceCalendarEventId:sourceEventId};
+      }else{
+        const offerId=String(body.offerId||'').trim()||('BES-'+crypto.randomUUID());
+        const timeEntryId=String(body.timeEntryId||'').trim()||('BESZEIT-'+crypto.randomUUID());
+        const activity=String(item.activity||item.note||ev.description||'Besichtigungstermin').trim()||'Besichtigungstermin';
+        const times=inspectionTimesForMirror(item,hours);
+        const closedQ=await client.query(
+          'SELECT 1 FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 LIMIT 1',[by,date]
+        );
+        await client.query(
+          `INSERT INTO inquiry_offers_shadow(
+             offer_id,inquiry_id,customer,phone,email,description,source,created_at_text,status,
+             changed_at_text,changed_by,calendar_event_id,inspection_date,inspection_hours,activity_note,shadow_updated_at
+           ) VALUES($1,'',$2,$3,$4,$5,'Besichtigung',$6,'Zu erstellen',$6,$7,$8,$9,$10,$11,now())`,
+          [offerId,customer,String(ev.phone||''),String(ev.email||''),String(ev.description||''),
+           nowIso,by,sourceEventId,date,hours,activity]
+        );
+        await client.query(
+          `INSERT INTO time_entries_shadow(
+             id,employee_name,entry_date,customer,start_time,end_time,hours,activity,calendar_id,transmitted_at_text,
+             closed,material_used,material,customer_signature_id,customer_signature_url,photo_count,photo_file_ids,photo_urls,
+             additional_employees_used,additional_employees_text,additional_employee_hours_text,source_calendar_event_id,
+             billing_status,billed_at_text,billed_by,object_id,job_status,is_supplement,supplement_created_at_text,
+             offer_id,offer_changed_at_text,offer_changed_by,maintenance,next_maintenance_due,maintenance_customer_id,
+             maintenance_object_id,maintenance_device_id,source_payload,shadow_updated_at
+           ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'',$9,$10,false,'','','',0,'','',false,'','',$11,
+                    'Offen','','','',$12,false,'',$13,$9,$2,false,'','','','',$14::jsonb,now())`,
+          [timeEntryId,by,date,customer,times.start,times.end,hours,activity,nowIso,Boolean(closedQ.rowCount),
+           sourceEventId,'Angebot zu erstellen',offerId,
+           JSON.stringify({source:'createInspectionOffer',vehicleUsed:Boolean(item.vehicleUsed),offerId})]
+        );
+        legacyPayload=Object.assign({},body,{offerId,timeEntryId});
+        result={ok:true,existing:false,offerId,timeEntryId,customer,hoursBooked:hours,activity,
+          transferredAt:nowIso,transferredBy:by,sourceCalendarEventId:sourceEventId};
+      }
     }else if(action==='saveOfferCreatedWithReminder'){
       const offerId=String(body.offerId||'').trim(),item=body.item||{};
       const customer=String(item.customer||'').trim(),offerNumber=String(item.offerNumber||'').trim();
@@ -10592,6 +10652,12 @@ async function tryDirectPostgresWrite(action,body){
       pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getMonthPayrollAudit','getPayrollCycleState','getDashboardSummary51')")
     ]);
     if(year)await mirrorHolidayYear(year);
+  }
+  if(action==='createInspectionOffer'){
+    await Promise.all([
+      pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'offer_%' OR shadow_name LIKE 'regie_%' OR shadow_name LIKE 'day_data:%' OR shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'month_data:%' OR shadow_name LIKE 'boss_month_native:%'"),
+      pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getOfferReports','getOfferStatistics','getMonthPayrollAudit','getPayrollCycleState','getDashboardSummary51')")
+    ]);
   }
   if(action==='inquiryToOffer'){
     await Promise.all([
