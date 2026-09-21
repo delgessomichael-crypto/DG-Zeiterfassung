@@ -8644,7 +8644,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
-  'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','updateEmployeeEntry','deleteEntry','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
+  'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','updateEmployeeEntry','deleteEntry','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
 function berlinTodayIso(){
@@ -8745,7 +8745,7 @@ async function tryDirectPostgresWrite(action,body){
     const item=body&&body.item||{};
     if(!String(item.id||'').trim()||String(item.inquiryId||'').trim())return null;
   }
-  const employeeSelfAction=['confirmEmployeeAssignment','reportEmployeeAssignmentIssue','updateEmployeeEntry','deleteEntry'].includes(action);
+  const employeeSelfAction=['confirmEmployeeAssignment','reportEmployeeAssignmentIssue','updateEmployeeEntry','deleteEntry','refreshClosedDay'].includes(action);
   const session=await localSessionForBody(body,!employeeSelfAction);if(!session)return null;
   const by=String(session.employee||body.employee||'').trim(),nowIso=new Date().toISOString();
   const client=await pool.connect();
@@ -8865,6 +8865,21 @@ async function tryDirectPostgresWrite(action,body){
         [entryId,customer,activity,materialUsed,material,jobStatus]
       );
       result=await postgresDayData({date},by);
+    }else if(action==='refreshClosedDay'){
+      const date=String(body.date||'').trim();
+      if(!validIsoDateText(date))throw new Error('Ungültiges Datum.');
+      const closure=await client.query(
+        'SELECT 1 FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 FOR UPDATE',[by,date]
+      );
+      if(!closure.rowCount)throw new Error('Dieser Tag ist noch nicht abgeschlossen.');
+      const data=await postgresDayData({date},by);
+      if(!data||!Array.isArray(data.entries)||!data.entries.length)throw new Error('Es sind keine Stunden für diesen Tag erfasst.');
+      await recalcClosedDayAfterDirectCorrection(client,by,date,'Nachtrag / Tagesabschluss aktualisiert',nowIso);
+      await client.query('UPDATE time_entries_shadow SET closed=true,shadow_updated_at=now() WHERE employee_name=$1 AND entry_date=$2',[by,date]);
+      result=await postgresDayData({date},by);
+      result.closureRefreshed=true;
+      result.closureNeedsRefresh=false;
+      result.closureRefreshedAt=shadowGermanDateTime(nowIso);
     }else if(action==='deleteEntry'){
       const id=String(body.id||'').trim(),date=String(body.date||'').trim();
       if(!id)throw new Error('Eintrag-ID fehlt.');
@@ -9769,8 +9784,8 @@ async function tryDirectPostgresWrite(action,body){
     const n=Number(q.rows[0]?.n||0);
     await saveShadowVerifyStat('manual_orders',n,n,0);
   }
-  if(['updateEmployeeEntry','deleteEntry'].includes(action)){
-    const employee=String(body.employee||''),date=action==='deleteEntry'?String(body.date||''):
+  if(['updateEmployeeEntry','deleteEntry','refreshClosedDay'].includes(action)){
+    const employee=String(body.employee||''),date=action==='deleteEntry'||action==='refreshClosedDay'?String(body.date||''):
       berlinDateOnly((await pool.query('SELECT entry_date FROM time_entries_shadow WHERE id=$1 LIMIT 1',[String(body.entryId||'')])).rows[0]?.entry_date||'');
     if(employee&&date){
       const dayKey=dayDataVerifyKey({date},employee);if(dayKey)await saveShadowVerifyStat(dayKey,1,1,0);
