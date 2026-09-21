@@ -1819,42 +1819,6 @@ async function mirrorRegieMetadataWrite(action,body,parsed){
     return;
   }
 
-  if(action==='deleteMonthlyAdjustment'){
-    await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'boss_month_native:%' OR shadow_name LIKE 'payroll_audit_native:%' OR shadow_name LIKE 'month_data:%'");
-    await pool.query('TRUNCATE boss_month_views_shadow');
-    if(result&&typeof result==='object'){
-      delete result._employee;delete result._year;delete result._month;
-    }
-  }
-  if(action==='rescheduleOfferReminder'){
-    const q=await pool.query('SELECT COUNT(*)::int AS n FROM offer_reminders_shadow');
-    const n=Number(q.rows[0]?.n||0);
-    await saveShadowVerifyStat('offer_reminders',n,n,0);
-  }
-  if(['reopenInquiryReminder','archiveInquiryReminder'].includes(action)){
-    for(const includeDone of [false,true]){
-      const rows=await postgresInquiryReminderView(includeDone),key=inquiryReminderViewKey(includeDone);
-      await saveShadowVerifyStat(key,rows.length,rows.length,0);
-      await markInquiryViewFresh(key);
-    }
-    for(const status of ['Offen','Alle','Neu','Archiviert']){
-      const rows=await postgresCustomerInquiryView(status),key=customerInquiryViewKey(status);
-      await saveShadowVerifyStat(key,rows.length,rows.length,0);
-      await markInquiryViewFresh(key);
-    }
-  }
-  if(['saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry'].includes(action)){
-    const statuses=['Offen','Alle','Kontaktiert','Erledigt','Archiviert'];
-    for(const status of statuses){
-      const rows=await postgresCustomerInquiryView(status),key=customerInquiryViewKey(status);
-      await saveShadowVerifyStat(key,rows.length,rows.length,0);
-      await markInquiryViewFresh(key);
-    }
-  }
-  if(['saveManualOrder','saveManualOrderNote','setManualOrderStatus','deleteManualOrder'].includes(action)){
-    const q=await pool.query('SELECT COUNT(*)::int AS n FROM manual_orders_shadow');
-    const n=Number(q.rows[0]?.n||0);await saveShadowVerifyStat('manual_orders',n,n,0);
-  }
   if(action==='saveObjectInternalNote'){
     await pool.query(
       `INSERT INTO object_notes_shadow(object_id,note,changed_at_text,changed_by,shadow_updated_at)
@@ -9062,6 +9026,35 @@ async function tryDirectPostgresWrite(action,body){
     throw e;
   }finally{client.release();}
 
+  if(action==='deleteMonthlyAdjustment'&&result&&typeof result==='object'){
+    delete result._employee;delete result._year;delete result._month;
+  }
+  if(action==='rescheduleOfferReminder'){
+    const q=await pool.query('SELECT COUNT(*)::int AS n FROM offer_reminders_shadow');
+    const n=Number(q.rows[0]?.n||0);
+    await saveShadowVerifyStat('offer_reminders',n,n,0);
+  }
+  if(['reopenInquiryReminder','archiveInquiryReminder'].includes(action)){
+    for(const includeDone of [false,true]){
+      const rows=await postgresInquiryReminderView(includeDone),key=inquiryReminderViewKey(includeDone);
+      await saveShadowVerifyStat(key,rows.length,rows.length,0);
+    }
+    for(const status of ['Offen','Alle','Neu','Archiviert']){
+      const rows=await postgresCustomerInquiryView(status),key=customerInquiryViewKey(status);
+      await saveShadowVerifyStat(key,rows.length,rows.length,0);
+    }
+  }
+  if(['saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry'].includes(action)){
+    for(const status of ['Offen','Alle','Kontaktiert','Erledigt','Archiviert']){
+      const rows=await postgresCustomerInquiryView(status),key=customerInquiryViewKey(status);
+      await saveShadowVerifyStat(key,rows.length,rows.length,0);
+    }
+  }
+  if(['saveManualOrder','saveManualOrderNote','setManualOrderStatus','deleteManualOrder'].includes(action)){
+    const q=await pool.query('SELECT COUNT(*)::int AS n FROM manual_orders_shadow');
+    const n=Number(q.rows[0]?.n||0);
+    await saveShadowVerifyStat('manual_orders',n,n,0);
+  }
   if(action==='setRegieObjectJobStatus'){
     for(const bodyView of [{status:'Offen',year:0,month:0},{status:'Abgerechnet',year:0,month:0}]){
       const rows=await postgresRegieReports(bodyView),key=regieReportsVerifyKey(bodyView);
