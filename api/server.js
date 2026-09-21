@@ -8639,7 +8639,7 @@ function directMinimumWageRead(body){
 const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'createOwnReminder','saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder',
   'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus',
-  'mergeRegieObjects','saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed','setMonthClosureStatus',
+  'mergeRegieObjects','saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed','setMonthClosureStatus','setPayrollMonthStatus',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
@@ -8772,6 +8772,10 @@ async function tryDirectPostgresWrite(action,body){
   if(action==='saveManualOrder'){
     const item=body&&body.item||{};
     if(!String(item.id||'').trim()||String(item.inquiryId||'').trim())return null;
+  }
+  if(action==='setPayrollMonthStatus'){
+    const payrollAction=String(body&&body.payrollAction||'').trim();
+    if(!['Freigegeben','Uebergeben','Wieder geoeffnet'].includes(payrollAction))return null;
   }
   const employeeSelfAction=['confirmEmployeeAssignment','reportEmployeeAssignmentIssue','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay'].includes(action);
   const session=await localSessionForBody(body,!employeeSelfAction);if(!session)return null;
@@ -9503,6 +9507,38 @@ async function tryDirectPostgresWrite(action,body){
       const history=h.rows.map(r=>({id:String(r.id||''),action:String(r.action||''),at:shadowGermanDateTime(r.action_at_text||''),by:String(r.action_by||''),reason:String(r.reason||'')}));
       const last=history.length?history[history.length-1]:null;
       result={status:last&&last.action==='Abgeschlossen'?'Abgeschlossen':'Offen',last,history};
+    }else if(action==='setPayrollMonthStatus'){
+      const year=Number(body.year)||0,month=Number(body.month)||0;
+      const payrollAction=String(body.payrollAction||'').trim(),reason=String(body.reason||'').trim();
+      if(!(year>0&&month>=1&&month<=12))throw new Error('Ungültiger Monat.');
+      if(!['Freigegeben','Uebergeben','Wieder geoeffnet'].includes(payrollAction))throw new Error('Ungültige Lohnabschluss-Aktion.');
+      if(payrollAction==='Wieder geoeffnet'&&!reason)throw new Error('Bitte einen Grund für die Wiederöffnung angeben.');
+      const audit=await postgresPayrollAuditNative({year,month});
+      if(!audit)throw new Error('Lohnprüfung konnte nicht aus PostgreSQL geladen werden.');
+      const currentState=audit.state||{};
+      if(payrollAction==='Freigegeben'&&(!audit.canRelease||currentState.changedSinceApproval))
+        throw new Error('Monatsabschluss kann erst freigegeben werden, wenn alle offenen Auffälligkeiten geprüft oder behoben sind.');
+      if(payrollAction==='Uebergeben'&&(currentState.status!=='Freigegeben'||currentState.changedSinceApproval))
+        throw new Error('Der Monat muss zuerst freigegeben werden und darf seitdem nicht verändert worden sein.');
+      const id=String(body.closureId||'').trim()||('PC-'+crypto.randomUUID());
+      const fingerprint=payrollAction==='Wieder geoeffnet'?'':String(audit.fingerprint||'');
+      await client.query(
+        `INSERT INTO payroll_closures_shadow(
+          id,closure_year,closure_month,action,action_at_text,action_by,reason,fingerprint,shadow_updated_at
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,now()) ON CONFLICT(id) DO NOTHING`,
+        [id,year,month,payrollAction,nowIso,by,reason,fingerprint]
+      );
+      legacyPayload=Object.assign({},body,{closureId:id});
+      const h=await client.query(
+        `SELECT id,action,action_at_text,action_by,reason,fingerprint FROM payroll_closures_shadow
+          WHERE closure_year=$1 AND closure_month=$2
+          ORDER BY action_at_text ASC NULLS LAST,id ASC`,[year,month]
+      );
+      const history=h.rows.map(r=>({id:String(r.id||''),action:String(r.action||''),at:shadowGermanDateTime(r.action_at_text||''),
+        by:String(r.action_by||''),reason:String(r.reason||''),fingerprint:String(r.fingerprint||'')}));
+      const last=history.length?history[history.length-1]:null;
+      let status=last?last.action:'Offen';if(status==='Wieder geoeffnet')status='Offen';
+      result={status,last,history,changedSinceApproval:false};
     }else if(action==='saveTimeBankManual'){
       const target=String(body.targetEmployee||'').trim(),reason=String(body.reason||'').trim();
       let hours=Math.abs(Number(body.hours)||0),art=String(body.timeBankAction||'').trim(),signed=hours;
