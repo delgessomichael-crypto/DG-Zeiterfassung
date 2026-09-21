@@ -4457,7 +4457,6 @@ async function verifySicknessAlertsShadow(data){
 }
 async function directSicknessAlertsRead(body){
   const session=await localSessionForBody(body,true);if(!session)return null;
-  if(!(await shadowReadyForDirectRead('sickness_alerts')))return null;
   return postgresSicknessAlerts();
 }
 
@@ -4564,8 +4563,6 @@ async function directAbsenceOverviewRead(body){
   const session=await localSessionForBody(body,true);if(!session)return null;
   const employee=String(body.targetEmployee||'').trim(),year=Number(body.year)||0;
   if(!employee||!year)return null;
-  const key='absence_overview:'+year+':'+employee;
-  if(!(await shadowReadyForDirectRead(key)))return null;
   return postgresAbsenceOverview(employee,year);
 }
 
@@ -6335,7 +6332,6 @@ async function directMyTimeBankRead(body){
   if(!session)return null;
   const employee=String(body.employee||session.employee||'').trim();
   if(!employee||employee!==session.employee)return null;
-  if(!(await shadowReadyForDirectRead('my_time_bank:'+employee)))return null;
   const q=await pool.query(
     'SELECT COALESCE(SUM(hours),0)::numeric AS balance FROM time_bank_shadow WHERE employee_name=$1',
     [employee]
@@ -6349,7 +6345,6 @@ async function directTimeBankAccountRead(body){
   if(!session)return null;
   const employee=String(body.targetEmployee||'').trim();
   if(!employee)return null;
-  if(!(await shadowReadyForDirectRead('time_bank:'+employee)))return null;
   const q=await pool.query(
     `SELECT id,employee_name,hours,booking_type,booking_year,booking_month,reference,reason,
             created_at_text,created_iso,created_by
@@ -6949,16 +6944,18 @@ async function directMaintenanceSearchRead(body){
 async function directAbsencesRead(body){
   const session=await localSessionForBody(body,true);
   if(!session)return null;
-  if(!(await shadowReadyForDirectRead('absences')))return null;
   const q=await pool.query(
-    `SELECT id,employee_name,absence_type,start_date,end_date,credited_hours
+    `SELECT id,employee_name,absence_type,start_date,end_date,credited_hours,
+            sickness_case_id,sickness_mode,employer_pay_through,payer,sickness_case_days,note
        FROM absences_shadow WHERE active=true
       ORDER BY start_date DESC,id DESC`
   );
   return q.rows.map(r=>({
     id:String(r.id||''),employee:String(r.employee_name||''),type:String(r.absence_type||''),
     start:berlinDateOnly(r.start_date),end:berlinDateOnly(r.end_date),
-    creditedHours:Number(r.credited_hours||0)
+    creditedHours:Number(r.credited_hours||0),sickCaseId:String(r.sickness_case_id||''),
+    sicknessMode:String(r.sickness_mode||''),employerPayThrough:berlinDateOnly(r.employer_pay_through),
+    payer:String(r.payer||''),caseDays:Number(r.sickness_case_days||0),note:String(r.note||'')
   }));
 }
 
@@ -6967,7 +6964,6 @@ async function directVacationAccountRead(body){
   if(!session)return null;
   const employee=String(body.targetEmployee||'').trim(),year=Number(body.year)||0;
   if(!employee||!year)return null;
-  if(!(await shadowReadyForDirectRead('vacation_full:'+year+':'+employee)))return null;
   return postgresVacationSummary(employee,year);
 }
 
@@ -6975,8 +6971,7 @@ async function directVacationAccountsRead(body){
   const session=await localSessionForBody(body,true);
   if(!session)return null;
   const year=Number(body.year)||0;if(!year)return null;
-  if(!(await shadowReadyForDirectRead('vacation_full:'+year+':all')))return null;
-  const activeMap=await employeeActiveMapFromSnapshot();
+  const activeMap=await employeeActiveMapLiveOrSnapshot();
   const names=[...activeMap.keys()].sort((a,b)=>a.localeCompare(b,'de'));
   const out=[];
   for(const name of names){
@@ -7661,7 +7656,6 @@ async function mirrorEmployeeMutation(action,body,parsed){
 async function directEmployeeAdminDataRead(body){
   const session=await localSessionForBody(body,true);
   if(!session)return null;
-  if(!(await shadowReadyForDirectRead('employee_admin')))return null;
   return postgresEmployeeAdminData();
 }
 
@@ -11771,8 +11765,8 @@ async function health() {
     phase: 'shadow-migration',
     database,
     googleBackendConfigured: Boolean(GOOGLE_BACKEND_URL),
-    productionWrites: 'Google-GS-9.0',
-    postgresWrites: 'migration-shadow-plus-read-cache',
+    productionWrites: 'PostgreSQL-primary',
+    postgresWrites: 'production-primary',
     employeeReadSource,
     employeeSnapshotDirty,
     postgresEmployeeSnapshotCount,
