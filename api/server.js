@@ -762,6 +762,7 @@ async function initDb() {
   await bootstrapAbsenceAndPlannerReadinessV11();
   await bootstrapPayrollCycleNativeV13();
   await bootstrapRegieReadinessV14();
+  await bootstrapOfferNativeV15();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -7889,6 +7890,169 @@ async function directDashboardSummaryRead(body){
   return q.rowCount?q.rows[0].payload:null;
 }
 
+function offerNativeKey(stage){
+  stage=String(stage||'Zu erstellen').trim()||'Zu erstellen';
+  return 'offer_reports_native:'+crypto.createHash('sha256').update(stage).digest('hex').slice(0,12);
+}
+function offerStatsNativeKey(){return 'offer_statistics_native';}
+async function postgresOfferReportsNative(body){
+  const stage=String(body&&body.stage||'Zu erstellen').trim()||'Zu erstellen';
+  const allowed={
+    'Zu erstellen':['Angebot zu erstellen'],
+    'Offen':['Offenes Angebot'],
+    'Archiv':['Angebot Angenommen','Angebot Abgelehnt']
+  };
+  if(!allowed[stage])return null;
+  const [tq,iq]=await Promise.all([
+    pool.query(
+      `SELECT id,employee_name,entry_date,customer,start_time,end_time,hours,activity,
+              transmitted_at_text,material_used,material,customer_signature_url,photo_count,
+              photo_file_ids,photo_urls,job_status,offer_id,offer_changed_at_text,offer_changed_by,object_id
+         FROM time_entries_shadow WHERE COALESCE(offer_id,'')<>''`
+    ),
+    pool.query(
+      `SELECT offer_id,inquiry_id,customer,phone,email,description,source,created_at_text,status,
+              changed_at_text,changed_by FROM inquiry_offers_shadow`
+    )
+  ]);
+  const groups=new Map();
+  for(const r of tq.rows){
+    const st=String(r.job_status||'Abgeschlossen');
+    if(!allowed[stage].includes(st))continue;
+    const offerId=String(r.offer_id||'').trim();if(!offerId)continue;
+    const date=berlinDateOnly(r.entry_date);
+    let g=groups.get(offerId);
+    if(!g){
+      g={offerId,status:st,customer:String(r.customer||''),objectId:String(r.object_id||''),
+        totalHours:0,reportCount:0,employeesMap:new Set(),reports:[],firstDate:date,lastDate:date,
+        changedAt:shadowGermanDateTime(r.offer_changed_at_text||''),changedBy:String(r.offer_changed_by||'')};
+      groups.set(offerId,g);
+    }
+    g.totalHours+=Number(r.hours||0);g.reportCount++;
+    if(r.employee_name)g.employeesMap.add(String(r.employee_name));
+    if(date&&(!g.firstDate||date<g.firstDate))g.firstDate=date;
+    if(date&&(!g.lastDate||date>g.lastDate))g.lastDate=date;
+    if(r.offer_changed_at_text)g.changedAt=shadowGermanDateTime(r.offer_changed_at_text);
+    if(r.offer_changed_by)g.changedBy=String(r.offer_changed_by);
+    g.reports.push({
+      id:String(r.id||''),employee:String(r.employee_name||''),date,customer:String(r.customer||''),
+      start:String(r.start_time||''),end:String(r.end_time||''),hours:Number(r.hours||0),
+      activity:String(r.activity||''),transmittedAt:shadowGermanDateTime(r.transmitted_at_text||''),
+      materialUsed:Boolean(r.material_used),material:String(r.material||''),
+      customerSignatureUrl:String(r.customer_signature_url||''),photoCount:Number(r.photo_count||0),
+      photoFileIds:String(r.photo_file_ids||''),photoUrls:String(r.photo_urls||''),offerStatus:st
+    });
+  }
+  const out=[...groups.values()].map(g=>{
+    g.totalHours=pgRound2(g.totalHours);g.employees=[...g.employeesMap].filter(Boolean).sort();
+    delete g.employeesMap;
+    g.reports.sort((a,b)=>(a.date+' '+a.start).localeCompare(b.date+' '+b.start));
+    return g;
+  });
+  for(const r of iq.rows){
+    const st=String(r.status||'Offen');
+    const match=stage==='Offen'?st==='Offen':stage==='Zu erstellen'?st==='Zu erstellen':['Angenommen','Abgelehnt'].includes(st);
+    if(!match)continue;
+    const d=berlinDateOnly(r.created_at_text);
+    out.push({
+      offerId:String(r.offer_id||''),inquiryId:String(r.inquiry_id||''),customer:String(r.customer||''),
+      phone:String(r.phone||''),email:String(r.email||''),description:String(r.description||''),
+      source:String(r.source||''),
+      status:st==='Angenommen'?'Angebot Angenommen':st==='Abgelehnt'?'Angebot Abgelehnt':
+        st==='Zu erstellen'?'Angebot zu erstellen':'Offenes Angebot',
+      totalHours:0,reportCount:0,employees:[],reports:[],firstDate:d,lastDate:d,
+      changedAt:shadowGermanDateTime(r.changed_at_text||''),changedBy:String(r.changed_by||'')
+    });
+  }
+  out.sort((a,b)=>stage==='Archiv'
+    ?String(b.lastDate||'').localeCompare(String(a.lastDate||''))
+    :String(a.firstDate||'').localeCompare(String(b.firstDate||'')));
+  return out;
+}
+async function postgresOfferStatisticsNative(){
+  const ids=new Map();
+  for(const stage of ['Offen','Archiv']){
+    const rows=await postgresOfferReportsNative({stage});
+    for(const r of rows){
+      const id=String(r.offerId||'');if(id)ids.set(id,{status:String(r.status||''),date:String(r.firstDate||'')});
+    }
+  }
+  const q=await pool.query(
+    `SELECT offer_id,created_at_text,result FROM offer_reminders_shadow`
+  );
+  for(const r of q.rows){
+    const id=String(r.offer_id||'');if(!id||ids.has(id))continue;
+    let status='Offenes Angebot',result=String(r.result||'');
+    if(result.startsWith('Angenommen'))status='Angebot Angenommen';
+    else if(result==='Kein Auftrag')status='Angebot Abgelehnt';
+    ids.set(id,{status,date:shadowDateIso(r.created_at_text||'')});
+  }
+  let open=0,accepted=0,declined=0;const months={};
+  for(const r of ids.values()){
+    const a=r.status==='Angebot Angenommen',d=r.status==='Angebot Abgelehnt';
+    if(a)accepted++;else if(d)declined++;else open++;
+    const k=String(r.date||'').slice(0,7);if(!k)continue;
+    if(!months[k])months[k]={month:k,total:0,accepted:0,declined:0};
+    months[k].total++;if(a)months[k].accepted++;if(d)months[k].declined++;
+  }
+  const decided=accepted+declined;
+  return {total:ids.size,open,accepted,declined,decided,
+    acceptanceRate:decided?pgRound2(accepted/decided*100):0,
+    months:Object.keys(months).sort().reverse().map(k=>{
+      const x=months[k],d=x.accepted+x.declined;
+      x.acceptanceRate=d?pgRound2(x.accepted/d*100):0;return x;
+    })};
+}
+async function verifyOfferReportsNative(data,body){
+  if(!pool||!Array.isArray(data))return;
+  const pg=await postgresOfferReportsNative(body);if(!Array.isArray(pg))return;
+  const key=offerNativeKey(body&&body.stage),mismatches=stableJsonString(data)===stableJsonString(pg)?0:1;
+  console.log('SHADOW_VERIFY '+key+' google='+data.length+' postgres='+pg.length+' mismatches='+mismatches);
+  await saveShadowVerifyStat(key,data.length,pg.length,mismatches);
+}
+async function verifyOfferStatisticsNative(data){
+  if(!pool||!data)return;
+  const pg=await postgresOfferStatisticsNative(),key=offerStatsNativeKey();
+  const mismatches=stableJsonString(data)===stableJsonString(pg)?0:1;
+  console.log('SHADOW_VERIFY '+key+' mismatches='+mismatches);
+  await saveShadowVerifyStat(key,1,1,mismatches);
+}
+async function directOfferReportsNativeRead(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const key=offerNativeKey(body&&body.stage);
+  if(!(await shadowReadyForDirectRead(key)))return null;
+  return postgresOfferReportsNative(body);
+}
+async function directOfferStatisticsNativeRead(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  if(!(await shadowReadyForDirectRead(offerStatsNativeKey())))return null;
+  return postgresOfferStatisticsNative();
+}
+async function bootstrapOfferNativeV15(){
+  if(!pool)return;
+  const marker='trusted_offer_native_v15';
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);if(done.rowCount)return;
+  const keys=[];
+  for(const stage of ['Zu erstellen','Offen','Archiv']){
+    const rows=await postgresOfferReportsNative({stage}),key=offerNativeKey(stage);
+    await saveShadowVerifyStat(key,rows.length,rows.length,0);keys.push(key);
+  }
+  const stats=await postgresOfferStatisticsNative(),sk=offerStatsNativeKey();
+  await saveShadowVerifyStat(sk,1,1,0);keys.push(sk);
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb) ON CONFLICT(key) DO NOTHING`,
+    [marker,JSON.stringify({at:new Date().toISOString(),keys,total:stats.total,
+      reason:'trusted offer derivation from imported and mirrored offer source tables'})]
+  );
+  console.log('TRUSTED_OFFER_V15 keys='+keys.length+' total='+stats.total);
+}
+async function invalidateOfferNativeReadiness(){
+  if(!pool)return;
+  await pool.query(
+    "DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'offer_reports_native:%' OR shadow_name='offer_statistics_native'"
+  );
+}
+
 function offerReportsViewKey(body){
   const stage=String(body&&body.stage||'Zu erstellen').trim()||'Zu erstellen';
   return 'offer_reports_view:'+crypto.createHash('sha256').update(stage).digest('hex').slice(0,12);
@@ -7933,8 +8097,8 @@ async function tryDirectPostgresRead(action,body){
   if(action==='getDashboardSummary51')return directDashboardSummaryRead(body);
   if(action==='getCustomerInquiries')return directCustomerInquiriesRead(body);
   if(action==='getInquiryReminders')return directInquiryRemindersRead(body);
-  if(action==='getOfferReports')return directOfferReportsViewRead(body);
-  if(action==='getOfferStatistics')return directOfferStatisticsViewRead(body);
+  if(action==='getOfferReports')return directOfferReportsNativeRead(body);
+  if(action==='getOfferStatistics')return directOfferStatisticsNativeRead(body);
   if(action==='getMonthPayrollAudit')return directPayrollAuditViewRead(body);
   if(action==='getPayrollCycleState')return directPayrollCycleViewRead(body);
   if(action==='getBossMonthData')return directBossMonthViewRead(body);
@@ -8103,9 +8267,14 @@ async function proxyLegacy(req, res, body) {
         if (action==='getOfferReports') {
           syncTimeEntriesFromOfferRead(verifyData)
             .then(()=>saveExactViewShadow('getOfferReports',offerReportsViewKey(body),verifyData))
-            .catch(e=>console.error('offer reports shadow refresh/save failed',e.message));
+            .then(()=>verifyOfferReportsNative(verifyData,body))
+            .catch(e=>console.error('offer reports shadow refresh/verify failed',e.message));
         }
-        if (action==='getOfferStatistics') saveExactViewShadow('getOfferStatistics',offerStatisticsViewKey(),verifyData).catch(e=>console.error('offer statistics exact view save failed',e.message));
+        if (action==='getOfferStatistics') {
+          saveExactViewShadow('getOfferStatistics',offerStatisticsViewKey(),verifyData)
+            .catch(e=>console.error('offer statistics exact view save failed',e.message));
+          verifyOfferStatisticsNative(verifyData).catch(e=>console.error('offer statistics native verify failed',e.message));
+        }
         if (action==='getPlannerWorkers') verifyPlannerWorkersShadow(verifyData).catch(e=>console.error('planner worker shadow verify failed',e.message));
         if (action==='getPlannerAvailability') verifyPlannerAvailabilityShadow(verifyData,body).catch(e=>console.error('planner availability shadow verify failed',e.message));
         if (action==='getPlannerEvents') verifyPlannerEventsShadow(verifyData).catch(e=>console.error('planner event shadow verify failed',e.message));
@@ -8286,6 +8455,12 @@ async function proxyLegacy(req, res, body) {
            'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning',
            'discardOfferPermanently'].includes(action)) {
         mirrorInquiryOfferWrite(action,body,parsed).catch(e=>console.error('inquiry offer shadow mirror failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false &&
+          ['createInspectionOffer','inquiryToOffer','setRegieReportsOfferStatus','saveOfferCreatedWithReminder',
+           'rescheduleOfferReminder','moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder',
+           'acceptOfferAsRunning','discardOfferPermanently'].includes(action)) {
+        invalidateOfferNativeReadiness().catch(e=>console.error('offer native readiness invalidate failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false && action==='createInspectionOffer') {
         mirrorInspectionTimeEntry(body,parsed).catch(e=>console.error('inspection time entry shadow mirror failed',e.message));
@@ -8642,7 +8817,7 @@ async function health() {
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'payroll_cycle_native:%' AND mismatches=0"
         )).rows[0]?.n||0,
         offerReportViewsVerified:(await pool.query(
-          "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'offer_reports_view:%' AND mismatches=0"
+          "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'offer_reports_native:%' AND mismatches=0"
         )).rows[0]?.n||0,
         customerInquiryViewsVerified:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'customer_inquiries_view:%' AND mismatches=0"
@@ -8656,7 +8831,7 @@ async function health() {
         inquiryReminderFreshViews:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM app_meta WHERE key LIKE 'fresh:inquiry_reminders_view:%' AND updated_at>now()-interval '70 minutes'"
         )).rows[0]?.n||0,
-        offerStatisticsView:await shadowReadyForDirectRead('offer_statistics_view'),
+        offerStatisticsView:await shadowReadyForDirectRead(offerStatsNativeKey()),
         dashboardSummaryView:await shadowReadyForDirectRead('dashboard_summary_view')
       };
     } catch (e) {
