@@ -4879,6 +4879,7 @@ async function mirrorMaintenanceWrite(action,body,parsed){
   if(!pool)return;
   const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
   if(!data||data.ok===false)return;
+  if(action==='saveAbsence' && String(body.type||'')!=='Urlaub')return null;
   if(action==='saveMaintenanceCustomer'){
     await mirrorMaintenanceCustomerTree(data,body.employee);
   } else if(action==='deleteMaintenanceCustomer'){
@@ -8665,7 +8666,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','syncHolidays','saveEmployeeAdmin','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','saveMaintenanceCustomer','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
+  'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','syncHolidays','saveEmployeeAdmin','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','saveMaintenanceCustomer','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','saveAbsence','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
@@ -10119,6 +10120,52 @@ async function tryDirectPostgresWrite(action,body){
         }
         result={ok:true,employee:target,returnDate,oldEnd,newEnd,changed:true,removedEntire,hoursCountFrom:returnDate};
       }
+    }else if(action==='saveAbsence'){
+      const target=String(body.targetEmployee||'').trim(),type=String(body.type||'').trim();
+      const start=berlinDateOnly(body.startDate||''),end=berlinDateOnly(body.endDate||'');
+      if(type!=='Urlaub')throw new Error('Diese Abwesenheitsart wird weiterhin über Google verarbeitet.');
+      if(!target)throw new Error('Mitarbeiter wurde nicht gefunden.');
+      if(!validIsoDateText(start)||!validIsoDateText(end)||end<start)throw new Error('Ungültiger Abwesenheitszeitraum.');
+      const eq=await client.query('SELECT payload FROM employee_admin_shadow WHERE employee_name=$1 LIMIT 1',[target]);
+      if(!eq.rowCount)throw new Error('Mitarbeiter wurde nicht gefunden.');
+      const profile=Object.assign({name:target},eq.rows[0].payload||{});
+      const id=String(body.absenceId||'').trim()||('ABS-'+crypto.randomUUID());
+      const dates=isoDateList(start,end),holidayCache=new Map(),creditRows=[];
+      let creditedHours=0,days=0;
+      for(const date of dates){
+        const dow=isoWeekday(date);if(dow<1||dow>5)continue;
+        const year=Number(date.slice(0,4));
+        if(!holidayCache.has(year))holidayCache.set(year,new Set(bavariaNurembergHolidayDates(year)));
+        if(holidayCache.get(year).has(date))continue;
+        const credit=Math.round(profileHoursForDate(profile,date)*100)/100;
+        if(!(credit>0))continue;
+        creditRows.push({date,credit});creditedHours=Math.round((creditedHours+credit)*100)/100;days++;
+      }
+      await client.query(
+        `INSERT INTO absences_shadow(
+           id,employee_name,absence_type,start_date,end_date,created_at_text,created_by,active,
+           sickness_case_id,sickness_mode,employer_pay_through,payer,sickness_case_days,note,
+           credited_hours,shadow_updated_at
+         ) VALUES($1,$2,'Urlaub',$3,$4,$5,$6,true,'','','','',0,'',$7,now())
+         ON CONFLICT(id) DO UPDATE SET employee_name=EXCLUDED.employee_name,absence_type='Urlaub',
+           start_date=EXCLUDED.start_date,end_date=EXCLUDED.end_date,created_by=EXCLUDED.created_by,
+           active=true,credited_hours=EXCLUDED.credited_hours,shadow_updated_at=now()`,
+        [id,target,start,end,nowIso,by,creditedHours]
+      );
+      for(const x of creditRows){
+        await client.query(
+          `INSERT INTO day_status_shadow(
+             employee_name,status_date,status,changed_at_text,source,reference,credited_hours,
+             credited_hours_missing,shadow_updated_at
+           ) VALUES($1,$2,'Urlaub',$3,'Chef Abwesenheit',$4,$5,false,now())
+           ON CONFLICT(employee_name,status_date) DO UPDATE SET status='Urlaub',
+             changed_at_text=EXCLUDED.changed_at_text,source='Chef Abwesenheit',reference=EXCLUDED.reference,
+             credited_hours=EXCLUDED.credited_hours,credited_hours_missing=false,shadow_updated_at=now()`,
+          [target,x.date,nowIso,id,x.credit]
+        );
+      }
+      legacyPayload=Object.assign({},body,{absenceId:id});
+      result={ok:true,id,days,creditedHours};
     }else if(action==='deleteAbsence'){
       const id=String(body.id||'').trim();if(!id)throw new Error('Abwesenheit nicht gefunden.');
       const q=await client.query(
@@ -10486,6 +10533,14 @@ async function tryDirectPostgresWrite(action,body){
       pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getMonthPayrollAudit','getPayrollCycleState','getDashboardSummary51')")
     ]);
     if(year)await mirrorHolidayYear(year);
+  }
+  if(action==='saveAbsence' && String(body.type||'')==='Urlaub'){
+    const sy=Number(String(body.startDate||'').slice(0,4))||0,ey=Number(String(body.endDate||'').slice(0,4))||sy;
+    for(let y=sy;y<=ey;y++)if(y)await pgSyncAutoClosures(y);
+    await Promise.all([
+      pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'absences%' OR shadow_name LIKE 'vacation_full:%' OR shadow_name LIKE 'absence_overview:%' OR shadow_name LIKE 'day_data:%' OR shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'month_data:%' OR shadow_name LIKE 'boss_day_closures:%'"),
+      pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getMonthPayrollAudit','getPayrollCycleState','getDashboardSummary51')")
+    ]);
   }
   if(action==='forceCompletePayrollCycle'){
     await Promise.all([
