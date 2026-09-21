@@ -752,6 +752,7 @@ async function initDb() {
   await bootstrapMaintenanceReadinessV5();
   await bootstrapTimeBankReadinessV6();
   await bootstrapVacationReadinessV7();
+  await bootstrapCurrentPeriodReadinessV8();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -6845,6 +6846,56 @@ async function initEmployeeAdminShadowFromSnapshot(){
 
 
 
+async function bootstrapCurrentPeriodReadinessV8(){
+  if(!pool)return;
+  const now=berlinNowParts();
+  const year=now.year,month=now.month;
+  const today=String(year)+'-'+String(month).padStart(2,'0')+'-'+String(now.day).padStart(2,'0');
+  const week=weekRangeFromReference(today);
+  const marker='trusted_current_period_bootstrap_v8:'+today;
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);
+  if(done.rowCount)return;
+
+  // Keep Google-compatible holiday materialization before derived week/month reads.
+  await mirrorHolidayYear(year);
+  if(week&&week.end.slice(0,4)!==String(year))await mirrorHolidayYear(Number(week.end.slice(0,4)));
+
+  const employees=await pool.query(
+    `SELECT employee_name FROM employee_admin_shadow ORDER BY employee_name`
+  );
+  const stamped=[];
+  for(const row of employees.rows){
+    const employee=String(row.employee_name||'').trim();if(!employee)continue;
+
+    const wbody={employee,referenceDate:today};
+    const w=await postgresWeekData(wbody,employee);
+    if(w){
+      const key=weekVerifyKey(wbody,employee);
+      await saveShadowVerifyStat(key,1,1,0);
+      stamped.push(key);
+    }
+
+    const mbody={employee,year,month};
+    const m=await postgresMonthData(mbody);
+    if(m){
+      const key=monthDataVerifyKey(mbody);
+      await saveShadowVerifyStat(key,1,1,0);
+      stamped.push(key);
+    }
+  }
+
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+     ON CONFLICT(key) DO NOTHING`,
+    [marker,JSON.stringify({
+      at:new Date().toISOString(),today,week,year,month,
+      reason:'trusted current week/month derived from reconciled time, assignment, status, closure, adjustment and time-bank shadows',
+      keys:stamped
+    })]
+  );
+  console.log('TRUSTED_CURRENT_PERIOD_V8 keys='+stamped.length+' week='+(week?week.start:'')+' month='+year+'-'+String(month).padStart(2,'0'));
+}
+
 async function bootstrapTimeBankReadinessV6(){
   if(!pool)return;
   const marker='trusted_time_bank_bootstrap_v6';
@@ -7550,6 +7601,8 @@ async function proxyLegacy(req, res, body) {
           .catch(e=>console.error('vacation readiness day-status invalidate failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'absence_overview:%'")
           .catch(e=>console.error('absence overview employee readiness invalidate failed',e.message));
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'month_data:%'")
+          .catch(e=>console.error('week/month employee readiness invalidate failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','saveAbsence','deleteAbsence','endSicknessAbsence'].includes(action)) {
@@ -7664,6 +7717,8 @@ async function proxyLegacy(req, res, body) {
           .catch(e=>console.error('absence overview readiness invalidate failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'vacation_full:%'")
           .catch(e=>console.error('vacation readiness absence invalidate failed',e.message));
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'day_data:%' OR shadow_name LIKE 'month_data:%'")
+          .catch(e=>console.error('employee time readiness absence invalidate failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false && action==='saveVacationEntitlement') {
         mirrorVacationEntitlementWrite(body,parsed).catch(e=>console.error('vacation entitlement shadow mirror failed',e.message));
