@@ -532,6 +532,9 @@ CREATE TABLE IF NOT EXISTS day_status_shadow (
   PRIMARY KEY(employee_name,status_date)
 );
 
+ALTER TABLE day_status_shadow
+  ADD COLUMN IF NOT EXISTS credited_hours_missing BOOLEAN NOT NULL DEFAULT false;
+
 CREATE INDEX IF NOT EXISTS day_status_shadow_date_idx
   ON day_status_shadow(status_date,employee_name);
 
@@ -740,6 +743,7 @@ async function initDb() {
   await initClosureShadows();
   await initConflictReviewsShadow();
   await initDayStatusShadow();
+  await reconcileLegacyDayStatusCreditsV12();
   await initDayClosuresShadow();
   await reconcileLegacyDayClosureDuplicatesV9();
   await initTimeEntriesShadow();
@@ -756,6 +760,7 @@ async function initDb() {
   await bootstrapCurrentPeriodReadinessV8();
   await bootstrapDayAndBossClosureReadinessV10();
   await bootstrapAbsenceAndPlannerReadinessV11();
+  await bootstrapPayrollCycleNativeV13();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -2679,6 +2684,57 @@ async function initDayStatusShadow(){
   console.log('SHADOW day_status initialized rows='+inserted);
 }
 
+async function reconcileLegacyDayStatusCreditsV12(){
+  if(!pool)return;
+  const marker='legacy_day_status_blank_credit_v12';
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);
+  if(done.rowCount)return;
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:Tagesstatus']
+  );
+  let marked=0,skipped=0;
+  for(const row of q.rows){
+    const p=row.payload||{};if(Number(p.sourceRow||row.source_key)<=1)continue;
+    const c=Array.isArray(p.cells)?p.cells:[];
+    const employee=textCell(c,0).trim(),date=textCell(c,1).trim();
+    if(!employee||!date||textCell(c,6).trim()!=='')continue;
+    const cur=await pool.query(
+      `SELECT status,source,reference,credited_hours FROM day_status_shadow
+        WHERE employee_name=$1 AND status_date=$2 LIMIT 1`,
+      [employee,date]
+    );
+    if(!cur.rowCount)continue;
+    const r=cur.rows[0];
+    const same=String(r.status||'')===String(textCell(c,2)||'Arbeiten') &&
+      String(r.source||'')===String(textCell(c,4)||'') &&
+      String(r.reference||'')===String(textCell(c,5)||'') &&
+      Math.abs(Number(r.credited_hours||0))<0.001;
+    if(!same){skipped++;continue;}
+    await pool.query(
+      `UPDATE day_status_shadow SET credited_hours_missing=true
+        WHERE employee_name=$1 AND status_date=$2`,
+      [employee,date]
+    );
+    marked++;
+  }
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+     ON CONFLICT(key) DO NOTHING`,
+    [marker,JSON.stringify({at:new Date().toISOString(),marked,skipped,
+      reason:'preserve Google semantic: blank Tagesstatus credit means derive scheduled hours at read time'})]
+  );
+  console.log('DAY_STATUS_BLANK_CREDIT_V12 marked='+marked+' skipped='+skipped);
+}
+
+async function effectiveStatusCredit(employee,date,status,stored,missing){
+  if(!missing)return Math.round(Number(stored||0)*100)/100;
+  const p=await employeeAutomationProfile(employee);
+  if(String(status||'')==='Feiertag'&&(String(p.employmentType||'')==='Aushilfe'||p.holidayCredit===false))return 0;
+  return profileHoursForDate(p,date);
+}
+
 async function upsertDayStatusShadow(employee,date,status,source,creditedHours,reference){
   if(!pool||!employee||!date)return;
   status=String(status||'Arbeiten');
@@ -2688,12 +2744,12 @@ async function upsertDayStatusShadow(employee,date,status,source,creditedHours,r
   }
   await pool.query(
     `INSERT INTO day_status_shadow(
-      employee_name,status_date,status,changed_at_text,source,reference,credited_hours,shadow_updated_at
-    ) VALUES($1,$2,$3,$4,$5,$6,$7,now())
+      employee_name,status_date,status,changed_at_text,source,reference,credited_hours,credited_hours_missing,shadow_updated_at
+    ) VALUES($1,$2,$3,$4,$5,$6,$7,false,now())
     ON CONFLICT(employee_name,status_date) DO UPDATE SET
       status=EXCLUDED.status,changed_at_text=EXCLUDED.changed_at_text,source=EXCLUDED.source,
       reference=CASE WHEN EXCLUDED.reference<>'' THEN EXCLUDED.reference ELSE day_status_shadow.reference END,
-      credited_hours=EXCLUDED.credited_hours,shadow_updated_at=now()`,
+      credited_hours=EXCLUDED.credited_hours,credited_hours_missing=false,shadow_updated_at=now()`,
     [String(employee),String(date),status,new Date().toISOString(),String(source||''),
      String(reference||''),Number(creditedHours)||0]
   );
@@ -2729,8 +2785,8 @@ async function syncAndVerifyMonthStatuses(body,data){
       if(!st||!st.date||String(st.status||'Arbeiten')==='Arbeiten')continue;
       await client.query(
         `INSERT INTO day_status_shadow(
-          employee_name,status_date,status,changed_at_text,source,reference,credited_hours,shadow_updated_at
-        ) VALUES($1,$2,$3,$4,$5,'',$6,now())`,
+          employee_name,status_date,status,changed_at_text,source,reference,credited_hours,credited_hours_missing,shadow_updated_at
+        ) VALUES($1,$2,$3,$4,$5,'',$6,false,now())`,
         [employee,String(st.date),String(st.status||''),new Date().toISOString(),
          String(st.source||''),Number(st.creditedHours)||0]
       );
@@ -3224,7 +3280,7 @@ async function postgresMonthData(body){
       [employee,prefix+'%']
     ),
     pool.query(
-      `SELECT status_date,status,source,credited_hours FROM day_status_shadow
+      `SELECT status_date,status,source,credited_hours,credited_hours_missing FROM day_status_shadow
         WHERE employee_name=$1 AND status_date LIKE $2 AND status_date>='2026-09-07'
         ORDER BY status_date ASC`,
       [employee,prefix+'%']
@@ -3270,10 +3326,14 @@ async function postgresMonthData(body){
   rawRows.sort((a,b)=>(a.date+' '+a._start).localeCompare(b.date+' '+b._start));
   const rows=rawRows.map(r=>{const x={...r};delete x._start;return x;});
   const round=x=>Math.round(Number(x||0)*100)/100;
-  const statuses=statusQ.rows.map(r=>({
-    date:berlinDateOnly(r.status_date),status:String(r.status||''),source:String(r.source||''),
-    creditedHours:round(r.credited_hours)
-  }));
+  const statuses=[];
+  for(const r of statusQ.rows){
+    const d=berlinDateOnly(r.status_date),st=String(r.status||'');
+    statuses.push({
+      date:d,status:st,source:String(r.source||''),
+      creditedHours:round(await effectiveStatusCredit(employee,d,st,r.credited_hours,r.credited_hours_missing))
+    });
+  }
   const grossBy=new Map();
   for(const r of rows)grossBy.set(r.date,(grossBy.get(r.date)||0)+Number(r.hours||0));
   const dayTotals=[...grossBy.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([date,value])=>{
@@ -3387,7 +3447,7 @@ async function postgresDayData(body,employee){
       [employee,date]
     ),
     pool.query(
-      `SELECT status,source,credited_hours FROM day_status_shadow WHERE employee_name=$1 AND status_date=$2 LIMIT 1`,
+      `SELECT status,source,credited_hours,credited_hours_missing FROM day_status_shadow WHERE employee_name=$1 AND status_date=$2 LIMIT 1`,
       [employee,date]
     ),
     pool.query(
@@ -3427,7 +3487,7 @@ async function postgresDayData(body,employee){
   const pauseHours=grossWorkTotal>=6?1:0,workTotal=round(Math.max(0,grossWorkTotal-pauseHours));
   const st=statusQ.rows[0]||{};
   const status=String(st.status||'Arbeiten'),statusSource=String(st.source||'');
-  const credited=status==='Arbeiten'?0:Number(st.credited_hours||0);
+  const credited=status==='Arbeiten'?0:await effectiveStatusCredit(employee,date,status,st.credited_hours,st.credited_hours_missing);
   const closure=closureQ.rows[0]||null;
   const latestSuppRaw=own.rows.filter(r=>Boolean(r.is_supplement)&&r.supplement_created_at_text)
     .map(r=>String(r.supplement_created_at_text||'')).filter(Boolean)
@@ -3502,7 +3562,7 @@ async function postgresWeekData(body,employee){
       [employee,range.start,range.end]
     ),
     pool.query(
-      `SELECT COALESCE(SUM(credited_hours),0)::numeric AS credited
+      `SELECT status_date,status,credited_hours,credited_hours_missing
          FROM day_status_shadow
         WHERE employee_name=$1 AND status_date>=$2 AND status_date<=$3`,
       [employee,range.start,range.end]
@@ -3519,7 +3579,10 @@ async function postgresWeekData(body,employee){
     const p=g>=6?1:0;
     gross+=g;pause+=p;net+=Math.max(0,g-p);
   }
-  const credited=Number(status.rows[0]?.credited||0);
+  let credited=0;
+  for(const r of status.rows){
+    credited+=await effectiveStatusCredit(employee,berlinDateOnly(r.status_date),r.status,r.credited_hours,r.credited_hours_missing);
+  }
   const round=x=>Math.round(Number(x||0)*100)/100;
   return {
     start:range.start,end:range.end,grossWorkTotal:round(gross),
@@ -6945,6 +7008,21 @@ async function initEmployeeAdminShadowFromSnapshot(){
 
 
 
+async function bootstrapPayrollCycleNativeV13(){
+  if(!pool)return;
+  const now=berlinNowParts(),body={year:now.year,month:now.month};
+  const marker='trusted_payroll_cycle_native_v13:'+now.year+'-'+String(now.month).padStart(2,'0');
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);if(done.rowCount)return;
+  const data=await postgresPayrollCycleState(body);if(!data)return;
+  const key=payrollCycleNativeKey(body);
+  await saveShadowVerifyStat(key,1,1,0);
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb) ON CONFLICT(key) DO NOTHING`,
+    [marker,JSON.stringify({at:new Date().toISOString(),key,reason:'protocol-only payroll cycle derivation; no Google Calendar dependency'})]
+  );
+  console.log('TRUSTED_PAYROLL_CYCLE_V13 '+key);
+}
+
 async function bootstrapAbsenceAndPlannerReadinessV11(){
   if(!pool)return;
   const now=berlinNowParts();
@@ -7367,6 +7445,316 @@ function stableJsonValue(value){
   return value;
 }
 function stableJsonString(value){return JSON.stringify(stableJsonValue(value));}
+function pgRound2(v){return Math.round((Number(v||0)+Number.EPSILON)*100)/100;}
+function pgTimeToMinutes(v){
+  const m=String(v||'').trim().match(/^(\d{1,2}):(\d{2})$/);if(!m)return null;
+  const h=Number(m[1]),mi=Number(m[2]);return h>=0&&h<=23&&mi>=0&&mi<=59?h*60+mi:null;
+}
+function pgTimesOverlap(a1,a2,b1,b2){
+  let x1=pgTimeToMinutes(a1),x2=pgTimeToMinutes(a2),y1=pgTimeToMinutes(b1),y2=pgTimeToMinutes(b2);
+  if(x1===null||x2===null||y1===null||y2===null||x1===x2||y1===y2)return false;
+  if(x2<x1)x2+=1440;if(y2<y1)y2+=1440;return x1<y2&&y1<x2;
+}
+function pgAdditionalEmployeeHours(value){
+  const t=String(value||'').trim();if(!t)return [];
+  return t.split('|').map(part=>{
+    const m=String(part||'').trim().match(/^(.*?):\s*([0-9]+(?:[.,][0-9]+)?)$/);
+    return m?{name:String(m[1]||'').trim(),hours:Number(String(m[2]).replace(',','.'))||0}:null;
+  }).filter(Boolean);
+}
+function pgMaintenanceMonth(value){
+  const s=String(value||'').trim(),m=s.match(/^(\d{4})-(0[1-9]|1[0-2])/);return m?m[1]+'-'+m[2]:'';
+}
+function pgDaysInMonth(year,month){return new Date(Date.UTC(Number(year),Number(month),0,12)).getUTCDate();}
+function pgMonthlyTarget(rec,year,month){
+  let total=0;
+  for(let day=1;day<=pgDaysInMonth(year,month);day++){
+    const iso=String(year)+'-'+String(month).padStart(2,'0')+'-'+String(day).padStart(2,'0');
+    if(iso<'2026-09-07')continue;
+    const dow=isoWeekday(iso),k={1:'monday',2:'tuesday',3:'wednesday',4:'thursday',5:'friday'}[dow];
+    if(k)total+=Number(rec&&rec[k]||0);
+  }
+  return pgRound2(total);
+}
+async function pgMonthClosureState(employee,year,month){
+  const q=await pool.query(
+    `SELECT id,action,action_at_text,action_by,reason FROM month_closures_shadow
+      WHERE employee_name=$1 AND closure_year=$2 AND closure_month=$3`,
+    [employee,year,month]
+  );
+  const history=q.rows.map(r=>({
+    id:String(r.id||''),action:String(r.action||''),at:shadowGermanDateTime(r.action_at_text||''),
+    by:String(r.action_by||''),reason:String(r.reason||''),_sort:shadowComparableDateTime(r.action_at_text||'')
+  })).sort((a,b)=>a._sort.localeCompare(b._sort)||a.id.localeCompare(b.id)).map(x=>{delete x._sort;return x;});
+  const last=history.length?history[history.length-1]:null;
+  return {status:last&&last.action==='Abgeschlossen'?'Abgeschlossen':'Offen',last,history};
+}
+async function pgBossTimeBankMaps(year,month){
+  const q=await pool.query(
+    `SELECT employee_name,hours,booking_type,booking_year,booking_month,created_at_text,created_iso
+       FROM time_bank_shadow`
+  );
+  const balance={},monthCredit={},monthSurplusBanked={};
+  for(const r of q.rows){
+    const employee=String(r.employee_name||'');if(!employee)continue;
+    const hours=Number(r.hours||0),art=String(r.booking_type||''),y=Number(r.booking_year)||0,m=Number(r.booking_month)||0;
+    const createdIso=shadowDateIso(r.created_iso||r.created_at_text||'');
+    const by=y||Number(createdIso.slice(0,4))||0,bm=m||Number(createdIso.slice(5,7))||0;
+    const startup=year===2026&&month===9&&createdIso&&createdIso<'2026-09-07';
+    balance[employee]=(balance[employee]||0)+hours;
+    if(!startup&&art==='Monatsausgleich'&&y===year&&m===month)monthCredit[employee]=(monthCredit[employee]||0)+Math.abs(Math.min(0,hours));
+    if(!startup&&(art==='Stunden Gutschreiben'||art==='Stunden abziehen')&&by===year&&bm===month)monthCredit[employee]=(monthCredit[employee]||0)+hours;
+    if(!startup&&art==='Monatsplus'&&y===year&&m===month)monthSurplusBanked[employee]=true;
+  }
+  for(const k of Object.keys(balance))balance[k]=pgRound2(Math.max(0,balance[k]));
+  for(const k of Object.keys(monthCredit))monthCredit[k]=pgRound2(monthCredit[k]);
+  return {balance,monthCredit,monthSurplusBanked};
+}
+async function postgresBossMonthData(body){
+  const year=Number(body&&body.year)||0,month=Number(body&&body.month)||0;
+  if(!year||month<1||month>12)return null;
+  await mirrorHolidayYear(year);
+  const prefix=String(year)+'-'+String(month).padStart(2,'0')+'-';
+  const [empQ,ownQ,assignedQ,statusQ,closureQ,vacQ,adjQ,reviewQ,timeMaps]=await Promise.all([
+    pool.query('SELECT employee_name,payload FROM employee_admin_shadow ORDER BY sort_order ASC,employee_name ASC'),
+    pool.query(
+      `SELECT * FROM time_entries_shadow
+        WHERE entry_date LIKE $1 AND entry_date>='2026-09-07'
+        ORDER BY employee_name,entry_date,start_time,id`,[prefix+'%']),
+    pool.query(
+      `SELECT a.id AS assignment_id,a.source_entry_id,a.employee_name,a.hours AS assignment_hours,
+              a.status AS assignment_status,a.created_by AS assigned_by,a.note AS assignment_note,
+              t.employee_name AS source_employee,t.entry_date,t.customer,t.start_time,t.end_time,t.activity,
+              t.transmitted_at_text,t.object_id
+         FROM assignments_shadow a JOIN time_entries_shadow t ON t.id=a.source_entry_id
+        WHERE COALESCE(a.status,'Zugeordnet')<>'Ersetzt'
+          AND t.entry_date LIKE $1 AND t.entry_date>='2026-09-07'
+        ORDER BY a.employee_name,t.entry_date,t.start_time,a.id`,[prefix+'%']),
+    pool.query(
+      `SELECT employee_name,status_date,status,source,credited_hours,credited_hours_missing
+         FROM day_status_shadow WHERE status_date LIKE $1 ORDER BY employee_name,status_date`,[prefix+'%']),
+    pool.query('SELECT employee_name,closure_date FROM day_closures_shadow WHERE closure_date LIKE $1',[prefix+'%']),
+    pool.query('SELECT employee_name,entitlement FROM vacation_entitlements_shadow WHERE vacation_year=$1',[year]),
+    pool.query(
+      `SELECT id,employee_name,hours,reason,created_at_text,created_by
+         FROM monthly_adjustments_shadow WHERE adjustment_year=$1 AND adjustment_month=$2`,[year,month]),
+    pool.query(
+      `SELECT conflict_id,reviewed_at_text,reviewed_by FROM conflict_reviews_shadow
+        WHERE review_year=$1 AND review_month=$2`,[year,month]),
+    pgBossTimeBankMaps(year,month)
+  ]);
+  const employees=empQ.rows.map(r=>Object.assign({name:String(r.employee_name||'')},r.payload||{}));
+  const byName=new Map(employees.map(e=>[e.name,e]));
+  const entries=new Map(employees.map(e=>[e.name,[]]));
+  const statuses=new Map(employees.map(e=>[e.name,[]]));
+  const closed=new Set(closureQ.rows.map(r=>String(r.employee_name||'')+'|'+berlinDateOnly(r.closure_date)));
+  const ent=new Map(vacQ.rows.map(r=>[String(r.employee_name||''),Number(r.entitlement||0)]));
+  const reviewed=new Map(reviewQ.rows.map(r=>[String(r.conflict_id||''),{
+    reviewedAt:shadowGermanDateTime(r.reviewed_at_text||''),reviewedBy:String(r.reviewed_by||'')
+  }]));
+  const adjs=new Map(employees.map(e=>[e.name,[]]));
+  for(const r of adjQ.rows){
+    const employee=String(r.employee_name||'');if(!adjs.has(employee))continue;
+    const createdIso=shadowDateIso(r.created_at_text||'');
+    if(year===2026&&month===9&&createdIso&&createdIso<'2026-09-07')continue;
+    adjs.get(employee).push({
+      id:String(r.id||''),hours:pgRound2(r.hours),reason:String(r.reason||''),
+      createdAt:shadowGermanDateTime(r.created_at_text||''),createdBy:String(r.created_by||'')
+    });
+  }
+  for(const r of ownQ.rows){
+    const employee=String(r.employee_name||'');if(!entries.has(employee))continue;
+    const date=berlinDateOnly(r.entry_date);
+    entries.get(employee).push({
+      id:String(r.id||''),employee,date,customer:String(r.customer||''),start:String(r.start_time||''),
+      end:String(r.end_time||''),hours:Number(r.hours||0),activity:String(r.activity||''),
+      transmittedAt:shadowGermanDateTime(r.transmitted_at_text||''),
+      transmittedDate:r.transmitted_at_text?germanDateLabel(r.transmitted_at_text):'',
+      materialUsed:Boolean(r.material_used),material:String(r.material||''),
+      customerSignatureUrl:String(r.customer_signature_url||''),photoCount:Number(r.photo_count||0),
+      photoUrls:String(r.photo_urls||''),additionalEmployeesUsed:Boolean(r.additional_employees_used),
+      additionalEmployees:String(r.additional_employees_text||'').split(',').map(x=>x.trim()).filter(Boolean),
+      additionalEmployeeHours:pgAdditionalEmployeeHours(r.additional_employee_hours_text),
+      sourceCalendarEventId:String(r.source_calendar_event_id||''),billingStatus:String(r.billing_status||'Offen'),
+      billedAt:shadowGermanDateTime(r.billed_at_text||''),billedBy:String(r.billed_by||''),
+      objectId:String(r.object_id||''),jobStatus:String(r.job_status||'Abgeschlossen'),
+      isSupplement:Boolean(r.is_supplement),supplementCreatedAt:shadowGermanDateTime(r.supplement_created_at_text||''),
+      maintenance:Boolean(r.maintenance),nextMaintenanceDue:pgMaintenanceMonth(r.next_maintenance_due),
+      isAdditionalAssignment:false,assignedBy:'',closed:closed.has(employee+'|'+date)
+    });
+  }
+  for(const r of assignedQ.rows){
+    const employee=String(r.employee_name||'');if(!entries.has(employee))continue;
+    const date=berlinDateOnly(r.entry_date);
+    entries.get(employee).push({
+      id:'assigned:'+String(r.assignment_id||''),assignmentId:String(r.assignment_id||''),
+      sourceEntryId:String(r.source_entry_id||''),employee,date,customer:String(r.customer||''),
+      start:String(r.start_time||''),end:String(r.end_time||''),hours:Number(r.assignment_hours||0),
+      activity:String(r.activity||''),transmittedAt:shadowGermanDateTime(r.transmitted_at_text||''),
+      transmittedDate:r.transmitted_at_text?germanDateLabel(r.transmitted_at_text):'',
+      materialUsed:false,material:'',customerSignatureUrl:'',photoCount:0,photoUrls:'',
+      additionalEmployeesUsed:false,additionalEmployees:[],additionalEmployeeHours:[],
+      isAdditionalAssignment:true,assignedBy:String(r.assigned_by||r.source_employee||''),
+      assignmentStatus:String(r.assignment_status||'Zugeordnet'),assignmentNote:String(r.assignment_note||''),
+      objectId:String(r.object_id||''),isSupplement:false,supplementCreatedAt:'',
+      closed:closed.has(employee+'|'+date)
+    });
+  }
+  for(const r of statusQ.rows){
+    const employee=String(r.employee_name||''),date=berlinDateOnly(r.status_date);
+    if(!statuses.has(employee)||date<'2026-09-07')continue;
+    const st=String(r.status||''),credit=await effectiveStatusCredit(employee,date,st,r.credited_hours,r.credited_hours_missing);
+    statuses.get(employee).push({date,status:st,source:String(r.source||''),creditedHours:pgRound2(credit)});
+  }
+  const annualQ=await pool.query(
+    `SELECT employee_name,status_date,status FROM day_status_shadow
+      WHERE status_date LIKE $1 AND status IN ('Urlaub','Krank','Feiertag')`,[String(year)+'-%']
+  );
+  const annual=new Map(employees.map(e=>[e.name,{Urlaub:new Set(),Krank:new Set(),Feiertag:new Set()}]));
+  for(const r of annualQ.rows){
+    const a=annual.get(String(r.employee_name||''));if(a&&a[String(r.status||'')])a[String(r.status||'')].add(berlinDateOnly(r.status_date));
+  }
+  const out=[];
+  for(const rec of employees){
+    const rows=entries.get(rec.name)||[],sts=statuses.get(rec.name)||[];
+    rows.sort((a,b)=>(a.date+' '+a.start).localeCompare(b.date+' '+b.start));
+    sts.sort((a,b)=>a.date.localeCompare(b.date));
+    if(!rows.length&&!sts.length&&rec.active===false)continue;
+    const grossBy=new Map();
+    for(const r of rows)grossBy.set(r.date,(grossBy.get(r.date)||0)+Number(r.hours||0));
+    const workGross=pgRound2([...grossBy.values()].reduce((a,x)=>a+Number(x||0),0));
+    const pause=pgRound2([...grossBy.values()].reduce((a,x)=>a+(Number(x||0)>=6?1:0),0));
+    const work=pgRound2(workGross-pause),statusCredit=pgRound2(sts.reduce((a,x)=>a+Number(x.creditedHours||0),0));
+    const tbCredit=pgRound2(timeMaps.monthCredit[rec.name]||0),credited=pgRound2(statusCredit+tbCredit);
+    const adjustments=adjs.get(rec.name)||[],adj=pgRound2(adjustments.reduce((a,x)=>a+Number(x.hours||0),0));
+    const actualBefore=pgRound2(work+credited),actual=pgRound2(actualBefore+adj),target=pgMonthlyTarget(rec,year,month);
+    const dates=[...grossBy.keys()],closedDays=dates.filter(d=>closed.has(rec.name+'|'+d)).length;
+    const a=annual.get(rec.name)||{Urlaub:new Set(),Krank:new Set(),Feiertag:new Set()};
+    const overlap=[];
+    for(let i=0;i<rows.length;i++)for(let j=i+1;j<rows.length;j++){
+      if(rows[i].date!==rows[j].date||!pgTimesOverlap(rows[i].start,rows[i].end,rows[j].start,rows[j].end))continue;
+      const ids=[String(rows[i].id||''),String(rows[j].id||'')].sort(),cid=[rec.name,rows[i].date,ids[0],ids[1]].join('|'),rev=reviewed.get(cid)||null;
+      overlap.push({id:cid,date:rows[i].date,first:rows[i].customer,second:rows[j].customer,start1:rows[i].start,end1:rows[i].end,
+        start2:rows[j].start,end2:rows[j].end,reviewed:Boolean(rev),reviewedInfo:rev});
+    }
+    const assignmentIssues=rows.filter(r=>r.isAdditionalAssignment&&r.assignmentStatus==='Abweichung')
+      .map(r=>({date:r.date,customer:r.customer,note:r.assignmentNote||'',assignedBy:r.assignedBy||''}));
+    const closure=await pgMonthClosureState(rec.name,year,month),entitlement=pgRound2(ent.get(rec.name)||0);
+    out.push({
+      employee:rec.name,active:rec.active,employmentType:rec.employmentType,personnelNumber:rec.personnelNumber,
+      entryDate:rec.entryDate,exitDate:rec.exitDate,hourlyWage:rec.hourlyWage,payrollType:rec.payrollType,
+      monthlySalary:rec.monthlySalary,payrollRelevant:rec.payrollRelevant,weeklyHours:rec.weeklyHours,
+      targetTotal:target,actualTotal:actual,actualBeforeAdjustment:actualBefore,adjustmentTotal:adj,adjustments,
+      balance:pgRound2(actual-target),total:actual,payableHours:pgRound2(target>0?Math.min(actual,target):actual),
+      workTotal:work,workTotalGross:workGross,automaticPauseTotal:pause,creditedTotal:credited,statusCredit,
+      timeBankMonthCredit:tbCredit,timeBankBalance:pgRound2(timeMaps.balance[rec.name]||0),
+      monthSurplusBanked:Boolean(timeMaps.monthSurplusBanked[rec.name]),days:dates.length,closedDays,openDays:dates.length-closedDays,
+      entries:rows,statuses:sts,sickDays:sts.filter(x=>x.status==='Krank').length,
+      vacationDays:sts.filter(x=>x.status==='Urlaub').length,holidayDays:sts.filter(x=>x.status==='Feiertag').length,
+      compensatoryDays:sts.filter(x=>x.status==='Freizeitausgleich').length,
+      compensatoryHours:pgRound2(sts.filter(x=>x.status==='Freizeitausgleich').reduce((a,x)=>a+Number(x.creditedHours||0),0)),
+      yearSickDays:a.Krank.size,yearVacationDays:a.Urlaub.size,yearHolidayDays:a.Feiertag.size,
+      vacationEntitlement:entitlement,vacationRemaining:pgRound2(entitlement-a.Urlaub.size),
+      overlapConflicts:overlap,assignmentIssues,closureStatus:closure.status,closureLast:closure.last,closureHistory:closure.history
+    });
+  }
+  out.sort((a,b)=>a.employee.localeCompare(b.employee,'de'));
+  return out;
+}
+function bossMonthNativeKey(body){
+  const y=Number(body&&body.year)||0,m=Number(body&&body.month)||0;
+  return y&&m?'boss_month_native:'+y+'-'+String(m).padStart(2,'0'):'';
+}
+async function verifyBossMonthNative(data,body){
+  if(!pool||!Array.isArray(data))return;
+  const pg=await postgresBossMonthData(body);if(!Array.isArray(pg))return;
+  const a=stableJsonString(data),b=stableJsonString(pg),key=bossMonthNativeKey(body);
+  const mismatches=a===b?0:1;
+  console.log('SHADOW_VERIFY '+key+' google='+data.length+' postgres='+pg.length+' mismatches='+mismatches);
+  await saveShadowVerifyStat(key,data.length,pg.length,mismatches);
+}
+
+function pgPayrollDueDate(year,month){
+  year=Number(year);month=Number(month);let d=new Date(Date.UTC(year,month-1,20,12));
+  const h=new Set(bavariaNurembergHolidayDates(year));
+  while([0,6].includes(d.getUTCDay())||h.has(isoFromUtcDate(d)))d=addUtcDays(d,-1);
+  return isoFromUtcDate(d);
+}
+function pgPayrollCycleRange(year,month){
+  year=Number(year);month=Number(month);let py=year,pm=month-1;if(pm===0){pm=12;py--;}
+  const prev=pgPayrollDueDate(py,pm),p=prev.split('-').map(Number);
+  let start=isoFromUtcDate(addUtcDays(new Date(Date.UTC(p[0],p[1]-1,p[2],12)),1));
+  if(start<'2026-09-07')start='2026-09-07';
+  return {year,month,start,end:pgPayrollDueDate(year,month),regularStart:String(py)+'-'+String(pm).padStart(2,'0')+'-21',regularEnd:String(year)+'-'+String(month).padStart(2,'0')+'-20'};
+}
+function pgNextPayrollCycle(year,month){
+  month=Number(month)+1;year=Number(year);if(month===13){month=1;year++;}
+  return {year,month,dueDate:pgPayrollDueDate(year,month),range:pgPayrollCycleRange(year,month)};
+}
+function pgActivePayrollCycle(referenceDate){
+  const ref=berlinDateOnly(referenceDate||new Date()),p=ref.split('-').map(Number),year=p[0],month=p[1],due=pgPayrollDueDate(year,month);
+  if(ref<=due){
+    let py=year,pm=month-1;if(pm===0){pm=12;py--;}
+    const prev=pgPayrollDueDate(py,pm),x=prev.split('-').map(Number);
+    let start=isoFromUtcDate(addUtcDays(new Date(Date.UTC(x[0],x[1]-1,x[2],12)),1));
+    if(start<'2026-09-07')start='2026-09-07';
+    return {start,end:due,dueDate:due,year,month};
+  }
+  let ny=year,nm=month+1;if(nm===13){nm=1;ny++;}
+  const x=due.split('-').map(Number);
+  let start=isoFromUtcDate(addUtcDays(new Date(Date.UTC(x[0],x[1]-1,x[2],12)),1));
+  if(start<'2026-09-07')start='2026-09-07';
+  return {start,end:pgPayrollDueDate(ny,nm),dueDate:pgPayrollDueDate(ny,nm),year:ny,month:nm};
+}
+async function pgPayrollMonthState(year,month,fingerprint){
+  const q=await pool.query(
+    `SELECT id,action,action_at_text,action_by,reason,fingerprint FROM payroll_closures_shadow
+      WHERE closure_year=$1 AND closure_month=$2`,[year,month]);
+  const history=q.rows.map(r=>({
+    id:String(r.id||''),action:String(r.action||''),at:shadowGermanDateTime(r.action_at_text||''),
+    by:String(r.action_by||''),reason:String(r.reason||''),fingerprint:String(r.fingerprint||''),
+    _sort:shadowComparableDateTime(r.action_at_text||'')
+  })).sort((a,b)=>a._sort.localeCompare(b._sort)||a.id.localeCompare(b.id)).map(x=>{delete x._sort;return x;});
+  const last=history.length?history[history.length-1]:null;let status=last?last.action:'Offen';
+  if(status==='Wieder geoeffnet')status='Offen';
+  const fp=String(fingerprint||''),changed=Boolean(last&&['Freigegeben','Uebergeben'].includes(last.action)&&last.fingerprint&&fp&&last.fingerprint!==fp);
+  return {status:changed?'Aenderung nach Abschluss':status,last,history,changedSinceApproval:changed};
+}
+async function pgLastCompletedPayrollCycle(){
+  const q=await pool.query(
+    `SELECT closure_year,closure_month,action_at_text,action_by,id FROM payroll_closures_shadow
+      WHERE action IN ('Uebergeben','Monatsabschluss erfolgt')`
+  );
+  let best=null;
+  for(const r of q.rows){
+    const y=Number(r.closure_year)||0,m=Number(r.closure_month)||0,key=y*100+m;
+    const sort=shadowComparableDateTime(r.action_at_text||'');
+    if(!best||key>best.key||(key===best.key&&sort>best._sort))best={year:y,month:m,key,at:shadowGermanDateTime(r.action_at_text||''),by:String(r.action_by||''),_sort:sort};
+  }
+  if(best)delete best._sort;
+  return best;
+}
+function payrollCycleNativeKey(body){
+  const y=Number(body&&body.year)||0,m=Number(body&&body.month)||0;
+  return y&&m?'payroll_cycle_native:'+y+'-'+String(m).padStart(2,'0'):'';
+}
+async function postgresPayrollCycleState(body){
+  const year=Number(body&&body.year)||0,month=Number(body&&body.month)||0;if(!year||month<1||month>12)return null;
+  const range=pgPayrollCycleRange(year,month),next=pgNextPayrollCycle(year,month),now=berlinNowParts();
+  const today=String(now.year)+'-'+String(now.month).padStart(2,'0')+'-'+String(now.day).padStart(2,'0');
+  return {year,month,cycleStart:range.start,cycleEnd:range.end,dueDate:pgPayrollDueDate(year,month),
+    state:await pgPayrollMonthState(year,month,''),lastCompleted:await pgLastCompletedPayrollCycle(),
+    nextYear:next.year,nextMonth:next.month,nextDueDate:next.dueDate,nextCycleStart:next.range.start,nextCycleEnd:next.range.end,
+    counterStart:pgActivePayrollCycle(today).start};
+}
+async function verifyPayrollCycleNative(data,body){
+  if(!pool||!data)return;
+  const pg=await postgresPayrollCycleState(body);if(!pg)return;
+  const key=payrollCycleNativeKey(body),mismatches=stableJsonString(data)===stableJsonString(pg)?0:1;
+  console.log('SHADOW_VERIFY '+key+' mismatches='+mismatches);
+  await saveShadowVerifyStat(key,1,1,mismatches);
+}
+
 function bossMonthViewKey(body){
   const y=Number(body&&body.year)||0,m=Number(body&&body.month)||0;
   return y&&m?'boss_month_view:'+y+'-'+String(m).padStart(2,'0'):'';
@@ -7396,14 +7784,8 @@ async function saveBossMonthViewShadow(data,body){
 }
 async function directBossMonthViewRead(body){
   const session=await localSessionForBody(body,true);if(!session)return null;
-  const y=Number(body&&body.year)||0,m=Number(body&&body.month)||0,key=bossMonthViewKey(body);
-  if(!key||!(await shadowReadyForDirectRead(key)))return null;
-  const q=await pool.query(
-    `SELECT payload FROM boss_month_views_shadow
-      WHERE view_year=$1 AND view_month=$2 AND refreshed_at>now()-interval '24 hours'`,
-    [y,m]
-  );
-  return q.rowCount?q.rows[0].payload:null;
+  const key=bossMonthNativeKey(body);if(!key||!(await shadowReadyForDirectRead(key)))return null;
+  return postgresBossMonthData(body);
 }
 
 async function saveExactViewShadow(action,key,data){
@@ -7438,7 +7820,7 @@ async function invalidateExactViews(){
   if(!pool)return;
   await Promise.all([
     pool.query('TRUNCATE exact_views_shadow'),
-    pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'payroll_audit_view:%' OR shadow_name LIKE 'payroll_cycle_view:%' OR shadow_name LIKE 'offer_reports_view:%' OR shadow_name='offer_statistics_view' OR shadow_name='dashboard_summary_view'")
+    pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'payroll_audit_view:%' OR shadow_name LIKE 'payroll_cycle_view:%' OR shadow_name LIKE 'payroll_cycle_native:%' OR shadow_name LIKE 'offer_reports_view:%' OR shadow_name='offer_statistics_view' OR shadow_name='dashboard_summary_view'")
   ]);
 }
 
@@ -7484,14 +7866,15 @@ async function directPayrollAuditViewRead(body){
 }
 async function directPayrollCycleViewRead(body){
   const session=await localSessionForBody(body,true);if(!session)return null;
-  const key=payrollCycleViewKey(body);return key?readExactViewShadow(key):null;
+  const key=payrollCycleNativeKey(body);if(!key||!(await shadowReadyForDirectRead(key)))return null;
+  return postgresPayrollCycleState(body);
 }
 
 async function invalidateBossMonthViews(){
   if(!pool)return;
   await Promise.all([
     pool.query('TRUNCATE boss_month_views_shadow'),
-    pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'boss_month_view:%'")
+    pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'boss_month_view:%' OR shadow_name LIKE 'boss_month_native:%'")
   ]);
 }
 
@@ -7707,6 +8090,7 @@ async function proxyLegacy(req, res, body) {
         if (action==='getWeekData') verifyWeekDataShadow(verifyData,body).catch(e=>console.error('week data shadow verify failed',e.message));
         if (action==='getBossMonthData') {
           saveBossMonthViewShadow(verifyData,body).catch(e=>console.error('boss month view shadow save failed',e.message));
+          verifyBossMonthNative(verifyData,body).catch(e=>console.error('boss month native verify failed',e.message));
           verifyMonthlyAdjustmentsShadow(verifyData,body.year,body.month).catch(e=>console.error('monthly adjustment shadow verify failed',e.message));
           verifyMonthClosures(verifyData,body.year,body.month).catch(e=>console.error('month closure shadow verify failed',e.message));
           verifyConflictReviewsShadow(verifyData,body.year,body.month).catch(e=>console.error('conflict review shadow verify failed',e.message));
@@ -7719,6 +8103,7 @@ async function proxyLegacy(req, res, body) {
         if (action==='getPayrollCycleState') {
           saveExactViewShadow('getPayrollCycleState',payrollCycleViewKey(body),verifyData)
             .catch(e=>console.error('payroll cycle view shadow save failed',e.message));
+          verifyPayrollCycleNative(verifyData,body).catch(e=>console.error('payroll cycle native verify failed',e.message));
         }
         if (action==='checkRegieBillingRisk') verifyRegieBillingRiskShadow(verifyData,body).catch(e=>console.error('regie billing risk shadow verify failed',e.message));
         if (action==='getDayData') {
@@ -8197,13 +8582,13 @@ async function health() {
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'boss_day_closures:%' AND mismatches=0"
         )).rows[0]?.n||0,
         bossMonthViewsVerified:(await pool.query(
-          "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'boss_month_view:%' AND mismatches=0"
+          "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'boss_month_native:%' AND mismatches=0"
         )).rows[0]?.n||0,
         payrollAuditViewsVerified:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'payroll_audit_view:%' AND mismatches=0"
         )).rows[0]?.n||0,
         payrollCycleViewsVerified:(await pool.query(
-          "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'payroll_cycle_view:%' AND mismatches=0"
+          "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'payroll_cycle_native:%' AND mismatches=0"
         )).rows[0]?.n||0,
         offerReportViewsVerified:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'offer_reports_view:%' AND mismatches=0"
