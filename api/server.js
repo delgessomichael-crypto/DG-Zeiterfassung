@@ -8640,8 +8640,8 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder',
   'saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
-  'updateCustomerInquiry','deleteCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
-  'reopenInquiryReminder','archiveInquiryReminder','rescheduleOfferReminder','saveManualOrder',
+  'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
+  'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
@@ -8925,7 +8925,7 @@ async function tryDirectPostgresWrite(action,body){
           WHERE id=$1`,[rid,due,nowIso,by]
       );
       result={ok:true,dueDate:due};
-    }else if(['reopenInquiryReminder','archiveInquiryReminder'].includes(action)){
+    }else if(['reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder'].includes(action)){
       const rid=String(body.reminderId||'').trim();if(!rid)throw new Error('Reminder-ID fehlt.');
       const rq=await client.query(
         'SELECT inquiry_id,status FROM inquiry_reminders_shadow WHERE id=$1 FOR UPDATE',[rid]
@@ -8938,8 +8938,8 @@ async function tryDirectPostgresWrite(action,body){
         'SELECT 1 FROM customer_inquiries_shadow WHERE id=$1 FOR UPDATE',[inquiryId]
       );
       if(!iq.rowCount)throw new Error('Zugehörige Anfrage wurde nicht gefunden.');
-      const resultText=action==='reopenInquiryReminder'?'Zurück zu offenen Anfragen':'Termin vereinbart';
-      const newStatus=action==='reopenInquiryReminder'?'Neu':'Archiviert';
+      const resultText=action==='reopenInquiryReminder'?'Zurück zu offenen Anfragen':(action==='archiveInquiryReminder'?'Termin vereinbart':'Abgelehnt');
+      const newStatus=action==='reopenInquiryReminder'?'Neu':(action==='archiveInquiryReminder'?'Archiviert':'Gelöscht');
       await client.query(
         `UPDATE inquiry_reminders_shadow
             SET status='Erledigt',result=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now()
@@ -8948,12 +8948,12 @@ async function tryDirectPostgresWrite(action,body){
       await client.query(
         `UPDATE customer_inquiries_shadow
             SET status=$2,read_flag=true,
-                done_reason=CASE WHEN $2='Archiviert' THEN 'Termin vereinbart' ELSE done_reason END,
+                done_reason=CASE WHEN $2='Archiviert' THEN 'Termin vereinbart' WHEN $2='Gelöscht' THEN 'Abgelehnt' ELSE done_reason END,
                 changed_at_text=$3,changed_by=$4,shadow_updated_at=now()
           WHERE id=$1`,[inquiryId,newStatus,nowIso,by]
       );
       result={ok:true,inquiryId};
-    }else if(['updateCustomerInquiry','deleteCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry'].includes(action)){
+    }else if(['updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry'].includes(action)){
       const id=String(body.id||'').trim();if(!id)throw new Error('Anfrage-ID fehlt.');
       const q=await client.query(
         'SELECT status FROM customer_inquiries_shadow WHERE id=$1 FOR UPDATE',[id]
@@ -8985,6 +8985,14 @@ async function tryDirectPostgresWrite(action,body){
             WHERE id=$1`,[id,nowIso,by]
         );
         result={ok:true};
+      }else if(action==='rejectCustomerInquiry'){
+        await client.query(
+          `UPDATE customer_inquiries_shadow
+              SET status='Gelöscht',read_flag=true,done_reason='Abgelehnt',
+                  changed_at_text=$2,changed_by=$3,shadow_updated_at=now()
+            WHERE id=$1`,[id,nowIso,by]
+        );
+        result={ok:true,gmailQueued:true};
       }else if(action==='saveCustomerInquiryNote'){
         await client.query(
           `UPDATE customer_inquiries_shadow
