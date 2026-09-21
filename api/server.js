@@ -8642,7 +8642,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteAbsence',
+  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
@@ -9250,6 +9250,61 @@ async function tryDirectPostgresWrite(action,body){
         );
         result={ok:true};
       }
+    }else if(action==='endSicknessAbsence'){
+      const id=String(body.id||'').trim(),returnDate=String(body.returnDate||'').trim();
+      if(!id)throw new Error('Krankheitseintrag fehlt.');
+      if(!validIsoDateText(returnDate))throw new Error('Bitte ein gültiges Rückkehrdatum wählen.');
+      const q=await client.query(
+        `SELECT id,employee_name,absence_type,start_date,end_date,sickness_case_id,active
+           FROM absences_shadow WHERE id=$1 FOR UPDATE`,[id]
+      );
+      if(!q.rowCount||q.rows[0].active===false)throw new Error('Aktiver Krankheitseintrag wurde nicht gefunden.');
+      const row=q.rows[0];
+      if(String(row.absence_type||'')!=='Krank')throw new Error('Gesundmeldung ist nur für Krankheitseinträge möglich.');
+      const target=String(row.employee_name||''),start=berlinDateOnly(row.start_date),oldEnd=berlinDateOnly(row.end_date);
+      const caseId=String(row.sickness_case_id||id),dayAfterOld=isoAddDays(oldEnd,1);
+      if(returnDate>dayAfterOld){
+        result={ok:true,employee:target,returnDate,oldEnd,changed:false,
+          message:'Mitarbeiter war laut Eintrag bereits ab '+germanDateLabel(dayAfterOld)+' gesund.'};
+      }else{
+        const removedEntire=returnDate<=start,newEnd=removedEntire?'':isoAddDays(returnDate,-1);
+        if(removedEntire){
+          await client.query('UPDATE absences_shadow SET active=false,shadow_updated_at=now() WHERE id=$1',[id]);
+        }else{
+          await client.query(
+            `UPDATE absences_shadow SET end_date=$2,note=$3,shadow_updated_at=now() WHERE id=$1`,
+            [id,newEnd,'Gesund gemeldet ab '+germanDateLabel(returnDate)+' durch '+by]
+          );
+        }
+        await client.query('DELETE FROM day_status_shadow WHERE reference=$1 AND status_date>=$2',[id,returnDate]);
+        const caseRows=await client.query(
+          `SELECT id,start_date,end_date FROM absences_shadow
+            WHERE active=true AND employee_name=$1 AND absence_type='Krank'
+              AND COALESCE(NULLIF(sickness_case_id,''),id)=$2
+            ORDER BY start_date ASC,id ASC FOR UPDATE`,[target,caseId]
+        );
+        const datesSet=new Set();
+        for(const r of caseRows.rows){for(const d of isoDateList(berlinDateOnly(r.start_date),berlinDateOnly(r.end_date)))datesSet.add(d);}
+        const dates=[...datesSet].sort(),entryDate=await employeeEntryDateForOverview(target),eligibleFrom=entryDate?isoAddDays(entryDate,28):'';
+        const eligible=dates.filter(d=>!eligibleFrom||d>=eligibleFrom),payThrough=eligible.length>=42?eligible[41]:'';
+        const paid=new Set(eligible.slice(0,42));
+        for(const r of caseRows.rows){
+          const rs=berlinDateOnly(r.start_date),re=berlinDateOnly(r.end_date),period=isoDateList(rs,re);
+          const periodEligible=period.filter(d=>!eligibleFrom||d>=eligibleFrom),periodPaid=periodEligible.filter(d=>paid.has(d));
+          const payer=periodEligible.length===0?'Krankenkasse/prüfen (4-Wochen-Wartezeit)':
+            periodPaid.length===0?'Krankengeld/Krankenkasse':
+            periodPaid.length<periodEligible.length?'Arbeitgeber / Krankengeld':'Arbeitgeber';
+          const cr=await client.query(
+            'SELECT COALESCE(SUM(credited_hours),0)::numeric AS h FROM day_status_shadow WHERE reference=$1',[String(r.id)]
+          );
+          await client.query(
+            `UPDATE absences_shadow SET employer_pay_through=$2,payer=$3,sickness_case_days=$4,
+               credited_hours=$5,shadow_updated_at=now() WHERE id=$1`,
+            [String(r.id),payThrough,payer,dates.length,Number(cr.rows[0]?.h||0)]
+          );
+        }
+        result={ok:true,employee:target,returnDate,oldEnd,newEnd,changed:true,removedEntire,hoursCountFrom:returnDate};
+      }
     }else if(action==='deleteAbsence'){
       const id=String(body.id||'').trim();if(!id)throw new Error('Abwesenheit nicht gefunden.');
       const q=await client.query(
@@ -9488,7 +9543,7 @@ async function tryDirectPostgresWrite(action,body){
       await saveShadowVerifyStat(key,rows.length,rows.length,0);
     }
   }
-  if(action==='deleteAbsence'){
+  if(['deleteAbsence','endSicknessAbsence'].includes(action)){
     await invalidateShadowVerify('absences');
     await invalidateShadowVerify('sickness_alerts');
     const id=String(body.id||'');
