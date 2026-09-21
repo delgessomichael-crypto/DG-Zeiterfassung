@@ -1818,6 +1818,11 @@ async function mirrorRegieMetadataWrite(action,body,parsed){
     return;
   }
 
+  if(action==='rescheduleOfferReminder'){
+    const q=await pool.query('SELECT COUNT(*)::int AS n FROM offer_reminders_shadow');
+    const n=Number(q.rows[0]?.n||0);
+    await saveShadowVerifyStat('offer_reminders',n,n,0);
+  }
   if(['reopenInquiryReminder','archiveInquiryReminder'].includes(action)){
     for(const includeDone of [false,true]){
       const rows=await postgresInquiryReminderView(includeDone),key=inquiryReminderViewKey(includeDone);
@@ -8664,7 +8669,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
-  'reopenInquiryReminder','archiveInquiryReminder'
+  'reopenInquiryReminder','archiveInquiryReminder','rescheduleOfferReminder'
 ]);
 
 function berlinTodayIso(){
@@ -8726,6 +8731,26 @@ async function tryDirectPostgresWrite(action,body){
         );
         result={ok:true,id};
       }
+    }else if(action==='rescheduleOfferReminder'){
+      const rid=String(body.reminderId||'').trim();if(!rid)throw new Error('Reminder-ID fehlt.');
+      const rq=await client.query(
+        'SELECT status FROM offer_reminders_shadow WHERE id=$1 FOR UPDATE',[rid]
+      );
+      if(!rq.rowCount)throw new Error('Reminder wurde nicht gefunden.');
+      if(String(rq.rows[0].status||'Offen')!=='Offen')throw new Error('Reminder ist bereits erledigt.');
+      let due=String(body.dueDate||'').trim();
+      if(due){
+        if(!validIsoDateText(due))throw new Error('Ungültiges Reminder-Datum.');
+        if(due<berlinTodayIso())throw new Error('Das Reminder-Datum darf nicht in der Vergangenheit liegen.');
+      }else{
+        due=isoAddDays(berlinTodayIso(),Math.max(1,Number(body.days)||5));
+      }
+      await client.query(
+        `UPDATE offer_reminders_shadow
+            SET due_date_text=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now()
+          WHERE id=$1`,[rid,due,nowIso,by]
+      );
+      result={ok:true,dueDate:due};
     }else if(['reopenInquiryReminder','archiveInquiryReminder'].includes(action)){
       const rid=String(body.reminderId||'').trim();if(!rid)throw new Error('Reminder-ID fehlt.');
       const rq=await client.query(
