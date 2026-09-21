@@ -8643,7 +8643,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','syncHolidays','saveEmployeeAdmin','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
+  'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','syncHolidays','saveEmployeeAdmin','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','saveMaintenanceCustomer','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
@@ -8746,6 +8746,14 @@ async function tryDirectPostgresWrite(action,body){
     const oq=await pool.query('SELECT id FROM objects_shadow WHERE object_key=$1 ORDER BY created_at_text ASC NULLS LAST,id ASC LIMIT 1',[shadowObjectKey(customer)]);
     if(!oq.rowCount)return null;
     if(String(e.sourceCalendarEventId||'').trim()&&!Boolean(e.maintenance))return null;
+  }
+  if(action==='saveMaintenanceCustomer'){
+    const item=body&&body.item||{},objects=Array.isArray(item.objects)?item.objects:[];
+    if(!String(item.id||'').trim()||!objects.length)return null;
+    if(objects.some(o=>!String(o&&o.id||'').trim()||!Array.isArray(o.devices)||!o.devices.length||
+      o.devices.some(d=>!String(d&&d.id||'').trim())))return null;
+    const q=await pool.query('SELECT 1 FROM maintenance_customers_shadow WHERE id=$1 AND active=true LIMIT 1',[String(item.id)]);
+    if(!q.rowCount)return null;
   }
   if(action==='savePlannerEvent'){
     const item=body&&body.item||{};
@@ -9510,6 +9518,66 @@ async function tryDirectPostgresWrite(action,body){
         [employee,year,entitlement,nowIso,by]
       );
       result={ok:true,_vacationEmployee:employee,_vacationYear:year};
+    }else if(action==='saveMaintenanceCustomer'){
+      const item=body.item||{},id=String(item.id||'').trim(),objects=Array.isArray(item.objects)?item.objects:[];
+      const name=String(item.name||'').trim(),email=String(item.email||'').trim(),phone=String(item.phone||'').trim();
+      const billingStreet=String(item.billingStreet||'').trim(),billingZip=String(item.billingZip||'').trim(),billingCity=String(item.billingCity||'').trim();
+      if(!id)throw new Error('Wartungskunde wurde nicht gefunden.');
+      if(!name||!billingStreet||!billingZip||!billingCity)throw new Error('Bitte Name und vollständige Rechnungsadresse eintragen.');
+      if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new Error('E-Mail-Adresse ist ungültig.');
+      if(!objects.length)throw new Error('Mindestens ein Ausführungsobjekt ist erforderlich.');
+      const cq=await client.query('SELECT 1 FROM maintenance_customers_shadow WHERE id=$1 AND active=true FOR UPDATE',[id]);
+      if(!cq.rowCount)throw new Error('Wartungskunde wurde nicht gefunden.');
+      await client.query(
+        `UPDATE maintenance_customers_shadow SET name=$2,billing_street=$3,billing_zip=$4,billing_city=$5,
+           email=$6,phone=$7,updated_at_text=$8,updated_by=$9,shadow_updated_at=now() WHERE id=$1`,
+        [id,name,billingStreet,billingZip,billingCity,email,phone,nowIso,by]
+      );
+      await client.query('UPDATE maintenance_objects_shadow SET active=false,updated_at_text=$2,updated_by=$3,shadow_updated_at=now() WHERE customer_id=$1',[id,nowIso,by]);
+      await client.query('UPDATE maintenance_devices_shadow SET active=false,updated_at_text=$2,updated_by=$3,shadow_updated_at=now() WHERE customer_id=$1',[id,nowIso,by]);
+      for(let oi=0;oi<objects.length;oi++){
+        const o=objects[oi]||{},oid=String(o.id||'').trim();
+        if(!oid)throw new Error('Objekt '+(oi+1)+': ID fehlt.');
+        if(!String(o.name||'').trim()||!String(o.street||'').trim()||!String(o.zip||'').trim()||!String(o.city||'').trim())
+          throw new Error('Objekt '+(oi+1)+': Bezeichnung und vollständige Adresse fehlen.');
+        const oq=await client.query('SELECT 1 FROM maintenance_objects_shadow WHERE id=$1 AND customer_id=$2 LIMIT 1',[oid,id]);
+        if(!oq.rowCount)throw new Error('Objekt '+(oi+1)+' wurde nicht gefunden.');
+        await client.query(
+          `UPDATE maintenance_objects_shadow SET name=$3,street=$4,zip=$5,city=$6,notes=$7,active=true,
+             updated_at_text=$8,updated_by=$9,shadow_updated_at=now() WHERE id=$1 AND customer_id=$2`,
+          [oid,id,String(o.name||''),String(o.street||''),String(o.zip||''),String(o.city||''),String(o.notes||''),nowIso,by]
+        );
+        const devices=Array.isArray(o.devices)?o.devices:[];
+        if(!devices.length)throw new Error('Objekt '+(oi+1)+': Mindestens ein Wartungsgerät anlegen.');
+        for(let di=0;di<devices.length;di++){
+          const d=devices[di]||{},did=String(d.id||'').trim();
+          if(!did)throw new Error('Objekt '+(oi+1)+', Gerät '+(di+1)+': ID fehlt.');
+          if(!String(d.deviceType||'').trim())throw new Error('Objekt '+(oi+1)+', Gerät '+(di+1)+': Geräteart fehlt.');
+          if(String(d.deviceType||'')==='Sonstiges'&&!String(d.otherDescription||'').trim())
+            throw new Error('Objekt '+(oi+1)+', Gerät '+(di+1)+': Bei „Sonstiges“ ist die Beschreibung Pflicht.');
+          if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(d.nextMaintenanceDue||'')))
+            throw new Error('Objekt '+(oi+1)+', Gerät '+(di+1)+': Nächste Wartung mit Monat und Jahr eintragen.');
+          const dq=await client.query(
+            'SELECT internal_device_id FROM maintenance_devices_shadow WHERE id=$1 AND customer_id=$2 LIMIT 1',[did,id]
+          );
+          if(!dq.rowCount)throw new Error('Objekt '+(oi+1)+', Gerät '+(di+1)+' wurde nicht gefunden.');
+          const internalId=String(d.internalDeviceId||dq.rows[0].internal_device_id||'');
+          await client.query(
+            `UPDATE maintenance_devices_shadow SET object_id=$3,device_type=$4,other_description=$5,manufacturer=$6,
+               model=$7,serial_number=$8,year_text=$9,tenant_name=$10,tenant_phone=$11,tenant_email=$12,
+               spare_part_manufacturer=$13,spare_part_serial_number=$14,internal_notes=$15,next_maintenance_due=$16,
+               active=true,updated_at_text=$17,updated_by=$18,internal_device_id=$19,shadow_updated_at=now()
+             WHERE id=$1 AND customer_id=$2`,
+            [did,id,oid,String(d.deviceType||''),String(d.otherDescription||''),String(d.manufacturer||''),
+             String(d.model||''),String(d.serialNumber||''),String(d.year||''),String(d.tenantName||''),
+             String(d.tenantPhone||''),String(d.tenantEmail||''),String(d.sparePartManufacturer||''),
+             String(d.sparePartSerialNumber||''),String(d.internalNotes||''),String(d.nextMaintenanceDue||''),
+             nowIso,by,internalId]
+          );
+        }
+      }
+      legacyPayload=Object.assign({},body,{item:Object.assign({},item,{id})});
+      result=await postgresMaintenanceCustomerFull(id);
     }else if(action==='addMaintenanceRepair'){
       const deviceId=String(body.deviceId||'').trim(),date=String(body.date||'').trim(),description=String(body.description||'').trim();
       if(!validIsoDateText(date))throw new Error('Reparaturdatum ist ungültig.');
@@ -10258,6 +10326,20 @@ async function tryDirectPostgresWrite(action,body){
     if(employee){
       const q=await pool.query('SELECT COUNT(*)::int AS n FROM time_bank_shadow WHERE employee_name=$1',[employee]);
       const n=Number(q.rows[0]?.n||0);await saveShadowVerifyStat('time_bank:'+employee,n,n,0);
+    }
+  }
+  if(action==='saveMaintenanceCustomer'){
+    const id=String(body.item&&body.item.id||'');
+    await Promise.all([
+      pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'maintenance_%'"),
+      pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getMaintenanceOverview','getMaintenanceContracts','getMaintenanceArchive','getMaintenanceCustomer','searchMaintenanceCustomers','findMaintenanceDeviceByInternalId','getDashboardSummary51')")
+    ]);
+    if(id){
+      const full=await postgresMaintenanceCustomerFull(id);
+      if(full){
+        const count=(full.objects||[]).reduce((s,o)=>s+(o.devices||[]).length,0);
+        await saveShadowVerifyStat('maintenance_customer_full:'+id,count,count,0);
+      }
     }
   }
   if(['addMaintenanceRepair','addManualMaintenanceCount'].includes(action)){
