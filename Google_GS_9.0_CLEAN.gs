@@ -777,12 +777,12 @@ function getMonthClosureState_(ss, employee, year, month) {
   return {status:last&&last.action==='Abgeschlossen'?'Abgeschlossen':'Offen',last:last,history:history};
 }
 
-function setMonthClosureStatus(employee, employeePin, targetEmployee, year, month, action, reason) {
+function setMonthClosureStatus(employee, employeePin, targetEmployee, year, month, action, reason, closureId) {
   requireChef_(employee,employeePin); action=clean_(action); reason=clean_(reason);
   if(!['Abgeschlossen','Wieder geöffnet'].includes(action)) throw new Error('Ungültige Abschlussaktion.');
   if(action==='Wieder geöffnet'&&!reason) throw new Error('Bitte einen Grund für die Wiederöffnung angeben.');
   const ss=getSpreadsheet_(), sh=ensureMonthClosureSheet_(ss);
-  sh.appendRow([Utilities.getUuid(),clean_(targetEmployee),Number(year),Number(month),action,new Date(),clean_(employee),reason]);
+  sh.appendRow([clean_(closureId)||Utilities.getUuid(),clean_(targetEmployee),Number(year),Number(month),action,new Date(),clean_(employee),reason]);
   return getMonthClosureState_(ss,targetEmployee,year,month);
 }
 
@@ -5434,7 +5434,7 @@ function doPost(e) {
       return jsonResponse_({ok:true,data:markConflictReviewed(clean_(data.employee),clean_(data.employeePin),clean_(data.conflictId),clean_(data.targetEmployee),Number(data.year),Number(data.month),clean_(data.date))});
     }
     if (action === 'setMonthClosureStatus') {
-      return jsonResponse_({ok:true,data:setMonthClosureStatus(clean_(data.employee),clean_(data.employeePin),clean_(data.targetEmployee),Number(data.year),Number(data.month),clean_(data.closureAction),clean_(data.reason))});
+      return jsonResponse_({ok:true,data:setMonthClosureStatus(clean_(data.employee),clean_(data.employeePin),clean_(data.targetEmployee),Number(data.year),Number(data.month),clean_(data.closureAction),clean_(data.reason),clean_(data.closureId))});
     }
     if (action === 'getObjectReports') {
       return jsonResponse_({ok:true,data:getObjectReports(clean_(data.employee),clean_(data.employeePin),clean_(data.objectId),clean_(data.customer))});
