@@ -8637,7 +8637,7 @@ function directMinimumWageRead(body){
 }
 
 const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
-  'saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder',
+  'createOwnReminder','saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder',
   'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus',
   'saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
@@ -8727,6 +8727,10 @@ async function tryDirectPostgresWrite(action,body){
   if(action==='setRegieReportsOfferStatus'){
     if(!String(body&&body.offerId||'').trim())return null;
   }
+  if(action==='createOwnReminder'){
+    const item=body&&body.item||{};
+    if(Array.isArray(item.files)&&item.files.length)return null;
+  }
   if(action==='saveEmployeeAdmin'){
     const item=body&&body.item||{},name=String(item.name||'').trim(),original=String(item.originalName||'').trim();
     if(!name||!original||name!==original||String(item.pin||'').trim())return null;
@@ -8776,7 +8780,25 @@ async function tryDirectPostgresWrite(action,body){
   let result=null,outboxId=0,legacyAction=action,legacyPayload=body;
   try{
     await client.query('BEGIN');
-    if(action==='saveEntry'){
+    if(action==='createOwnReminder'){
+      const item=body.item||{},reminderText=String(item.text||'').trim(),due=String(item.dueDate||'').trim();
+      if(!reminderText)throw new Error('Bitte einen Reminder-Text eingeben.');
+      if(reminderText.length>5000)throw new Error('Der Reminder-Text ist zu lang.');
+      if(Array.isArray(item.files)&&item.files.length)throw new Error('Reminder mit Dateianhang wird weiterhin über Google/Drive verarbeitet.');
+      if(!validIsoDateText(due))throw new Error('Bitte ein gültiges Fälligkeitsdatum wählen.');
+      if(due<berlinTodayIso())throw new Error('Das Fälligkeitsdatum darf nicht in der Vergangenheit liegen.');
+      const id=String(item.id||'').trim()||('EIGREM-'+crypto.randomUUID());
+      await client.query(
+        `INSERT INTO own_reminders_shadow(
+          id,reminder_text,due_date_text,status,result,created_at_text,created_by,
+          changed_at_text,changed_by,attachments_json,internal_note,shadow_updated_at
+        ) VALUES($1,$2,$3,'Offen','',$4,$5,$4,$5,'[]','',now())
+        ON CONFLICT(id) DO NOTHING`,
+        [id,reminderText,due,nowIso,by]
+      );
+      legacyPayload=Object.assign({},body,{item:Object.assign({},item,{id})});
+      result={ok:true,id,dueDate:due,attachmentCount:0};
+    }else if(action==='saveEntry'){
       const entry=Object.assign({},body.entry||{});
       const date=String(entry.date||'').trim(),customer=String(entry.customer||'').trim(),activity=String(entry.activity||'').trim();
       if(!by)throw new Error('Mitarbeiter fehlt.');
@@ -10004,6 +10026,11 @@ async function tryDirectPostgresWrite(action,body){
     await invalidateOfferNativeReadiness();
     await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name='offer_reminders' OR shadow_name LIKE 'offer_reports_native:%' OR shadow_name='offer_statistics_native'");
     await pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getOfferReports','getOfferStatistics','getOfferReminders','getDashboardSummary51')");
+  }
+  if(action==='createOwnReminder'){
+    const q=await pool.query('SELECT COUNT(*)::int AS n FROM own_reminders_shadow');
+    const n=Number(q.rows[0]?.n||0);await saveShadowVerifyStat('own_reminders',n,n,0);
+    await pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getOwnReminders','getDashboardSummary51')");
   }
   if(action==='rescheduleOfferReminder'){
     const q=await pool.query('SELECT COUNT(*)::int AS n FROM offer_reminders_shadow');
