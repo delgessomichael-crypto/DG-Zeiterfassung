@@ -6371,9 +6371,9 @@ async function directTimeBankAccountRead(body){
 
 
 
-async function postgresMaintenanceCustomerFull(id){
+async function postgresMaintenanceCustomerFull(id,db=pool){
   id=String(id||'').trim();if(!id)return null;
-  const cq=await pool.query(
+  const cq=await db.query(
     `SELECT id,name,billing_street,billing_zip,billing_city,email,phone
        FROM maintenance_customers_shadow WHERE id=$1 AND active=true`,
     [id]
@@ -6381,12 +6381,12 @@ async function postgresMaintenanceCustomerFull(id){
   if(!cq.rowCount)return null;
   const cst=cq.rows[0];
   const [oq,dq,rq,aq,hq]=await Promise.all([
-    pool.query(
+    db.query(
       `SELECT id,name,street,zip,city,notes
          FROM maintenance_objects_shadow WHERE customer_id=$1 AND active=true`,
       [id]
     ),
-    pool.query(
+    db.query(
       `SELECT id,object_id,customer_id,device_type,other_description,manufacturer,model,
               serial_number,year_text,tenant_name,tenant_phone,tenant_email,
               spare_part_manufacturer,spare_part_serial_number,internal_notes,
@@ -6394,18 +6394,18 @@ async function postgresMaintenanceCustomerFull(id){
          FROM maintenance_devices_shadow WHERE customer_id=$1 AND active=true`,
       [id]
     ),
-    pool.query(
+    db.query(
       `SELECT id,device_id,customer_id,object_id,repair_date,description,created_at_text,created_by
          FROM maintenance_repairs_shadow WHERE customer_id=$1`,
       [id]
     ),
-    pool.query(
+    db.query(
       `SELECT id,device_id,customer_id,object_id,kind,name,mime,file_size,url,
               created_at_text,created_by
          FROM maintenance_attachments_shadow WHERE customer_id=$1 AND active=true`,
       [id]
     ),
-    pool.query(
+    db.query(
       `SELECT id,employee_name,entry_date,activity,hours,next_maintenance_due,maintenance_device_id
          FROM time_entries_shadow
         WHERE maintenance=true AND maintenance_customer_id=$1 AND COALESCE(maintenance_device_id,'')<>''`,
@@ -9703,7 +9703,7 @@ async function tryDirectPostgresWrite(action,body){
          ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,[metaValue]
       );
       legacyPayload=Object.assign({},body,{item:outItem});
-      result=await postgresMaintenanceCustomerFull(id);
+      result=await postgresMaintenanceCustomerFull(id,client);
     }else if(action==='addMaintenanceRepair'){
       const deviceId=String(body.deviceId||'').trim(),date=String(body.date||'').trim(),description=String(body.description||'').trim();
       if(!validIsoDateText(date))throw new Error('Reparaturdatum ist ungültig.');
