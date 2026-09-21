@@ -8639,7 +8639,7 @@ function directMinimumWageRead(body){
 const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'createOwnReminder','saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder',
   'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus',
-  'saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed',
+  'saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed','setMonthClosureStatus',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
@@ -9449,6 +9449,31 @@ async function tryDirectPostgresWrite(action,body){
         [employee,year,entitlement,nowIso,by]
       );
       result={ok:true,_vacationEmployee:employee,_vacationYear:year};
+    }else if(action==='setMonthClosureStatus'){
+      const target=String(body.targetEmployee||'').trim(),year=Number(body.year)||0,month=Number(body.month)||0;
+      const closureAction=String(body.closureAction||'').trim(),reason=String(body.reason||'').trim();
+      if(!target)throw new Error('Mitarbeiter wurde nicht gefunden.');
+      if(!(year>0&&month>=1&&month<=12))throw new Error('Ungültiger Monat.');
+      if(!['Abgeschlossen','Wieder geöffnet'].includes(closureAction))throw new Error('Ungültige Abschlussaktion.');
+      if(closureAction==='Wieder geöffnet'&&!reason)throw new Error('Bitte einen Grund für die Wiederöffnung angeben.');
+      const eq=await client.query('SELECT 1 FROM employee_admin_shadow WHERE employee_name=$1 LIMIT 1',[target]);
+      if(!eq.rowCount)throw new Error('Mitarbeiter wurde nicht gefunden.');
+      const id=String(body.closureId||'').trim()||('MC-'+crypto.randomUUID());
+      await client.query(
+        `INSERT INTO month_closures_shadow(
+          id,employee_name,closure_year,closure_month,action,action_at_text,action_by,reason,shadow_updated_at
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,now()) ON CONFLICT(id) DO NOTHING`,
+        [id,target,year,month,closureAction,nowIso,by,reason]
+      );
+      legacyPayload=Object.assign({},body,{closureId:id});
+      const h=await client.query(
+        `SELECT id,action,action_at_text,action_by,reason FROM month_closures_shadow
+          WHERE employee_name=$1 AND closure_year=$2 AND closure_month=$3
+          ORDER BY action_at_text ASC NULLS LAST,id ASC`,[target,year,month]
+      );
+      const history=h.rows.map(r=>({id:String(r.id||''),action:String(r.action||''),at:shadowGermanDateTime(r.action_at_text||''),by:String(r.action_by||''),reason:String(r.reason||'')}));
+      const last=history.length?history[history.length-1]:null;
+      result={status:last&&last.action==='Abgeschlossen'?'Abgeschlossen':'Offen',last,history};
     }else if(action==='saveEmployeeAdmin'){
       const item=body.item||{},name=String(item.name||'').trim(),original=String(item.originalName||'').trim();
       if(!name||!original||name!==original)throw new Error('Namensänderungen werden weiterhin über Google verarbeitet.');
@@ -10049,6 +10074,11 @@ async function tryDirectPostgresWrite(action,body){
     throw e;
   }finally{client.release();}
 
+  if(action==='setMonthClosureStatus'){
+    const employee=String(body.targetEmployee||''),year=Number(body.year)||0,month=Number(body.month)||0;
+    const monthKey=monthDataVerifyKey({employee,year,month});if(monthKey)await saveShadowVerifyStat(monthKey,1,1,0);
+    await pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getMonthPayrollAudit','getPayrollCycleState')");
+  }
   if(['saveMonthlyAdjustment','deleteMonthlyAdjustment'].includes(action)&&result&&typeof result==='object'){
     if(action==='saveMonthlyAdjustment'){
       const employee=result._employee,year=result._year,month=result._month;
