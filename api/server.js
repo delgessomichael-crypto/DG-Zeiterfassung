@@ -9599,7 +9599,20 @@ async function tryDirectPostgresWrite(action,body){
     }else if(action==='reserveMaintenanceDeviceId'){
       await client.query("SELECT pg_advisory_xact_lock(hashtext('maintenance_internal_device_id'))");
       const mx=await client.query(
-        `SELECT COALESCE(MAX(CASE WHEN internal_device_id ~ '^[0-9]+
+        "SELECT COALESCE(MAX(CASE WHEN internal_device_id ~ '^[0-9]+$' THEN internal_device_id::int END),999)::int AS n FROM maintenance_devices_shadow"
+      );
+      const meta=await client.query(
+        "SELECT COALESCE(NULLIF(value->>'nextInternalDeviceId','')::int,1000)::int AS n FROM app_meta WHERE key='maintenance_next_device_id' LIMIT 1 FOR UPDATE"
+      );
+      const reserved=Math.max(Number(mx.rows[0]?.n||999)+1,Number(meta.rows[0]?.n||1000),1000);
+      const next=reserved+1;
+      const value=JSON.stringify({nextInternalDeviceId:String(next),lastReservedInternalDeviceId:String(reserved),reservedBy:by,reservedAt:nowIso,source:'postgres'});
+      await client.query(
+        "INSERT INTO app_meta(key,value) VALUES('maintenance_next_device_id',$1::jsonb) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()",
+        [value]
+      );
+      result={ok:true,internalDeviceId:String(reserved)};
+    }else if(action==='saveMaintenanceCustomer'){
       const src=body.item||{},objects=Array.isArray(src.objects)?src.objects:[];
       const name=String(src.name||'').trim(),email=String(src.email||'').trim(),phone=String(src.phone||'').trim();
       const billingStreet=String(src.billingStreet||'').trim(),billingZip=String(src.billingZip||'').trim(),billingCity=String(src.billingCity||'').trim();
