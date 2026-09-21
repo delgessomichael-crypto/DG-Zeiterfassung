@@ -8644,7 +8644,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
-  'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
+  'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
 function berlinTodayIso(){
@@ -8727,6 +8727,14 @@ async function tryDirectPostgresWrite(action,body){
   if(action==='setRegieReportsOfferStatus'){
     if(!String(body&&body.offerId||'').trim())return null;
   }
+  if(action==='saveEntry'){
+    const e=body&&body.entry||{};
+    if((Array.isArray(e.photos)&&e.photos.length)||String(e.customerSignature||'').trim())return null;
+    const customer=String(e.customer||'').trim();if(!customer)return null;
+    const oq=await pool.query('SELECT id FROM objects_shadow WHERE object_key=$1 ORDER BY created_at_text ASC NULLS LAST,id ASC LIMIT 1',[shadowObjectKey(customer)]);
+    if(!oq.rowCount)return null;
+    if(String(e.sourceCalendarEventId||'').trim()&&!Boolean(e.maintenance))return null;
+  }
   if(action==='savePlannerEvent'){
     const item=body&&body.item||{};
     if(!String(item.id||'').trim())return null;
@@ -8753,14 +8761,79 @@ async function tryDirectPostgresWrite(action,body){
     const item=body&&body.item||{};
     if(!String(item.id||'').trim()||String(item.inquiryId||'').trim())return null;
   }
-  const employeeSelfAction=['confirmEmployeeAssignment','reportEmployeeAssignmentIssue','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay'].includes(action);
+  const employeeSelfAction=['confirmEmployeeAssignment','reportEmployeeAssignmentIssue','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay'].includes(action);
   const session=await localSessionForBody(body,!employeeSelfAction);if(!session)return null;
   const by=String(session.employee||body.employee||'').trim(),nowIso=new Date().toISOString();
   const client=await pool.connect();
   let result=null,outboxId=0,legacyAction=action,legacyPayload=body;
   try{
     await client.query('BEGIN');
-    if(['moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus'].includes(action)){
+    if(action==='saveEntry'){
+      const entry=Object.assign({},body.entry||{});
+      const date=String(entry.date||'').trim(),customer=String(entry.customer||'').trim(),activity=String(entry.activity||'').trim();
+      if(!by)throw new Error('Mitarbeiter fehlt.');
+      if(!validIsoDateText(date))throw new Error('Ungültiges Datum.');
+      if(!customer)throw new Error('Kunde/Baustelle fehlt.');
+      let start='',end='';
+      const smRaw=Number(entry.startMinutes),emRaw=Number(entry.endMinutes);
+      if(Number.isFinite(smRaw)&&Number.isFinite(emRaw)&&smRaw>=0&&smRaw<1440&&emRaw>=0&&emRaw<1440){
+        start=String(Math.floor(smRaw/60)).padStart(2,'0')+':'+String(smRaw%60).padStart(2,'0');
+        end=String(Math.floor(emRaw/60)).padStart(2,'0')+':'+String(emRaw%60).padStart(2,'0');
+      }else{
+        const sm=pgTimeToMinutes(entry.start),em=pgTimeToMinutes(entry.end);
+        if(sm!==null)start=String(Math.floor(sm/60)).padStart(2,'0')+':'+String(sm%60).padStart(2,'0');
+        if(em!==null)end=String(Math.floor(em/60)).padStart(2,'0')+':'+String(em%60).padStart(2,'0');
+      }
+      if(!start||!end)throw new Error('Bitte gültige Von-/Bis-Zeit eintragen.');
+      let sm=pgTimeToMinutes(start),em=pgTimeToMinutes(end);if(em<sm)em+=1440;
+      const hours=Math.round(((em-sm)/60)*100)/100;
+      if(!(hours>0&&hours<=24))throw new Error('Die Arbeitsstunden sind ungültig.');
+      if(!activity)throw new Error('Bitte die ausgeführte Tätigkeit eintragen.');
+      const materialUsed=Boolean(entry.materialUsed),material=String(entry.material||'').trim();
+      if(materialUsed&&!material)throw new Error('Bitte das verbaute Material eintragen.');
+      const st=await client.query('SELECT status FROM day_status_shadow WHERE employee_name=$1 AND status_date=$2 LIMIT 1',[by,date]);
+      const dayStatus=String(st.rows[0]?.status||'Arbeiten');
+      if(dayStatus!=='Arbeiten')throw new Error('Dieser Tag ist als '+dayStatus+' fest hinterlegt. Arbeitszeiteingaben sind für diesen Tag vollständig gesperrt.');
+      const closure=await client.query('SELECT 1 FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 LIMIT 1',[by,date]);
+      const dayWasClosed=closure.rowCount>0,isSupplement=Boolean(entry.isSupplement);
+      if(dayWasClosed&&!isSupplement)throw new Error('Dieser Tag wurde bereits abgeschlossen. Für weitere Einsätze bitte die Funktion „Nachtrag erfassen“ verwenden.');
+      if((Array.isArray(entry.photos)&&entry.photos.length)||String(entry.customerSignature||'').trim())throw new Error('Dateianhänge werden weiterhin über Google verarbeitet.');
+      const oq=await client.query('SELECT id FROM objects_shadow WHERE object_key=$1 ORDER BY created_at_text ASC NULLS LAST,id ASC LIMIT 1',[shadowObjectKey(customer)]);
+      if(!oq.rowCount)throw new Error('Neues Kundenobjekt wird weiterhin über Google verarbeitet.');
+      const objectId=String(oq.rows[0].id||'');
+      const isMaintenance=Boolean(entry.maintenance),nextDue=String(entry.nextMaintenanceDue||'').trim();
+      const maintenanceCustomerId=String(entry.maintenanceCustomerId||'').trim(),maintenanceObjectId=String(entry.maintenanceObjectId||'').trim(),maintenanceDeviceId=String(entry.maintenanceDeviceId||'').trim();
+      if(String(entry.sourceCalendarEventId||'').trim()&&!isMaintenance)throw new Error('Kalenderverknüpfte Einträge werden weiterhin über Google geprüft.');
+      if(isMaintenance&&!/^\d{4}-(0[1-9]|1[0-2])$/.test(nextDue))throw new Error('Bei Wartungen ist „Nächste Wartung fällig“ mit Monat und Jahr Pflicht.');
+      if(isMaintenance&&maintenanceDeviceId){
+        const md=await client.query('SELECT active FROM maintenance_devices_shadow WHERE id=$1 LIMIT 1',[maintenanceDeviceId]);
+        if(!md.rowCount||md.rows[0].active===false)throw new Error('Das zugeordnete Wartungsgerät wurde nicht gefunden oder ist inaktiv.');
+      }
+      const id=String(entry.clientId||'').trim()||('ENTRY-'+crypto.randomUUID());
+      const dup=await client.query('SELECT 1 FROM time_entries_shadow WHERE id=$1 LIMIT 1',[id]);
+      if(!dup.rowCount){
+        await client.query(
+          `INSERT INTO time_entries_shadow(
+             id,employee_name,entry_date,customer,start_time,end_time,hours,activity,calendar_id,transmitted_at_text,closed,
+             material_used,material,customer_signature_id,customer_signature_url,photo_count,photo_file_ids,photo_urls,
+             additional_employees_used,additional_employees_text,additional_employee_hours_text,source_calendar_event_id,
+             billing_status,billed_at_text,billed_by,object_id,job_status,is_supplement,supplement_created_at_text,
+             offer_id,offer_changed_at_text,offer_changed_by,maintenance,next_maintenance_due,maintenance_customer_id,
+             maintenance_object_id,maintenance_device_id,shadow_updated_at
+           ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'',$9,false,$10,$11,'','',0,'','',false,'','',$12,
+                    'Offen','','',$13,$14,$15,$16,'','','','',$17,$18,$19,$20,$21,now())`,
+          [id,by,date,customer,start,end,hours,activity,nowIso,materialUsed,material,String(entry.sourceCalendarEventId||''),
+           objectId,String(entry.jobStatus||'')==='Laufend'?'Laufend':'Abgeschlossen',dayWasClosed&&isSupplement,
+           dayWasClosed&&isSupplement?nowIso:'',isMaintenance,nextDue,maintenanceCustomerId,maintenanceObjectId,maintenanceDeviceId]
+        );
+        if(isMaintenance&&maintenanceDeviceId){
+          await client.query('UPDATE maintenance_devices_shadow SET next_maintenance_due=$2,updated_at_text=$3,updated_by=$4,shadow_updated_at=now() WHERE id=$1',[maintenanceDeviceId,nextDue,nowIso,by]);
+        }
+      }
+      legacyPayload=Object.assign({},body,{entry:Object.assign({},entry,{employee:by,clientId:id,start,end,hours})});
+      result=await postgresDayData({date},by);
+      if(dayWasClosed&&isSupplement){result.supplementSaved=true;result.supplementEntryId=id;}
+    }else if(['moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus'].includes(action)){
       let offerId=String(body.offerId||'').trim(),reminderId=String(body.reminderId||'').trim();
       if(['declineOfferFromReminder','acceptOfferFromReminder'].includes(action)){
         if(!reminderId)throw new Error('Reminder wurde nicht gefunden.');
@@ -9914,9 +9987,10 @@ async function tryDirectPostgresWrite(action,body){
     const n=Number(q.rows[0]?.n||0);
     await saveShadowVerifyStat('manual_orders',n,n,0);
   }
-  if(['updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay'].includes(action)){
-    const employee=String(body.employee||''),date=['deleteEntry','closeDay','refreshClosedDay'].includes(action)?String(body.date||''):
-      berlinDateOnly((await pool.query('SELECT entry_date FROM time_entries_shadow WHERE id=$1 LIMIT 1',[String(body.entryId||'')])).rows[0]?.entry_date||'');
+  if(['saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay'].includes(action)){
+    const employee=String(body.employee||''),date=action==='saveEntry'?String(body.entry&&body.entry.date||''):
+      (['deleteEntry','closeDay','refreshClosedDay'].includes(action)?String(body.date||''):
+      berlinDateOnly((await pool.query('SELECT entry_date FROM time_entries_shadow WHERE id=$1 LIMIT 1',[String(body.entryId||'')])).rows[0]?.entry_date||''));
     if(employee&&date){
       const dayKey=dayDataVerifyKey({date},employee);if(dayKey)await saveShadowVerifyStat(dayKey,1,1,0);
       const weekKey=weekVerifyKey({referenceDate:date},employee);if(weekKey)await saveShadowVerifyStat(weekKey,1,1,0);
