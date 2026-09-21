@@ -8643,7 +8643,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveEmployeeAdmin','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
+  'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveEmployeeAdmin','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
@@ -9449,6 +9449,35 @@ async function tryDirectPostgresWrite(action,body){
         [employee,year,entitlement,nowIso,by]
       );
       result={ok:true,_vacationEmployee:employee,_vacationYear:year};
+    }else if(action==='addMaintenanceRepair'){
+      const deviceId=String(body.deviceId||'').trim(),date=String(body.date||'').trim(),description=String(body.description||'').trim();
+      if(!validIsoDateText(date))throw new Error('Reparaturdatum ist ungültig.');
+      if(!description)throw new Error('Reparaturbeschreibung fehlt.');
+      const dq=await client.query('SELECT id,customer_id,object_id,active FROM maintenance_devices_shadow WHERE id=$1 FOR UPDATE',[deviceId]);
+      if(!dq.rowCount||dq.rows[0].active===false)throw new Error('Wartungsgerät nicht gefunden.');
+      const d=dq.rows[0],id=String(body.repairId||'').trim()||('WR-'+crypto.randomUUID());
+      await client.query(
+        `INSERT INTO maintenance_repairs_shadow(
+          id,device_id,customer_id,object_id,repair_date,description,created_at_text,created_by,shadow_updated_at
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,now()) ON CONFLICT(id) DO NOTHING`,
+        [id,deviceId,String(d.customer_id||''),String(d.object_id||''),date,description,nowIso,by]
+      );
+      legacyPayload=Object.assign({},body,{repairId:id});
+      result={id};
+    }else if(action==='addManualMaintenanceCount'){
+      let date=String(body.date||'').trim()||berlinTodayIso();
+      const count=Math.floor(Number(body.count)||0),note=String(body.note||'').trim();
+      if(!validIsoDateText(date))throw new Error('Datum ist ungültig.');
+      if(count<1||count>99)throw new Error('Bitte eine Anzahl zwischen 1 und 99 eintragen.');
+      const id=String(body.manualId||'').trim()||('WM-'+crypto.randomUUID());
+      await client.query(
+        `INSERT INTO maintenance_manual_shadow(
+          id,maintenance_date,maintenance_count,note,created_at_text,created_by,shadow_updated_at
+        ) VALUES($1,$2,$3,$4,$5,$6,now()) ON CONFLICT(id) DO NOTHING`,
+        [id,date,count,note,nowIso,by]
+      );
+      legacyPayload=Object.assign({},body,{manualId:id});
+      result={id,date,count,note};
     }else if(action==='setMonthClosureStatus'){
       const target=String(body.targetEmployee||'').trim(),year=Number(body.year)||0,month=Number(body.month)||0;
       const closureAction=String(body.closureAction||'').trim(),reason=String(body.reason||'').trim();
@@ -10074,6 +10103,12 @@ async function tryDirectPostgresWrite(action,body){
     throw e;
   }finally{client.release();}
 
+  if(['addMaintenanceRepair','addManualMaintenanceCount'].includes(action)){
+    await Promise.all([
+      pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'maintenance_%'"),
+      pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getMaintenanceArchive','getMaintenanceOverview','getDashboardSummary51')")
+    ]);
+  }
   if(action==='setMonthClosureStatus'){
     const employee=String(body.targetEmployee||''),year=Number(body.year)||0,month=Number(body.month)||0;
     const monthKey=monthDataVerifyKey({employee,year,month});if(monthKey)await saveShadowVerifyStat(monthKey,1,1,0);
