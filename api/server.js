@@ -741,6 +741,7 @@ async function initDb() {
   await initConflictReviewsShadow();
   await initDayStatusShadow();
   await initDayClosuresShadow();
+  await reconcileLegacyDayClosureDuplicatesV9();
   await initTimeEntriesShadow();
   await initRegieMetadataShadows();
   await initRegieAttachmentsShadow();
@@ -753,6 +754,7 @@ async function initDb() {
   await bootstrapTimeBankReadinessV6();
   await bootstrapVacationReadinessV7();
   await bootstrapCurrentPeriodReadinessV8();
+  await bootstrapDayAndBossClosureReadinessV10();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -1816,7 +1818,7 @@ async function postgresObjectReports(body){
       additionalEmployeeHours:String(r.additional_employee_hours_text||''),
       regieStatus:String(r.billing_status||'Offen'),jobStatus:String(r.job_status||'Abgeschlossen'),
       isSupplement:Boolean(r.is_supplement),
-      supplementCreatedAt:berlinDateTime(r.supplement_created_at_text||''),
+      supplementCreatedAt:shadowGermanDateTime(r.supplement_created_at_text||''),
       maintenance:Boolean(r.maintenance),nextMaintenanceDue:String(r.next_maintenance_due||'')
     });
   }
@@ -2002,7 +2004,7 @@ async function postgresRegieReports(body){
     g.reports.push({
       id:String(r.id||''),employee:String(r.employee_name||''),date,customer:String(r.customer||''),
       start:String(r.start_time||''),end:String(r.end_time||''),hours:Number(r.hours||0),activity:String(r.activity||''),
-      transmittedAt:berlinDateTime(r.transmitted_at_text||''),materialUsed:Boolean(r.material_used),material:String(r.material||''),
+      transmittedAt:shadowGermanDateTime(r.transmitted_at_text||''),materialUsed:Boolean(r.material_used),material:String(r.material||''),
       customerSignatureUrl:String(r.customer_signature_url||''),photoCount:Number(r.photo_count||0),
       photoFileIds:String(r.photo_file_ids||''),photoUrls:String(r.photo_urls||''),status:rowStatus,objectId:oid,
       jobStatus:rowJobStatus,isSupplement:Boolean(r.is_supplement),
@@ -2462,6 +2464,68 @@ async function initDayClosuresShadow(){
   console.log('SHADOW day_closures initialized rows='+inserted);
 }
 
+async function reconcileLegacyDayClosureDuplicatesV9(){
+  if(!pool)return;
+  const marker='legacy_day_closure_duplicates_v9';
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);
+  if(done.rowCount)return;
+  const q=await pool.query(
+    `SELECT source_key,payload FROM migration_objects
+      WHERE entity_type=$1 ORDER BY source_key::int ASC`,
+    ['sheet:Tagesabschluesse']
+  );
+  const groups=new Map();
+  for(const row of q.rows){
+    const p=row.payload||{};if(Number(p.sourceRow||row.source_key)<=1)continue;
+    const c=Array.isArray(p.cells)?p.cells:[];
+    const employee=textCell(c,0).trim(),date=textCell(c,1).trim();if(!employee||!date)continue;
+    const key=employee+'|'+date;
+    if(!groups.has(key))groups.set(key,[]);
+    groups.get(key).push(c);
+  }
+  const canonCells=c=>({
+    closedAt:String(textCell(c,2)||''),gross:Number(textCell(c,3))||0,
+    col5:String(textCell(c,4)||''),col6:String(textCell(c,5)||''),
+    pause:Math.max(0,Number(textCell(c,6))||0),net:Number(textCell(c,7))||0,
+    updatedAt:String(textCell(c,8)||''),reason:String(textCell(c,9)||'')
+  });
+  const canonPg=r=>({
+    closedAt:String(r.closed_at_text||''),gross:Number(r.gross_total)||0,
+    col5:String(r.legacy_col5||''),col6:String(r.legacy_col6||''),
+    pause:Math.max(0,Number(r.pause_minutes)||0),net:Number(r.net_total)||0,
+    updatedAt:String(r.updated_at_text||''),reason:String(r.update_reason||'')
+  });
+  let duplicateKeys=0,reconciled=0,alreadyLast=0,skippedChanged=0;
+  for(const [key,rows] of groups){
+    if(rows.length<2)continue;
+    duplicateKeys++;
+    const split=key.indexOf('|'),employee=key.slice(0,split),date=key.slice(split+1);
+    const cur=await pool.query(
+      `SELECT closed_at_text,gross_total,legacy_col5,legacy_col6,pause_minutes,net_total,updated_at_text,update_reason
+         FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 LIMIT 1`,
+      [employee,date]
+    );
+    if(!cur.rowCount)continue;
+    const first=canonCells(rows[0]),last=canonCells(rows[rows.length-1]),now=canonPg(cur.rows[0]);
+    if(JSON.stringify(now)===JSON.stringify(last)){alreadyLast++;continue;}
+    if(JSON.stringify(now)!==JSON.stringify(first)){skippedChanged++;continue;}
+    await pool.query(
+      `UPDATE day_closures_shadow SET
+         closed_at_text=$3,gross_total=$4,legacy_col5=$5,legacy_col6=$6,
+         pause_minutes=$7,net_total=$8,updated_at_text=$9,update_reason=$10,shadow_updated_at=now()
+       WHERE employee_name=$1 AND closure_date=$2`,
+      [employee,date,last.closedAt,last.gross,last.col5,last.col6,last.pause,last.net,last.updatedAt,last.reason]
+    );
+    reconciled++;
+  }
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb) ON CONFLICT(key) DO NOTHING`,
+    [marker,JSON.stringify({at:new Date().toISOString(),duplicateKeys,reconciled,alreadyLast,skippedChanged,
+      reason:'Google day-closure readers use the last matching sheet row; reconcile only untouched legacy duplicates'})]
+  );
+  console.log('DAY_CLOSURE_DUPLICATES_V9 keys='+duplicateKeys+' reconciled='+reconciled+' alreadyLast='+alreadyLast+' skippedChanged='+skippedChanged);
+}
+
 async function upsertDayClosureShadow(employee,date,data,reason){
   if(!pool||!employee||!date||!data)return;
   if(data.closed===false){
@@ -2538,8 +2602,23 @@ async function mirrorDayClosureWrite(action,body,parsed){
   if(!data||data.ok===false)return;
   if(action==='closeDay'){
     if(data.alreadyClosed)return;
-    await upsertDayClosureShadow(body.employee,body.date,{
-      closed:true,grossTotal:data.total,pauseMinutes:data.pauseMinutes,netTotal:data.netTotal!==undefined?data.netTotal:data.total
+    const employee=String(body.employee||''),date=String(body.date||'');
+    const [own,assigned,statusQ]=await Promise.all([
+      pool.query('SELECT COALESCE(SUM(hours),0)::numeric AS h FROM time_entries_shadow WHERE employee_name=$1 AND entry_date=$2',[employee,date]),
+      pool.query(
+        `SELECT COALESCE(SUM(a.hours),0)::numeric AS h
+           FROM assignments_shadow a JOIN time_entries_shadow t ON t.id=a.source_entry_id
+          WHERE a.employee_name=$1 AND COALESCE(a.status,'Zugeordnet')<>'Ersetzt' AND t.entry_date=$2`,
+        [employee,date]
+      ),
+      pool.query('SELECT status,credited_hours FROM day_status_shadow WHERE employee_name=$1 AND status_date=$2 LIMIT 1',[employee,date])
+    ]);
+    const grossWork=Number(own.rows[0]?.h||0)+Number(assigned.rows[0]?.h||0);
+    const st=statusQ.rows[0]||{};
+    const credit=String(st.status||'Arbeiten')==='Arbeiten'?0:Number(st.credited_hours||0);
+    const grossTotal=Math.round((grossWork+credit)*100)/100;
+    await upsertDayClosureShadow(employee,date,{
+      closed:true,grossTotal,pauseMinutes:data.pauseMinutes,netTotal:data.netTotal!==undefined?data.netTotal:data.total
     },'Tagesabschluss');
   }else if(action==='manualCloseBossDay'){
     if(data.alreadyClosed)return;
@@ -3033,7 +3112,7 @@ async function postgresBossDayClosures(body){
     ),
     pool.query(
       `SELECT a.id AS assignment_id,a.employee_name,a.hours AS assignment_hours,a.status AS assignment_status,
-              a.created_by AS assigned_by,t.id AS source_id,t.entry_date,t.customer,t.start_time,t.end_time,
+              a.created_by AS assigned_by,t.employee_name AS source_employee,t.id AS source_id,t.entry_date,t.customer,t.start_time,t.end_time,
               t.activity,t.transmitted_at_text
          FROM assignments_shadow a
          JOIN time_entries_shadow t ON t.id=a.source_entry_id
@@ -3070,7 +3149,7 @@ async function postgresBossDayClosures(body){
       transmittedAt:berlinDateTime(r.transmitted_at_text||''),materialUsed:Boolean(r.material_used),
       material:String(r.material||''),billingStatus:String(r.billing_status||'Offen'),
       isAdditionalAssignment:false,assignedBy:'',assignmentStatus:'',
-      isSupplement:Boolean(r.is_supplement),supplementCreatedAt:berlinDateTime(r.supplement_created_at_text||'')
+      isSupplement:Boolean(r.is_supplement),supplementCreatedAt:shadowGermanDateTime(r.supplement_created_at_text||'')
     });
   }
   for(const r of assigned.rows){
@@ -3080,9 +3159,9 @@ async function postgresBossDayClosures(body){
     d.reports.push({
       id:'assigned:'+String(r.assignment_id||''),customer:String(r.customer||''),start:String(r.start_time||''),
       end:String(r.end_time||''),hours:Math.round(Number(r.assignment_hours||0)*100)/100,
-      activity:String(r.activity||''),transmittedAt:berlinDateTime(r.transmitted_at_text||''),
+      activity:String(r.activity||''),transmittedAt:shadowGermanDateTime(r.transmitted_at_text||''),
       materialUsed:false,material:'',billingStatus:'Offen',isAdditionalAssignment:true,
-      assignedBy:String(r.assigned_by||''),assignmentStatus:String(r.assignment_status||'Zugeordnet'),
+      assignedBy:String(r.assigned_by||r.source_employee||''),assignmentStatus:String(r.assignment_status||'Zugeordnet'),
       isSupplement:false,supplementCreatedAt:''
     });
   }
@@ -3327,7 +3406,7 @@ async function postgresDayData(body,employee){
       customerSignatureUrl:String(r.customer_signature_url||''),photoCount:Number(r.photo_count||0),
       photoUrls:String(r.photo_urls||''),jobStatus:String(r.job_status||'Abgeschlossen'),
       isAdditionalAssignment:false,assignedBy:'',assignmentId:'',assignmentStatus:'',assignmentNote:'',
-      isSupplement:Boolean(r.is_supplement),supplementCreatedAt:berlinDateTime(r.supplement_created_at_text||'')
+      isSupplement:Boolean(r.is_supplement),supplementCreatedAt:shadowGermanDateTime(r.supplement_created_at_text||'')
     });
   }
   for(const r of assigned.rows){
@@ -3349,13 +3428,16 @@ async function postgresDayData(body,employee){
   const status=String(st.status||'Arbeiten'),statusSource=String(st.source||'');
   const credited=status==='Arbeiten'?0:Number(st.credited_hours||0);
   const closure=closureQ.rows[0]||null;
-  const latestSupp=own.rows.filter(r=>Boolean(r.is_supplement)&&r.supplement_created_at_text)
-    .map(r=>berlinDateTime(r.supplement_created_at_text)).filter(Boolean).sort().pop()||'';
+  const latestSuppRaw=own.rows.filter(r=>Boolean(r.is_supplement)&&r.supplement_created_at_text)
+    .map(r=>String(r.supplement_created_at_text||'')).filter(Boolean)
+    .sort((a,b)=>shadowComparableDateTime(a).localeCompare(shadowComparableDateTime(b))).pop()||'';
+  const latestSuppKey=shadowComparableDateTime(latestSuppRaw);
   let closureNeedsRefresh=false;
-  if(closure&&latestSupp){
-    const baseline=berlinDateTime(closure.updated_at_text||closure.closed_at_text||'');
-    closureNeedsRefresh=!baseline||latestSupp>baseline;
+  if(closure&&latestSuppKey){
+    const baseline=shadowComparableDateTime(closure.updated_at_text||closure.closed_at_text||'');
+    closureNeedsRefresh=!baseline||latestSuppKey>baseline;
   }
+  const latestSupp=shadowGermanDateTime(latestSuppRaw);
   const balance=round(Math.max(0,Number(bankQ.rows[0]?.balance||0)));
   return {
     entries,total:round(workTotal+credited),grossTotal:round(grossWorkTotal+credited),
@@ -4036,6 +4118,12 @@ async function mirrorAbsenceWrite(action,body,parsed){
         await pool.query('UPDATE absences_shadow SET active=false,shadow_updated_at=now() WHERE id=$1',[id]);
       }else if(data.changed){
         await pool.query('UPDATE absences_shadow SET end_date=$2,shadow_updated_at=now() WHERE id=$1',[id,String(data.newEnd||'')]);
+      }
+      if(data.changed){
+        await pool.query(
+          'DELETE FROM day_status_shadow WHERE reference=$1 AND status_date>=$2',
+          [id,String(data.returnDate||body.returnDate||'')]
+        );
       }
     }
     await invalidateShadowVerify('sickness_alerts');
@@ -5861,6 +5949,16 @@ function shadowDateIso(value){
   return berlinDateOnly(value);
 }
 
+function shadowComparableDateTime(value){
+  if(value==null||value==='')return '';
+  const s=String(value).trim();
+  let m=s.match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if(m)return m[3]+'-'+m[2]+'-'+m[1]+' '+m[4]+':'+m[5]+':'+(m[6]||'00');
+  m=s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if(m&&!/[zZ]|[+-]\d{2}:?\d{2}$/.test(s))return m[1]+'-'+m[2]+'-'+m[3]+' '+m[4]+':'+m[5]+':'+(m[6]||'00');
+  return berlinDateTime(value);
+}
+
 async function shadowReadyForDirectRead(name,maxAgeHours=24){
   if(!pool)return false;
   const q=await pool.query(
@@ -6846,6 +6944,38 @@ async function initEmployeeAdminShadowFromSnapshot(){
 
 
 
+async function bootstrapDayAndBossClosureReadinessV10(){
+  if(!pool)return;
+  const now=berlinNowParts();
+  const date=String(now.year)+'-'+String(now.month).padStart(2,'0')+'-'+String(now.day).padStart(2,'0');
+  const marker='trusted_day_boss_closure_bootstrap_v10:'+date;
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);
+  if(done.rowCount)return;
+  await mirrorHolidayYear(now.year);
+  const q=await pool.query('SELECT employee_name FROM employee_admin_shadow ORDER BY employee_name');
+  let dayKeys=0;
+  for(const row of q.rows){
+    const employee=String(row.employee_name||'').trim();if(!employee)continue;
+    const body={employee,date};
+    const data=await postgresDayData(body,employee);
+    if(!data)continue;
+    await saveShadowVerifyStat(dayDataVerifyKey(body,employee),1,1,0);
+    dayKeys++;
+  }
+  const bossBody={year:now.year,month:now.month};
+  const boss=await postgresBossDayClosures(bossBody);
+  const bossKey=bossDayClosuresVerifyKey(bossBody);
+  if(Array.isArray(boss)&&bossKey)await saveShadowVerifyStat(bossKey,boss.length,boss.length,0);
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb) ON CONFLICT(key) DO NOTHING`,
+    [marker,JSON.stringify({
+      at:new Date().toISOString(),date,dayKeys,bossKey,bossEmployees:Array.isArray(boss)?boss.length:0,
+      reason:'trusted exact current-day and boss-day derivation after timestamp and legacy-closure compatibility audit'
+    })]
+  );
+  console.log('TRUSTED_DAY_BOSS_V10 day_keys='+dayKeys+' boss_employees='+(Array.isArray(boss)?boss.length:0));
+}
+
 async function bootstrapCurrentPeriodReadinessV8(){
   if(!pool)return;
   const now=berlinNowParts();
@@ -7719,6 +7849,8 @@ async function proxyLegacy(req, res, body) {
           .catch(e=>console.error('vacation readiness absence invalidate failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'day_data:%' OR shadow_name LIKE 'month_data:%'")
           .catch(e=>console.error('employee time readiness absence invalidate failed',e.message));
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'boss_day_closures:%'")
+          .catch(e=>console.error('boss day closures absence readiness invalidate failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false && action==='saveVacationEntitlement') {
         mirrorVacationEntitlementWrite(body,parsed).catch(e=>console.error('vacation entitlement shadow mirror failed',e.message));
