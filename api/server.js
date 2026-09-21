@@ -11093,6 +11093,16 @@ async function proxyLegacy(req, res, body) {
       console.error('Postgres employee read failed; falling back to Google:', e.message);
     }
   }
+  if(action==='employeeLogout'){
+    try{
+      const token=String(body.deviceSessionToken||body.employeePin||body.pin||'').trim();
+      if(token)await revokeRailwaySession(token);
+      return json(res,200,{ok:true,data:{ok:true},source:'postgres'},req);
+    }catch(e){
+      console.error('Postgres logout failed:',e.message);
+      return json(res,400,{ok:false,error:e.message},req);
+    }
+  }
   if (['systemHealthCheck','getDashboardSummary51','getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getRegieAttachments','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts'].includes(action)) {
     try {
       const direct=await tryDirectPostgresRead(action,body);
