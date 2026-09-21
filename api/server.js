@@ -8643,7 +8643,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
+  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','updateEmployeeEntry','deleteEntry','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
@@ -8730,6 +8730,10 @@ async function tryDirectPostgresWrite(action,body){
   if(action==='savePlannerEvent'){
     const item=body&&body.item||{};
     if(!String(item.id||'').trim())return null;
+  }
+  if(action==='transferPlannerEvent'){
+    const item=body&&body.item||{};
+    if(!String(item.sourceId||'').trim().startsWith('KT-'))return null;
   }
   if(action==='updateEmployeeEntry'){
     const entryId=String(body&&body.entryId||'').trim(),item=body&&body.item||{};
@@ -9554,6 +9558,25 @@ async function tryDirectPostgresWrite(action,body){
         'SELECT id,employee_name,display_name,provider,calendar_id,active,sort_order FROM planner_workers_shadow ORDER BY sort_order ASC,display_name ASC'
       );
       result=list.rows.map(r=>({id:String(r.id||''),employeeName:String(r.employee_name||''),displayName:String(r.display_name||r.employee_name||''),provider:String(r.provider||'google'),calendarId:String(r.calendar_id||''),active:Boolean(r.active),sortOrder:Number(r.sort_order||999)}));
+    }else if(action==='transferPlannerEvent'){
+      const item=body.item||{},sourceId=String(item.sourceId||'').trim(),targetWorkerId=String(item.targetWorkerId||'').trim();
+      if(!sourceId||!targetWorkerId)throw new Error('Quelltermin oder Zielmitarbeiter fehlt.');
+      if(!sourceId.startsWith('KT-'))throw new Error('Externe Google-Termine werden weiterhin über Google verarbeitet.');
+      const worker=await client.query(
+        'SELECT id,display_name,employee_name,active FROM planner_workers_shadow WHERE id=$1 FOR UPDATE',[targetWorkerId]
+      );
+      if(!worker.rowCount||worker.rows[0].active===false)throw new Error('Zielmitarbeiter ist nicht aktiv.');
+      const ev=await client.query(
+        'SELECT id,event_type,maintenance_device_id FROM planner_events_shadow WHERE id=$1 FOR UPDATE',[sourceId]
+      );
+      if(!ev.rowCount)throw new Error('DG-Termin wurde nicht gefunden.');
+      const display=String(worker.rows[0].display_name||worker.rows[0].employee_name||targetWorkerId);
+      await client.query(
+        `UPDATE planner_events_shadow SET employee_ids_json=$2,employee_names_json=$3,
+           updated_at_text=$4,updated_by=$5,shadow_updated_at=now() WHERE id=$1`,
+        [sourceId,JSON.stringify([targetWorkerId]),JSON.stringify([display]),nowIso,by]
+      );
+      result={ok:true,id:sourceId,type:String(ev.rows[0].event_type||'Auftrag'),maintenanceDeviceId:String(ev.rows[0].maintenance_device_id||'')};
     }else if(action==='savePlannerEvent'){
       const item=body.item||{},id=String(item.id||'').trim();
       if(!id)throw new Error('Termin-ID fehlt.');
@@ -9845,7 +9868,7 @@ async function tryDirectPostgresWrite(action,body){
     const q=await pool.query('SELECT COUNT(*)::int AS n FROM planner_workers_shadow');
     const n=Number(q.rows[0]?.n||0);await saveShadowVerifyStat('planner_workers',n,n,0);
   }
-  if(['savePlannerEvent','deletePlannerEvent'].includes(action)){
+  if(['savePlannerEvent','deletePlannerEvent','transferPlannerEvent'].includes(action)){
     await Promise.all([
       pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'planner_events:%' OR shadow_name LIKE 'planner_availability:%' OR shadow_name='maintenance_contracts'"),
       pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getPlannerEvents','getMaintenanceContracts','getMaintenanceOverview','getDashboardSummary51')")
