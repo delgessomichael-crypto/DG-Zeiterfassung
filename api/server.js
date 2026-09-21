@@ -6032,19 +6032,25 @@ async function verifyManualOrdersShadow(rows) {
   );
   const pg=new Map(q.rows.map(r=>[String(r.id),r]));
   let mismatches=0;
+  const mismatchDetails=[];
   const seen=new Set();
   for(const r of rows){
-    const id=normalizeShadowText(r&&r.id);if(!id){mismatches++;continue;}
-    seen.add(id);const p=pg.get(id);if(!p){mismatches++;continue;}
-    const pairs=[
-      [r.customer,p.customer],[r.address,p.address],[r.phone,p.phone],[r.email,p.email],
-      [r.description,p.description],[r.source,p.source],[r.inquiryId,p.inquiry_id],
-      [r.status,p.status],[r.internalNote,p.internal_note]
+    const id=normalizeShadowText(r&&r.id);
+    if(!id){mismatches++;mismatchDetails.push({id:'<missing>',fields:['id']});continue;}
+    seen.add(id);const p=pg.get(id);
+    if(!p){mismatches++;mismatchDetails.push({id,fields:['missing_in_postgres']});continue;}
+    const fields=[
+      ['customer',r.customer,p.customer],['address',r.address,p.address],['phone',r.phone,p.phone],
+      ['email',r.email,p.email],['description',r.description,p.description],['source',r.source,p.source],
+      ['inquiryId',r.inquiryId,p.inquiry_id],['status',r.status,p.status],
+      ['internalNote',r.internalNote,p.internal_note]
     ];
-    if(pairs.some(([a,b])=>normalizeShadowText(a)!==normalizeShadowText(b)))mismatches++;
+    const changed=fields.filter(([,a,b])=>normalizeShadowText(a)!==normalizeShadowText(b)).map(([name])=>name);
+    if(changed.length){mismatches++;mismatchDetails.push({id,fields:changed});}
   }
-  for(const id of pg.keys())if(!seen.has(id))mismatches++;
+  for(const id of pg.keys())if(!seen.has(id)){mismatches++;mismatchDetails.push({id,fields:['missing_in_google']});}
   console.log('SHADOW_VERIFY manual_orders google='+rows.length+' postgres='+pg.size+' mismatches='+mismatches);
+  if(mismatchDetails.length)console.log('MANUAL_ORDER_MISMATCH '+JSON.stringify(mismatchDetails.slice(0,25)));
   await saveShadowVerifyStat('manual_orders',rows.length,pg.size,mismatches);
 }
 
