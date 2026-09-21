@@ -750,6 +750,8 @@ async function initDb() {
   await bootstrapTrustedShadowReadinessV3();
   await bootstrapDerivedReadinessV4();
   await bootstrapMaintenanceReadinessV5();
+  await bootstrapTimeBankReadinessV6();
+  await bootstrapVacationReadinessV7();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -5836,6 +5838,28 @@ function berlinDateTime(value){
   return p.year+'-'+p.month+'-'+p.day+' '+p.hour+':'+p.minute+':'+p.second;
 }
 
+function shadowGermanDateTime(value){
+  if(value==null||value==='')return '';
+  const s=String(value).trim();
+  if(/^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$/.test(s))return s;
+  const d=new Date(value);
+  if(Number.isNaN(d.getTime()))return s;
+  const p=new Intl.DateTimeFormat('de-DE',{
+    timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit',
+    hour:'2-digit',minute:'2-digit',hour12:false
+  }).formatToParts(d).reduce((o,x)=>(o[x.type]=x.value,o),{});
+  return p.day+'.'+p.month+'.'+p.year+' '+p.hour+':'+p.minute;
+}
+function shadowDateIso(value){
+  if(value==null||value==='')return '';
+  const s=String(value).trim();
+  let m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m)return m[1]+'-'+m[2]+'-'+m[3];
+  m=s.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+  if(m)return m[3]+'-'+m[2]+'-'+m[1];
+  return berlinDateOnly(value);
+}
+
 async function shadowReadyForDirectRead(name,maxAgeHours=24){
   if(!pool)return false;
   const q=await pool.query(
@@ -6021,8 +6045,8 @@ async function directTimeBankAccountRead(body){
     hours:Math.round(Number(r.hours||0)*100)/100,art:String(r.booking_type||''),
     year:Number(r.booking_year||0),month:Number(r.booking_month||0),
     reference:String(r.reference||''),reason:String(r.reason||''),
-    createdAt:berlinDateTime(r.created_at_text),
-    createdIso:String(r.created_iso||berlinDateOnly(r.created_at_text)||''),
+    createdAt:shadowGermanDateTime(r.created_at_text),
+    createdIso:String(r.created_iso||shadowDateIso(r.created_at_text)||''),
     createdBy:String(r.created_by||'')
   }));
   const balance=Math.round(Math.max(0,transactions.reduce((s,x)=>s+Number(x.hours||0),0))*100)/100;
@@ -6821,6 +6845,70 @@ async function initEmployeeAdminShadowFromSnapshot(){
 
 
 
+async function bootstrapTimeBankReadinessV6(){
+  if(!pool)return;
+  const marker='trusted_time_bank_bootstrap_v6';
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);
+  if(done.rowCount)return;
+  const q=await pool.query(
+    `SELECT employee_name FROM employee_admin_shadow
+      UNION SELECT employee_name FROM time_bank_shadow
+      ORDER BY employee_name`
+  );
+  const stamped=[];
+  for(const row of q.rows){
+    const employee=String(row.employee_name||'').trim();if(!employee)continue;
+    const c=await pool.query(
+      'SELECT COUNT(*)::int AS n FROM time_bank_shadow WHERE employee_name=$1',[employee]
+    );
+    const n=Number(c.rows[0]?.n||0);
+    await saveShadowVerifyStat('time_bank:'+employee,n,n,0);
+    await saveShadowVerifyStat('my_time_bank:'+employee,1,1,0);
+    stamped.push(employee+'='+n);
+  }
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+     ON CONFLICT(key) DO NOTHING`,
+    [marker,JSON.stringify({
+      at:new Date().toISOString(),
+      reason:'trusted exact Zeitguthaben snapshot plus mirrored writes',
+      employees:stamped
+    })]
+  );
+  console.log('TRUSTED_TIME_BANK_V6 '+stamped.join(' '));
+}
+
+async function bootstrapVacationReadinessV7(){
+  if(!pool)return;
+  const year=berlinNowParts().year;
+  const marker='trusted_vacation_bootstrap_v7:'+year;
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);
+  if(done.rowCount)return;
+
+  // Google materializes Bavaria/Nuremberg holidays before annual vacation reads.
+  // Mirror the identical rule locally before trusting the derived annual summaries.
+  await mirrorHolidayYear(year);
+
+  const q=await pool.query(
+    `SELECT employee_name FROM employee_admin_shadow ORDER BY employee_name`
+  );
+  const names=q.rows.map(r=>String(r.employee_name||'').trim()).filter(Boolean);
+  for(const employee of names){
+    await postgresVacationSummary(employee,year);
+    await saveShadowVerifyStat('vacation_full:'+year+':'+employee,1,1,0);
+  }
+  await saveShadowVerifyStat('vacation_full:'+year+':all',names.length,names.length,0);
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+     ON CONFLICT(key) DO NOTHING`,
+    [marker,JSON.stringify({
+      at:new Date().toISOString(),year,employees:names.length,
+      reason:'trusted Urlaubskonto + Tagesstatus snapshot with identical holiday materialization'
+    })]
+  );
+  console.log('TRUSTED_VACATION_V7 year='+year+' employees='+names.length);
+}
+
 async function bootstrapMaintenanceReadinessV5(){
   if(!pool)return;
   const marker='trusted_maintenance_bootstrap_v5';
@@ -7458,6 +7546,8 @@ async function proxyLegacy(req, res, body) {
           .catch(e=>console.error('day data employee readiness invalidate failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'boss_day_closures:%'")
           .catch(e=>console.error('boss day closures employee readiness invalidate failed',e.message));
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'vacation_full:%'")
+          .catch(e=>console.error('vacation readiness day-status invalidate failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'absence_overview:%'")
           .catch(e=>console.error('absence overview employee readiness invalidate failed',e.message));
       }
@@ -7572,11 +7662,15 @@ async function proxyLegacy(req, res, body) {
           .catch(e=>console.error('planner availability absence readiness invalidate failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'absence_overview:%'")
           .catch(e=>console.error('absence overview readiness invalidate failed',e.message));
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'vacation_full:%'")
+          .catch(e=>console.error('vacation readiness absence invalidate failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false && action==='saveVacationEntitlement') {
         mirrorVacationEntitlementWrite(body,parsed).catch(e=>console.error('vacation entitlement shadow mirror failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'month_data:%'")
           .catch(e=>console.error('month data vacation readiness invalidate failed',e.message));
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'vacation_full:%'")
+          .catch(e=>console.error('vacation readiness entitlement invalidate failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['saveMonthlyAdjustment','deleteMonthlyAdjustment'].includes(action)) {
@@ -7595,6 +7689,8 @@ async function proxyLegacy(req, res, body) {
         mirrorHolidayYear(Number(body.year)||0).catch(e=>console.error('holiday status shadow mirror failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'day_data:%' OR shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'month_data:%' OR shadow_name LIKE 'boss_day_closures:%'")
           .catch(e=>console.error('holiday readiness invalidate failed',e.message));
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'vacation_full:%'")
+          .catch(e=>console.error('vacation readiness holiday invalidate failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false && action==='setDayStatus') {
         mirrorSetDayStatus(body,parsed).catch(e=>console.error('day status shadow mirror failed',e.message));
