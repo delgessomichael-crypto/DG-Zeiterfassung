@@ -9013,7 +9013,7 @@ async function tryDirectPostgresWrite(action,body){
     const employee=result.employee,year=result.year;
     await saveShadowVerifyStat('vacation_full:'+year+':'+employee,1,1,0);
     const activeMap=await employeeActiveMapFromSnapshot();
-    await saveShadowVerifyStat('vacation_full:'+year+':all,activeMap.size,activeMap.size,0);
+    await saveShadowVerifyStat('vacation_full:'+year+':all',activeMap.size,activeMap.size,0);
     await saveShadowVerifyStat('vacation_entitlement',1,1,0);
   }
   if(action==='saveObjectInternalNote'){
