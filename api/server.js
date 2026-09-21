@@ -8690,6 +8690,30 @@ function validIsoDateText(v){
   const p=s.split('-').map(Number),d=new Date(Date.UTC(p[0],p[1]-1,p[2],12));
   return d.getUTCFullYear()===p[0]&&d.getUTCMonth()===p[1]-1&&d.getUTCDate()===p[2];
 }
+async function invalidateLegacySnapshotsAfterDirectWrite(action,body){
+  if(!pool)return;
+  await invalidateReadCache(action);
+  const a=String(action||'');
+  const tasks=[];
+  if(/Payroll|Conflict|MonthlyAdjustment|MonthClosure|TimeBank|Absence|Vacation|Entry|Day/i.test(a)){
+    tasks.push(pool.query('TRUNCATE boss_month_views_shadow'));
+    tasks.push(pool.query(
+      "DELETE FROM exact_views_shadow WHERE action IN ('getMonthPayrollAudit','getPayrollCycleState')"
+    ));
+  }
+  if(/Offer/i.test(a)){
+    tasks.push(pool.query(
+      "DELETE FROM exact_views_shadow WHERE action IN ('getOfferReports','getOfferStatistics')"
+    ));
+  }
+  if(/Dashboard|Offer|OwnReminder|Inquiry|ManualOrder|Maintenance|Planner|Entry|Day|Absence|Vacation|Payroll/i.test(a)){
+    tasks.push(pool.query(
+      "DELETE FROM exact_views_shadow WHERE action='getDashboardSummary51'"
+    ));
+  }
+  if(tasks.length)await Promise.all(tasks);
+}
+
 async function tryDirectPostgresWrite(action,body){
   if(!DIRECT_POSTGRES_WRITE_ACTIONS.has(action)||!pool||!GOOGLE_BACKEND_URL||!legacyOutboxCryptoKey())return null;
   if(action==='saveManualOrder'){
@@ -8974,6 +8998,7 @@ async function tryDirectPostgresWrite(action,body){
     const n=Number(q.rows[0]?.n||0);await saveShadowVerifyStat('own_reminders',n,n,0);
   }
   await bumpWriteStat(action,true);
+  await invalidateLegacySnapshotsAfterDirectWrite(action,body);
   console.log('POSTGRES_WRITE action='+action+' legacy_outbox='+outboxId);
   kickLegacyOutbox();
   return {result,outboxId};
