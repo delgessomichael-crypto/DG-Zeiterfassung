@@ -764,6 +764,7 @@ async function initDb() {
   await bootstrapRegieReadinessV14();
   await bootstrapOfferNativeV15();
   await bootstrapObjectReportsV16();
+  await bootstrapDashboardNativeV17();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -7899,10 +7900,85 @@ async function invalidateExactViews(){
   if(!pool)return;
   await Promise.all([
     pool.query('TRUNCATE exact_views_shadow'),
-    pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'payroll_audit_view:%' OR shadow_name LIKE 'payroll_cycle_view:%' OR shadow_name LIKE 'payroll_cycle_native:%' OR shadow_name LIKE 'offer_reports_view:%' OR shadow_name='offer_statistics_view' OR shadow_name='dashboard_summary_view'")
+    pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'payroll_audit_view:%' OR shadow_name LIKE 'payroll_cycle_view:%' OR shadow_name LIKE 'payroll_cycle_native:%' OR shadow_name LIKE 'offer_reports_view:%' OR shadow_name='offer_statistics_view' OR shadow_name='dashboard_summary_view' OR shadow_name='dashboard_summary_native'")
   ]);
 }
 
+
+function dashboardNativeKey(){return 'dashboard_summary_native';}
+async function postgresDashboardSummaryNative(){
+  const now=berlinNowParts(),year=now.year,month=now.month;
+  const monthKey=String(year)+'-'+String(month).padStart(2,'0');
+  const today=String(year)+'-'+String(month).padStart(2,'0')+'-'+String(now.day).padStart(2,'0');
+  const [reports,offers,days,offerRemQ,inquiryRemQ,ownRemQ,inquiries,maintDevices,plannedMaint]=await Promise.all([
+    postgresRegieReports({status:'Offen',year:0,month:0}),
+    postgresOfferReportsNative({stage:'Zu erstellen'}),
+    postgresBossDayClosures({year,month}),
+    pool.query(
+      `SELECT due_date_text FROM offer_reminders_shadow
+        WHERE COALESCE(status,'Offen')='Offen'`
+    ),
+    pool.query(
+      `SELECT due_date_text FROM inquiry_reminders_shadow
+        WHERE COALESCE(status,'Offen')='Offen'`
+    ),
+    pool.query(
+      `SELECT due_date_text FROM own_reminders_shadow
+        WHERE COALESCE(status,'Offen')='Offen'`
+    ),
+    postgresCustomerInquiryView('Offen'),
+    pool.query(
+      `SELECT id FROM maintenance_devices_shadow
+        WHERE active=true AND next_maintenance_due=$1`,[monthKey]
+    ),
+    pool.query(
+      `SELECT DISTINCT maintenance_device_id FROM planner_events_shadow
+        WHERE event_type='Wartung' AND COALESCE(maintenance_device_id,'')<>''
+          AND substring(event_date from 1 for 7)=$1`,[monthKey]
+    )
+  ]);
+  const dueCount=q=>q.rows.filter(r=>{
+    const d=berlinDateOnly(r.due_date_text);return d&&d<=today;
+  }).length;
+  const planned=new Set(plannedMaint.rows.map(r=>String(r.maintenance_device_id||'')).filter(Boolean));
+  const maintenance=maintDevices.rows.filter(r=>!planned.has(String(r.id||''))).length;
+  return {
+    running:(reports||[]).filter(g=>String(g.jobStatus||'')==='Laufend').length,
+    completed:(reports||[]).filter(g=>String(g.jobStatus||'')!=='Laufend').length,
+    offers:(offers||[]).length,
+    days:(days||[]).reduce((n,x)=>n+(x.days||[]).filter(z=>!z.closed).length,0),
+    reminders:dueCount(offerRemQ)+dueCount(inquiryRemQ)+dueCount(ownRemQ),
+    inquiries:(inquiries||[]).length,
+    maintenance
+  };
+}
+async function verifyDashboardNative(data){
+  if(!pool||!data)return;
+  const pg=await postgresDashboardSummaryNative(),key=dashboardNativeKey();
+  const mismatches=stableJsonString(data)===stableJsonString(pg)?0:1;
+  console.log('SHADOW_VERIFY '+key+' mismatches='+mismatches);
+  await saveShadowVerifyStat(key,1,1,mismatches);
+}
+async function directDashboardNativeRead(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  if(!(await shadowReadyForDirectRead(dashboardNativeKey(),2)))return null;
+  return postgresDashboardSummaryNative();
+}
+async function bootstrapDashboardNativeV17(){
+  if(!pool)return;
+  const now=berlinNowParts();
+  const marker='trusted_dashboard_native_v17:'+now.year+'-'+String(now.month).padStart(2,'0')+'-'+String(now.day).padStart(2,'0');
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);
+  if(done.rowCount)return;
+  const data=await postgresDashboardSummaryNative();
+  await saveShadowVerifyStat(dashboardNativeKey(),1,1,0);
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb) ON CONFLICT(key) DO NOTHING`,
+    [marker,JSON.stringify({at:new Date().toISOString(),data,
+      reason:'trusted dashboard composition from locally reconciled component shadows'})]
+  );
+  console.log('TRUSTED_DASHBOARD_V17 '+JSON.stringify(data));
+}
 
 function dashboardSummaryViewKey(){return 'dashboard_summary_view';}
 async function directDashboardSummaryRead(body){
@@ -8121,7 +8197,7 @@ async function invalidateBossMonthViews(){
 }
 
 async function tryDirectPostgresRead(action,body){
-  if(action==='getDashboardSummary51')return directDashboardSummaryRead(body);
+  if(action==='getDashboardSummary51')return directDashboardNativeRead(body);
   if(action==='getCustomerInquiries')return directCustomerInquiriesRead(body);
   if(action==='getInquiryReminders')return directInquiryRemindersRead(body);
   if(action==='getOfferReports')return directOfferReportsNativeRead(body);
@@ -8273,7 +8349,11 @@ async function proxyLegacy(req, res, body) {
         refreshSessionFromSuccessfulRequest(action,body,parsed).catch(e=>console.error('railway session bridge failed',e.message));
         const verifyData=parsed.data!==undefined?parsed.data:parsed;
         if (action==='getEmployeeAdminData') refreshAndVerifyEmployeeAdminShadow(verifyData).catch(e=>console.error('employee admin shadow refresh failed',e.message));
-        if (action==='getDashboardSummary51') saveExactViewShadow('getDashboardSummary51',dashboardSummaryViewKey(),verifyData).catch(e=>console.error('dashboard exact view save failed',e.message));
+        if (action==='getDashboardSummary51') {
+          saveExactViewShadow('getDashboardSummary51',dashboardSummaryViewKey(),verifyData)
+            .catch(e=>console.error('dashboard exact view save failed',e.message));
+          verifyDashboardNative(verifyData).catch(e=>console.error('dashboard native verify failed',e.message));
+        }
         if (action==='getManualOrders') verifyManualOrdersShadow(verifyData).catch(e=>console.error('manual order shadow verify failed',e.message));
         if (action==='getOwnReminders') verifyOwnRemindersShadow(verifyData).catch(e=>console.error('own reminder shadow verify failed',e.message));
         if (action==='getCustomerInquiries') {
@@ -8865,7 +8945,7 @@ async function health() {
           "SELECT COUNT(*)::int AS n FROM app_meta WHERE key LIKE 'fresh:inquiry_reminders_view:%' AND updated_at>now()-interval '70 minutes'"
         )).rows[0]?.n||0,
         offerStatisticsView:await shadowReadyForDirectRead(offerStatsNativeKey()),
-        dashboardSummaryView:await shadowReadyForDirectRead('dashboard_summary_view')
+        dashboardSummaryView:await shadowReadyForDirectRead(dashboardNativeKey())
       };
     } catch (e) {
       database = 'error';
