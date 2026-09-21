@@ -3006,7 +3006,7 @@ function getRegieMergeMap_(ss) {
   return map;
 }
 
-function mergeRegieObjects(employee, employeePin, objectIds) {
+function mergeRegieObjects(employee, employeePin, objectIds, requestedMergeId) {
   requireChef_(employee, employeePin);
   const input = Array.isArray(objectIds) ? objectIds : String(objectIds || '').split(',');
   let ids = Array.from(new Set(input.map(clean_).filter(Boolean)));
@@ -3042,7 +3042,7 @@ function mergeRegieObjects(employee, employeePin, objectIds) {
     ids = Array.from(new Set(ids.filter(Boolean)));
   }
 
-  const mergeId = 'RM-' + Utilities.getUuid();
+  const mergeId = clean_(requestedMergeId) || ('RM-' + Utilities.getUuid());
   const now = new Date();
   const by = clean_(employee);
   const rowByObject = {};
@@ -5194,7 +5194,7 @@ function doPost(e) {
       return jsonResponse_({ok:true,data:createRegieReportZip(clean_(data.employee),clean_(data.employeePin),data.objectIds || [],data.fileIds || [],clean_(data.customer),data.entryIds)});
     }
     if (action === 'mergeRegieObjects') {
-      return jsonResponse_({ok:true,data:mergeRegieObjects(clean_(data.employee),clean_(data.employeePin),data.objectIds || [])});
+      return jsonResponse_({ok:true,data:mergeRegieObjects(clean_(data.employee),clean_(data.employeePin),data.objectIds || [],clean_(data.mergeId))});
     }
     if (action === 'getObjectInternalNote') {
       return jsonResponse_({ok:true,data:getObjectInternalNote(clean_(data.employee),clean_(data.employeePin),clean_(data.objectId))});
