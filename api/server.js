@@ -8391,7 +8391,36 @@ async function invalidateBossMonthViews(){
   ]);
 }
 
+async function directSystemHealthCheck(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const h=await health();
+  const checks=[],errors=[],warnings=[];
+  const push=(name,ok,level,detail)=>{
+    checks.push({name,ok,level,detail});
+    if(level==='error')errors.push(name+': '+detail);
+    if(level==='warn')warnings.push(name+': '+detail);
+  };
+  push('Railway / PostgreSQL',h.database==='ok',h.database==='ok'?'ok':'error',
+    h.database==='ok'?'Datenbank erreichbar':'Datenbankstatus '+h.database);
+  const mig=await migrationStatusPublic();
+  const sheets=Array.isArray(mig.sheets)?mig.sheets:[],src=sheets.reduce((n,x)=>n+Number(x.source_rows||0),0),
+        dst=sheets.reduce((n,x)=>n+Number(x.imported_rows||0),0),
+        mismatch=sheets.filter(x=>Number(x.source_rows||0)!==Number(x.imported_rows||0)).length;
+  push('Migration',mismatch===0,mismatch===0?'ok':'error',
+    sheets.length+' Tabellen · '+src+'/'+dst+' Datensätze · '+mismatch+' Abweichungen');
+  const ready=h.shadowReadiness||[],bad=ready.filter(x=>x.status!=='ready');
+  push('PostgreSQL-Lesewege',bad.length===0,bad.length===0?'ok':'warn',
+    ready.length+' geprüft · '+bad.length+' nicht freigegeben/abweichend');
+  const gp=googlePingCache,googleOk=Boolean(gp&&gp.raw);
+  push('Google Backend',googleOk,googleOk?'ok':'warn',
+    googleOk?'letzter erfolgreicher Ping '+shadowGermanDateTime(gp.checkedAt||''):'noch kein erfolgreicher Ping gespeichert');
+  push('Kalender-Synchronisation',true,'ok','Google-Kalender bleibt absichtlich aktiv.');
+  push('Drive-Dateien',true,'ok','Anhänge/Exporte bleiben absichtlich über Google Drive.');
+  return {ok:errors.length===0,version:'DG App 10 Railway',checks,warnings,errors,checkedAt:shadowGermanDateTime(new Date().toISOString())};
+}
+
 async function tryDirectPostgresRead(action,body){
+  if(action==='systemHealthCheck')return directSystemHealthCheck(body);
   if(action==='getDashboardSummary51')return directDashboardNativeRead(body);
   if(action==='getCustomerInquiries')return directCustomerInquiriesRead(body);
   if(action==='getInquiryReminders')return directInquiryRemindersRead(body);
@@ -8500,7 +8529,7 @@ async function proxyLegacy(req, res, body) {
       console.error('Postgres employee read failed; falling back to Google:', e.message);
     }
   }
-  if (['getDashboardSummary51','getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getRegieAttachments','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts'].includes(action)) {
+  if (['systemHealthCheck','getDashboardSummary51','getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getRegieAttachments','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts'].includes(action)) {
     try {
       const direct=await tryDirectPostgresRead(action,body);
       if (direct!==null) {
