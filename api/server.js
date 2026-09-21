@@ -8770,14 +8770,6 @@ async function tryDirectPostgresWrite(action,body){
     if(!oq.rowCount)return null;
     if(String(e.sourceCalendarEventId||'').trim()&&!Boolean(e.maintenance))return null;
   }
-  if(action==='saveMaintenanceCustomer'){
-    const item=body&&body.item||{},objects=Array.isArray(item.objects)?item.objects:[];
-    if(!String(item.id||'').trim()||!objects.length)return null;
-    if(objects.some(o=>!String(o&&o.id||'').trim()||!Array.isArray(o.devices)||!o.devices.length||
-      o.devices.some(d=>!String(d&&d.id||'').trim())))return null;
-    const q=await pool.query('SELECT 1 FROM maintenance_customers_shadow WHERE id=$1 AND active=true LIMIT 1',[String(item.id)]);
-    if(!q.rowCount)return null;
-  }
   if(action==='savePlannerEvent'){
     const item=body&&body.item||{};
     if(!String(item.id||'').trim())return null;
@@ -9602,64 +9594,115 @@ async function tryDirectPostgresWrite(action,body){
       );
       result={ok:true,_vacationEmployee:employee,_vacationYear:year};
     }else if(action==='saveMaintenanceCustomer'){
-      const item=body.item||{},id=String(item.id||'').trim(),objects=Array.isArray(item.objects)?item.objects:[];
-      const name=String(item.name||'').trim(),email=String(item.email||'').trim(),phone=String(item.phone||'').trim();
-      const billingStreet=String(item.billingStreet||'').trim(),billingZip=String(item.billingZip||'').trim(),billingCity=String(item.billingCity||'').trim();
-      if(!id)throw new Error('Wartungskunde wurde nicht gefunden.');
+      const src=body.item||{},objects=Array.isArray(src.objects)?src.objects:[];
+      const name=String(src.name||'').trim(),email=String(src.email||'').trim(),phone=String(src.phone||'').trim();
+      const billingStreet=String(src.billingStreet||'').trim(),billingZip=String(src.billingZip||'').trim(),billingCity=String(src.billingCity||'').trim();
       if(!name||!billingStreet||!billingZip||!billingCity)throw new Error('Bitte Name und vollständige Rechnungsadresse eintragen.');
       if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new Error('E-Mail-Adresse ist ungültig.');
       if(!objects.length)throw new Error('Mindestens ein Ausführungsobjekt ist erforderlich.');
-      const cq=await client.query('SELECT 1 FROM maintenance_customers_shadow WHERE id=$1 AND active=true FOR UPDATE',[id]);
-      if(!cq.rowCount)throw new Error('Wartungskunde wurde nicht gefunden.');
-      await client.query(
-        `UPDATE maintenance_customers_shadow SET name=$2,billing_street=$3,billing_zip=$4,billing_city=$5,
-           email=$6,phone=$7,updated_at_text=$8,updated_by=$9,shadow_updated_at=now() WHERE id=$1`,
-        [id,name,billingStreet,billingZip,billingCity,email,phone,nowIso,by]
+      const stableId=(prefix,text)=>prefix+crypto.createHash('sha256').update(String(text||'')).digest('hex').slice(0,20);
+      let id=String(src.id||'').trim();
+      const requestedExisting=Boolean(id);
+      if(!id)id=stableId('WKC-PG-', [name,billingStreet,billingZip,billingCity,email,phone].join('|').toLowerCase());
+      const cq=await client.query('SELECT 1 FROM maintenance_customers_shadow WHERE id=$1 FOR UPDATE',[id]);
+      if(requestedExisting&&!cq.rowCount)throw new Error('Wartungskunde wurde nicht gefunden.');
+      if(cq.rowCount){
+        await client.query(
+          `UPDATE maintenance_customers_shadow SET name=$2,billing_street=$3,billing_zip=$4,billing_city=$5,
+             email=$6,phone=$7,active=true,updated_at_text=$8,updated_by=$9,shadow_updated_at=now() WHERE id=$1`,
+          [id,name,billingStreet,billingZip,billingCity,email,phone,nowIso,by]
+        );
+        await client.query('UPDATE maintenance_objects_shadow SET active=false,updated_at_text=$2,updated_by=$3,shadow_updated_at=now() WHERE customer_id=$1',[id,nowIso,by]);
+        await client.query('UPDATE maintenance_devices_shadow SET active=false,updated_at_text=$2,updated_by=$3,shadow_updated_at=now() WHERE customer_id=$1',[id,nowIso,by]);
+      }else{
+        await client.query(
+          `INSERT INTO maintenance_customers_shadow(
+             id,name,billing_street,billing_zip,billing_city,email,phone,active,created_at_text,updated_at_text,updated_by,shadow_updated_at
+           ) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$8,$9,now())`,
+          [id,name,billingStreet,billingZip,billingCity,email,phone,nowIso,by]
+        );
+      }
+
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('maintenance_internal_device_id'))");
+      const mx=await client.query(
+        `SELECT COALESCE(MAX(CASE WHEN internal_device_id ~ '^[0-9]+$' THEN internal_device_id::int END),999)::int AS n
+           FROM maintenance_devices_shadow`
       );
-      await client.query('UPDATE maintenance_objects_shadow SET active=false,updated_at_text=$2,updated_by=$3,shadow_updated_at=now() WHERE customer_id=$1',[id,nowIso,by]);
-      await client.query('UPDATE maintenance_devices_shadow SET active=false,updated_at_text=$2,updated_by=$3,shadow_updated_at=now() WHERE customer_id=$1',[id,nowIso,by]);
+      const meta=await client.query(
+        `SELECT COALESCE(NULLIF(value->>'nextInternalDeviceId','')::int,1000)::int AS n
+           FROM app_meta WHERE key='maintenance_next_device_id' LIMIT 1`
+      );
+      let nextInternal=Math.max(Number(mx.rows[0]?.n||999)+1,Number(meta.rows[0]?.n||1000),1000);
+      const outItem={...src,id,name,email,phone,billingStreet,billingZip,billingCity,objects:[]};
+
       for(let oi=0;oi<objects.length;oi++){
-        const o=objects[oi]||{},oid=String(o.id||'').trim();
-        if(!oid)throw new Error('Objekt '+(oi+1)+': ID fehlt.');
+        const o=objects[oi]||{},hadOid=Boolean(String(o.id||'').trim());
+        let oid=String(o.id||'').trim();
         if(!String(o.name||'').trim()||!String(o.street||'').trim()||!String(o.zip||'').trim()||!String(o.city||'').trim())
           throw new Error('Objekt '+(oi+1)+': Bezeichnung und vollständige Adresse fehlen.');
-        const oq=await client.query('SELECT 1 FROM maintenance_objects_shadow WHERE id=$1 AND customer_id=$2 LIMIT 1',[oid,id]);
-        if(!oq.rowCount)throw new Error('Objekt '+(oi+1)+' wurde nicht gefunden.');
+        if(!oid)oid=stableId('WKO-PG-', [id,oi,o.name,o.street,o.zip,o.city].join('|').toLowerCase());
+        const oq=await client.query('SELECT customer_id FROM maintenance_objects_shadow WHERE id=$1 FOR UPDATE',[oid]);
+        if(hadOid&&(!oq.rowCount||String(oq.rows[0].customer_id||'')!==id))
+          throw new Error('Objekt '+(oi+1)+' wurde nicht gefunden.');
         await client.query(
-          `UPDATE maintenance_objects_shadow SET name=$3,street=$4,zip=$5,city=$6,notes=$7,active=true,
-             updated_at_text=$8,updated_by=$9,shadow_updated_at=now() WHERE id=$1 AND customer_id=$2`,
+          `INSERT INTO maintenance_objects_shadow(
+             id,customer_id,name,street,zip,city,notes,active,created_at_text,updated_at_text,updated_by,shadow_updated_at
+           ) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$8,$9,now())
+           ON CONFLICT(id) DO UPDATE SET customer_id=EXCLUDED.customer_id,name=EXCLUDED.name,street=EXCLUDED.street,
+             zip=EXCLUDED.zip,city=EXCLUDED.city,notes=EXCLUDED.notes,active=true,
+             updated_at_text=EXCLUDED.updated_at_text,updated_by=EXCLUDED.updated_by,shadow_updated_at=now()`,
           [oid,id,String(o.name||''),String(o.street||''),String(o.zip||''),String(o.city||''),String(o.notes||''),nowIso,by]
         );
         const devices=Array.isArray(o.devices)?o.devices:[];
         if(!devices.length)throw new Error('Objekt '+(oi+1)+': Mindestens ein Wartungsgerät anlegen.');
+        const outObject={...o,id:oid,devices:[]};
         for(let di=0;di<devices.length;di++){
-          const d=devices[di]||{},did=String(d.id||'').trim();
-          if(!did)throw new Error('Objekt '+(oi+1)+', Gerät '+(di+1)+': ID fehlt.');
+          const d=devices[di]||{},hadDid=Boolean(String(d.id||'').trim());
+          let did=String(d.id||'').trim();
           if(!String(d.deviceType||'').trim())throw new Error('Objekt '+(oi+1)+', Gerät '+(di+1)+': Geräteart fehlt.');
           if(String(d.deviceType||'')==='Sonstiges'&&!String(d.otherDescription||'').trim())
             throw new Error('Objekt '+(oi+1)+', Gerät '+(di+1)+': Bei „Sonstiges“ ist die Beschreibung Pflicht.');
           if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(d.nextMaintenanceDue||'')))
             throw new Error('Objekt '+(oi+1)+', Gerät '+(di+1)+': Nächste Wartung mit Monat und Jahr eintragen.');
+          if(!did)did=stableId('WKG-PG-', [oid,di,d.deviceType,d.manufacturer,d.model,d.serialNumber].join('|').toLowerCase());
           const dq=await client.query(
-            'SELECT internal_device_id FROM maintenance_devices_shadow WHERE id=$1 AND customer_id=$2 LIMIT 1',[did,id]
+            'SELECT customer_id,internal_device_id FROM maintenance_devices_shadow WHERE id=$1 FOR UPDATE',[did]
           );
-          if(!dq.rowCount)throw new Error('Objekt '+(oi+1)+', Gerät '+(di+1)+' wurde nicht gefunden.');
-          const internalId=String(d.internalDeviceId||dq.rows[0].internal_device_id||'');
+          if(hadDid&&(!dq.rowCount||String(dq.rows[0].customer_id||'')!==id))
+            throw new Error('Objekt '+(oi+1)+', Gerät '+(di+1)+' wurde nicht gefunden.');
+          let internalId=String(d.internalDeviceId||dq.rows[0]?.internal_device_id||'').trim();
+          if(!/^\d+$/.test(internalId)){internalId=String(nextInternal++);}
+          else nextInternal=Math.max(nextInternal,Number(internalId)+1);
           await client.query(
-            `UPDATE maintenance_devices_shadow SET object_id=$3,device_type=$4,other_description=$5,manufacturer=$6,
-               model=$7,serial_number=$8,year_text=$9,tenant_name=$10,tenant_phone=$11,tenant_email=$12,
-               spare_part_manufacturer=$13,spare_part_serial_number=$14,internal_notes=$15,next_maintenance_due=$16,
-               active=true,updated_at_text=$17,updated_by=$18,internal_device_id=$19,shadow_updated_at=now()
-             WHERE id=$1 AND customer_id=$2`,
-            [did,id,oid,String(d.deviceType||''),String(d.otherDescription||''),String(d.manufacturer||''),
+            `INSERT INTO maintenance_devices_shadow(
+               id,object_id,customer_id,device_type,other_description,manufacturer,model,serial_number,
+               year_text,tenant_name,tenant_phone,tenant_email,spare_part_manufacturer,spare_part_serial_number,
+               internal_notes,next_maintenance_due,active,created_at_text,updated_at_text,updated_by,internal_device_id,shadow_updated_at
+             ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true,$17,$17,$18,$19,now())
+             ON CONFLICT(id) DO UPDATE SET object_id=EXCLUDED.object_id,customer_id=EXCLUDED.customer_id,
+               device_type=EXCLUDED.device_type,other_description=EXCLUDED.other_description,manufacturer=EXCLUDED.manufacturer,
+               model=EXCLUDED.model,serial_number=EXCLUDED.serial_number,year_text=EXCLUDED.year_text,
+               tenant_name=EXCLUDED.tenant_name,tenant_phone=EXCLUDED.tenant_phone,tenant_email=EXCLUDED.tenant_email,
+               spare_part_manufacturer=EXCLUDED.spare_part_manufacturer,spare_part_serial_number=EXCLUDED.spare_part_serial_number,
+               internal_notes=EXCLUDED.internal_notes,next_maintenance_due=EXCLUDED.next_maintenance_due,active=true,
+               updated_at_text=EXCLUDED.updated_at_text,updated_by=EXCLUDED.updated_by,
+               internal_device_id=EXCLUDED.internal_device_id,shadow_updated_at=now()`,
+            [did,oid,id,String(d.deviceType||''),String(d.otherDescription||''),String(d.manufacturer||''),
              String(d.model||''),String(d.serialNumber||''),String(d.year||''),String(d.tenantName||''),
              String(d.tenantPhone||''),String(d.tenantEmail||''),String(d.sparePartManufacturer||''),
              String(d.sparePartSerialNumber||''),String(d.internalNotes||''),String(d.nextMaintenanceDue||''),
              nowIso,by,internalId]
           );
+          outObject.devices.push({...d,id:did,internalDeviceId:internalId});
         }
+        outItem.objects.push(outObject);
       }
-      legacyPayload=Object.assign({},body,{item:Object.assign({},item,{id})});
+      const metaValue=JSON.stringify({nextInternalDeviceId:String(nextInternal),updatedBy:by,updatedAt:nowIso,source:'postgres'});
+      await client.query(
+        `INSERT INTO app_meta(key,value) VALUES('maintenance_next_device_id',$1::jsonb)
+         ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,[metaValue]
+      );
+      legacyPayload=Object.assign({},body,{item:outItem});
       result=await postgresMaintenanceCustomerFull(id);
     }else if(action==='addMaintenanceRepair'){
       const deviceId=String(body.deviceId||'').trim(),date=String(body.date||'').trim(),description=String(body.description||'').trim();
