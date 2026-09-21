@@ -8643,7 +8643,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive',
-  'setRegieObjectJobStatus','markRegieObjectCompleted','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
+  'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
 function berlinTodayIso(){
@@ -8660,7 +8660,7 @@ async function invalidateLegacySnapshotsAfterDirectWrite(action,body){
   await invalidateReadCache(action);
   const a=String(action||'');
   const tasks=[];
-  if(/Payroll|Conflict|MonthlyAdjustment|MonthClosure|TimeBank|Absence|Vacation|Assignment|Entry|Day/i.test(a)){
+  if(/Payroll|Conflict|MonthlyAdjustment|MonthClosure|TimeBank|Absence|Vacation|Assignment|Entry|Day|Regie/i.test(a)){
     tasks.push(pool.query('TRUNCATE boss_month_views_shadow'));
     tasks.push(pool.query(
       "DELETE FROM exact_views_shadow WHERE action IN ('getMonthPayrollAudit','getPayrollCycleState')"
@@ -8761,6 +8761,19 @@ async function tryDirectPostgresWrite(action,body){
         );
         result={ok:true,id};
       }
+    }else if(action==='markRegieReportBilled'){
+      const entryId=String(body.entryId||'').trim();
+      if(!entryId)throw new Error('Auftrags-ID fehlt.');
+      const q=await client.query(
+        'SELECT billing_status FROM time_entries_shadow WHERE id=$1 FOR UPDATE',[entryId]
+      );
+      if(!q.rowCount)throw new Error('Regiebericht wurde nicht gefunden.');
+      await client.query(
+        `UPDATE time_entries_shadow
+            SET billing_status='Abgerechnet',billed_at_text=$2,billed_by=$3,shadow_updated_at=now()
+          WHERE id=$1`,[entryId,nowIso,by]
+      );
+      result={ok:true,id:entryId,billedBy:by,billedAt:shadowGermanDateTime(nowIso)};
     }else if(['setRegieObjectJobStatus','markRegieObjectCompleted'].includes(action)){
       const objectId=String(body.objectId||'').trim();
       const jobStatus=action==='markRegieObjectCompleted'?'Abgeschlossen':String(body.jobStatus||'').trim();
