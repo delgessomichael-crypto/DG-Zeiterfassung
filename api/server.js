@@ -8643,7 +8643,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive',
-  'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','setDayStatus','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
+  'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','setDayStatus','manualCloseBossDay','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
 function berlinTodayIso(){
@@ -8774,6 +8774,42 @@ async function tryDirectPostgresWrite(action,body){
           WHERE id=$1`,[entryId,nowIso,by]
       );
       result={ok:true,id:entryId,billedBy:by,billedAt:shadowGermanDateTime(nowIso)};
+    }else if(action==='manualCloseBossDay'){
+      const target=String(body.targetEmployee||'').trim(),date=String(body.date||'').trim();
+      if(!target)throw new Error('Mitarbeiter wurde nicht gefunden.');
+      if(!validIsoDateText(date))throw new Error('Ungültiges Datum.');
+      const emp=await client.query('SELECT 1 FROM employee_admin_shadow WHERE employee_name=$1 LIMIT 1',[target]);
+      if(!emp.rowCount)throw new Error('Mitarbeiter wurde nicht gefunden.');
+      const existing=await client.query(
+        'SELECT 1 FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 FOR UPDATE',[target,date]
+      );
+      if(existing.rowCount){
+        result={ok:true,alreadyClosed:true,employee:target,date};
+      }else{
+        const own=await client.query(
+          'SELECT id,hours FROM time_entries_shadow WHERE employee_name=$1 AND entry_date=$2 FOR UPDATE',[target,date]
+        );
+        const assigned=await client.query(
+          `SELECT a.hours FROM assignments_shadow a
+             JOIN time_entries_shadow t ON t.id=a.source_entry_id
+            WHERE a.employee_name=$1 AND COALESCE(a.status,'Zugeordnet')<>'Ersetzt' AND t.entry_date=$2`,
+          [target,date]
+        );
+        const gross=Math.round((own.rows.reduce((s,r)=>s+Number(r.hours||0),0)+assigned.rows.reduce((s,r)=>s+Number(r.hours||0),0))*100)/100;
+        if(!(gross>0))throw new Error('Für diesen Mitarbeiter sind an diesem Tag keine Arbeitszeiten vorhanden.');
+        const pause=gross>=6?1:0,total=Math.round(Math.max(0,gross-pause)*100)/100;
+        await client.query(
+          `INSERT INTO day_closures_shadow(
+             employee_name,closure_date,closed_at_text,gross_total,legacy_col5,legacy_col6,pause_minutes,
+             net_total,updated_at_text,update_reason,shadow_updated_at
+           ) VALUES($1,$2,$3,$4,$5,'',$6,$7,'','',now())`,
+          [target,date,nowIso,gross,'Büro: manueller Abschluss durch '+by,Math.round(pause*60),total]
+        );
+        await client.query(
+          'UPDATE time_entries_shadow SET closed=true,shadow_updated_at=now() WHERE employee_name=$1 AND entry_date=$2',[target,date]
+        );
+        result={ok:true,alreadyClosed:false,employee:target,date,total,closedBy:by,closedAt:shadowGermanDateTime(nowIso)};
+      }
     }else if(action==='setDayStatus'){
       const target=String(body.employee||'').trim(),date=String(body.date||'').trim(),status=String(body.status||'').trim();
       const allowed=['Arbeiten','Krank','Urlaub','Feiertag'];
@@ -9279,6 +9315,15 @@ async function tryDirectPostgresWrite(action,body){
     const q=await pool.query('SELECT COUNT(*)::int AS n FROM manual_orders_shadow');
     const n=Number(q.rows[0]?.n||0);
     await saveShadowVerifyStat('manual_orders',n,n,0);
+  }
+  if(action==='manualCloseBossDay'){
+    const employee=String(body.targetEmployee||''),date=String(body.date||'');
+    const p=date.split('-').map(Number),year=p[0]||0,month=p[1]||0;
+    if(employee&&year&&month){
+      const dayKey=dayDataVerifyKey({date},employee);if(dayKey)await saveShadowVerifyStat(dayKey,1,1,0);
+      const monthKey=monthDataVerifyKey({employee,year,month});if(monthKey)await saveShadowVerifyStat(monthKey,1,1,0);
+      const bossKey=bossDayClosuresVerifyKey({year,month});if(bossKey)await saveShadowVerifyStat(bossKey,1,1,0);
+    }
   }
   if(action==='setDayStatus'){
     const employee=String(body.employee||''),date=String(body.date||'');
