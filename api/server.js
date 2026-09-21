@@ -8642,7 +8642,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive',
+  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','deleteMaintenanceDevice','deleteMaintenanceCustomer',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','setDayStatus','manualCloseBossDay','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
@@ -9132,6 +9132,36 @@ async function tryDirectPostgresWrite(action,body){
         );
         result={ok:true};
       }
+    }else if(action==='deleteMaintenanceDevice'){
+      const id=String(body.id||'').trim();if(!id)throw new Error('Wartungsgerät wurde nicht gefunden.');
+      const q=await client.query(
+        'SELECT customer_id,object_id,active FROM maintenance_devices_shadow WHERE id=$1 FOR UPDATE',[id]
+      );
+      if(!q.rowCount||q.rows[0].active===false)throw new Error('Wartungsgerät wurde nicht gefunden.');
+      await client.query(
+        'UPDATE maintenance_devices_shadow SET active=false,updated_at_text=$2,updated_by=$3,shadow_updated_at=now() WHERE id=$1',
+        [id,nowIso,by]
+      );
+      result={ok:true,id,customerId:String(q.rows[0].customer_id||''),objectId:String(q.rows[0].object_id||'')};
+    }else if(action==='deleteMaintenanceCustomer'){
+      const id=String(body.id||'').trim();if(!id)throw new Error('Wartungskunde wurde nicht gefunden.');
+      const q=await client.query(
+        'SELECT active FROM maintenance_customers_shadow WHERE id=$1 FOR UPDATE',[id]
+      );
+      if(!q.rowCount||q.rows[0].active===false)throw new Error('Wartungskunde wurde nicht gefunden.');
+      await client.query(
+        'UPDATE maintenance_customers_shadow SET active=false,updated_at_text=$2,updated_by=$3,shadow_updated_at=now() WHERE id=$1',
+        [id,nowIso,by]
+      );
+      await client.query(
+        'UPDATE maintenance_objects_shadow SET active=false,updated_at_text=$2,updated_by=$3,shadow_updated_at=now() WHERE customer_id=$1 AND active=true',
+        [id,nowIso,by]
+      );
+      await client.query(
+        'UPDATE maintenance_devices_shadow SET active=false,updated_at_text=$2,updated_by=$3,shadow_updated_at=now() WHERE customer_id=$1 AND active=true',
+        [id,nowIso,by]
+      );
+      result={ok:true,id};
     }else if(action==='saveManualOrder'){
       const item=body.item||{},id=String(item.id||'').trim();
       const customer=String(item.customer||'').trim();
@@ -9310,6 +9340,12 @@ async function tryDirectPostgresWrite(action,body){
       const rows=await postgresCustomerInquiryView(status),key=customerInquiryViewKey(status);
       await saveShadowVerifyStat(key,rows.length,rows.length,0);
     }
+  }
+  if(['deleteMaintenanceDevice','deleteMaintenanceCustomer'].includes(action)){
+    await Promise.all([
+      pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'maintenance_%'"),
+      pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getMaintenanceOverview','getMaintenanceContracts','getMaintenanceArchive','getMaintenanceCustomer','searchMaintenanceCustomers','findMaintenanceDeviceByInternalId','getDashboardSummary51')")
+    ]);
   }
   if(['saveManualOrder','saveManualOrderNote','setManualOrderStatus','deleteManualOrder'].includes(action)){
     const q=await pool.query('SELECT COUNT(*)::int AS n FROM manual_orders_shadow');
