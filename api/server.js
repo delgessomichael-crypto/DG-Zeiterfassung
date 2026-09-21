@@ -8643,7 +8643,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
+  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','deletePlannerEvent','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','updateEmployeeEntry','deleteEntry','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
@@ -9532,6 +9532,12 @@ async function tryDirectPostgresWrite(action,body){
       }
       const bal=await client.query('SELECT COALESCE(SUM(hours),0)::numeric AS h FROM time_bank_shadow WHERE employee_name=$1',[target]);
       result={ok:true,timeBankBalance:Math.round(Math.max(0,Number(bal.rows[0]?.h||0))*100)/100};
+    }else if(action==='deletePlannerEvent'){
+      const id=String(body.id||'').trim();if(!id)throw new Error('Termin nicht gefunden.');
+      const q=await client.query('SELECT id FROM planner_events_shadow WHERE id=$1 FOR UPDATE',[id]);
+      if(!q.rowCount)throw new Error('Termin nicht gefunden.');
+      await client.query('DELETE FROM planner_events_shadow WHERE id=$1',[id]);
+      result={ok:true,id};
     }else if(action==='deleteMaintenanceAttachment'){
       const id=String(body.id||'').trim();if(!id)throw new Error('Wartungsunterlage nicht gefunden.');
       const q=await client.query(
@@ -9772,6 +9778,12 @@ async function tryDirectPostgresWrite(action,body){
       }
     }
     await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'planner_availability:%' OR shadow_name LIKE 'day_data:%' OR shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'month_data:%' OR shadow_name LIKE 'boss_day_closures:%'");
+  }
+  if(action==='deletePlannerEvent'){
+    await Promise.all([
+      pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'planner_events:%' OR shadow_name LIKE 'planner_availability:%' OR shadow_name='maintenance_contracts'"),
+      pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getPlannerEvents','getMaintenanceContracts','getMaintenanceOverview','getDashboardSummary51')")
+    ]);
   }
   if(['deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment'].includes(action)){
     await Promise.all([
