@@ -8639,7 +8639,7 @@ function directMinimumWageRead(body){
 const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'createOwnReminder','saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder',
   'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus',
-  'saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed','setMonthClosureStatus',
+  'mergeRegieObjects','saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed','setMonthClosureStatus',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
@@ -10061,6 +10061,34 @@ async function tryDirectPostgresWrite(action,body){
         await client.query('DELETE FROM manual_orders_shadow WHERE id=$1',[id]);
         result={ok:true};
       }
+    }else if(action==='mergeRegieObjects'){
+      const input=Array.isArray(body.objectIds)?body.objectIds:String(body.objectIds||'').split(',');
+      let ids=[...new Set(input.map(x=>String(x||'').trim()).filter(Boolean))];
+      if(ids.length<2)throw new Error('Bitte mindestens zwei offene Regieberichte auswählen.');
+      const open=await client.query(
+        `SELECT DISTINCT object_id FROM time_entries_shadow
+          WHERE object_id=ANY($1::text[]) AND COALESCE(billing_status,'Offen')='Offen'`,[ids]
+      );
+      const openSet=new Set(open.rows.map(r=>String(r.object_id||'')));ids=ids.filter(id=>openSet.has(id));
+      if(ids.length<2)throw new Error('Mindestens zwei der ausgewählten Objekte müssen offene Regieberichte enthalten.');
+      const mq=await client.query('SELECT object_id,merge_id FROM regie_merges_shadow FOR UPDATE');
+      const related=new Set(mq.rows.filter(r=>ids.includes(String(r.object_id||''))&&String(r.merge_id||'')).map(r=>String(r.merge_id)));
+      if(related.size){
+        for(const r of mq.rows)if(related.has(String(r.merge_id||'')))ids.push(String(r.object_id||''));
+        ids=[...new Set(ids.filter(Boolean))];
+      }
+      const mergeId=String(body.mergeId||'').trim()||('RM-'+crypto.randomUUID());
+      for(const objectId of ids){
+        await client.query(
+          `INSERT INTO regie_merges_shadow(object_id,merge_id,merged_at_text,merged_by,shadow_updated_at)
+           VALUES($1,$2,$3,$4,now())
+           ON CONFLICT(object_id) DO UPDATE SET merge_id=EXCLUDED.merge_id,merged_at_text=EXCLUDED.merged_at_text,
+             merged_by=EXCLUDED.merged_by,shadow_updated_at=now()`,
+          [objectId,mergeId,nowIso,by]
+        );
+      }
+      legacyPayload=Object.assign({},body,{objectIds:ids,mergeId});
+      result={ok:true,mergeId,objectIds:ids,count:ids.length,mergedBy:by,mergedAt:shadowGermanDateTime(nowIso)};
     }else if(action==='saveObjectInternalNote'){
       const objectId=String(body.objectId||'').trim();if(!objectId)throw new Error('Objekt-ID fehlt.');
       const note=String(body.note==null?'':body.note).trim();
@@ -10281,6 +10309,10 @@ async function tryDirectPostgresWrite(action,body){
       const monthKey=monthDataVerifyKey({employee,year,month});if(monthKey)await saveShadowVerifyStat(monthKey,1,1,0);
       const bossKey=bossDayClosuresVerifyKey({year,month});if(bossKey)await saveShadowVerifyStat(bossKey,1,1,0);
     }
+  }
+  if(action==='mergeRegieObjects'){
+    await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'object_reports_id:%' OR shadow_name LIKE 'object_reports_customer:%' OR shadow_name LIKE 'regie_reports:%'");
+    await pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getRegieReports','getObjectReports','getDashboardSummary51')");
   }
   if(action==='setRegieObjectJobStatus'){
     for(const bodyView of [{status:'Offen',year:0,month:0},{status:'Abgerechnet',year:0,month:0}]){
