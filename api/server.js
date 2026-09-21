@@ -8688,7 +8688,7 @@ async function tryDirectPostgresWrite(action,body){
   const session=await localSessionForBody(body,true);if(!session)return null;
   const by=String(body.employee||session.employeeName||'').trim(),nowIso=new Date().toISOString();
   const client=await pool.connect();
-  let result=null,outboxId=0;
+  let result=null,outboxId=0,legacyAction=action,legacyPayload=body;
   try{
     await client.query('BEGIN');
     if(['saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder'].includes(action)){
@@ -8947,7 +8947,8 @@ async function tryDirectPostgresWrite(action,body){
     }else if(['saveManualOrderNote','setManualOrderStatus','deleteManualOrder'].includes(action)){
       const id=String(body.id||'').trim();if(!id)throw new Error('Auftrag-ID fehlt.');
       const q=await client.query(
-        'SELECT status FROM manual_orders_shadow WHERE id=$1 FOR UPDATE',[id]
+        `SELECT status,customer,address,phone,email,description,source,inquiry_id,internal_note
+           FROM manual_orders_shadow WHERE id=$1 FOR UPDATE`,[id]
       );
       if(!q.rowCount)throw new Error('Auftrag nicht gefunden.');
       const oldStatus=String(q.rows[0].status||'Offen');
@@ -8970,6 +8971,20 @@ async function tryDirectPostgresWrite(action,body){
                   shadow_updated_at=now()
             WHERE id=$1`,[id,status,nowIso,by]
         );
+        const extendedStatuses=new Set(['In Regiebericht uebernommen','Offenes Angebot','Angebot Abgelehnt','Angebot zu erstellen']);
+        if(extendedStatuses.has(status)){
+          const row=q.rows[0]||{};
+          legacyAction='saveManualOrder';
+          legacyPayload=Object.assign({},body,{
+            action:'saveManualOrder',
+            item:{
+              id,customer:String(row.customer||''),address:String(row.address||''),
+              phone:String(row.phone||''),email:String(row.email||''),
+              description:String(row.description||''),source:String(row.source||'Manuell'),
+              inquiryId:String(row.inquiry_id||''),status,internalNote:String(row.internal_note||'')
+            }
+          });
+        }
         result={ok:true,id,status};
       }else{
         if(oldStatus==='Laufend')throw new Error('Laufende Aufträge bitte zuerst auf Offen setzen oder abschließen.');
@@ -9019,7 +9034,7 @@ async function tryDirectPostgresWrite(action,body){
       );
       result={ok:true};
     }
-    outboxId=await enqueueLegacyWriteWithClient(client,action,body);
+    outboxId=await enqueueLegacyWriteWithClient(client,legacyAction,legacyPayload);
     await client.query('COMMIT');
   }catch(e){
     try{await client.query('ROLLBACK');}catch(_e){}
@@ -9099,7 +9114,7 @@ async function tryDirectPostgresWrite(action,body){
   }
   await bumpWriteStat(action,true);
   await invalidateLegacySnapshotsAfterDirectWrite(action,body);
-  console.log('POSTGRES_WRITE action='+action+' legacy_outbox='+outboxId);
+  console.log('POSTGRES_WRITE action='+action+' legacy_action='+legacyAction+' legacy_outbox='+outboxId);
   kickLegacyOutbox();
   return {result,outboxId};
 }
