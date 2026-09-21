@@ -4879,7 +4879,6 @@ async function mirrorMaintenanceWrite(action,body,parsed){
   if(!pool)return;
   const data=parsed&&parsed.data!==undefined?parsed.data:parsed;
   if(!data||data.ok===false)return;
-  if(action==='saveAbsence' && String(body.type||'')!=='Urlaub')return null;
   if(action==='reserveMaintenanceDeviceId'){
     await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'maintenance_%'");
   }
@@ -8807,7 +8806,7 @@ async function tryDirectPostgresWrite(action,body){
   const session=await localSessionForBody(body,!employeeSelfAction);if(!session)return null;
   const by=String(session.employee||body.employee||'').trim(),nowIso=new Date().toISOString();
   const client=await pool.connect();
-  let result=null,outboxId=0,legacyAction=action,legacyPayload=body;
+  let result=null,outboxId=0,legacyAction=action,legacyPayload=body,skipLegacySync=false;
   try{
     await client.query('BEGIN');
     if(action==='createOwnReminder'){
@@ -10303,50 +10302,173 @@ async function tryDirectPostgresWrite(action,body){
       }
     }else if(action==='saveAbsence'){
       const target=String(body.targetEmployee||'').trim(),type=String(body.type||'').trim();
-      const start=berlinDateOnly(body.startDate||''),end=berlinDateOnly(body.endDate||'');
-      if(type!=='Urlaub')throw new Error('Diese Abwesenheitsart wird weiterhin über Google verarbeitet.');
+      const startDate=berlinDateOnly(body.startDate||''),endDate=berlinDateOnly(body.endDate||'');
+      const sicknessMode=String(body.sicknessMode||'').trim(),continuationCaseId=String(body.continuationCaseId||'').trim();
+      if(!['Urlaub','Krank','Schulung','Freizeitausgleich'].includes(type))
+        throw new Error('Als Abwesenheit sind Urlaub, Krankheit, Schulung oder Freizeitausgleich möglich.');
       if(!target)throw new Error('Mitarbeiter wurde nicht gefunden.');
-      if(!validIsoDateText(start)||!validIsoDateText(end)||end<start)throw new Error('Ungültiger Abwesenheitszeitraum.');
-      const eq=await client.query('SELECT payload FROM employee_admin_shadow WHERE employee_name=$1 LIMIT 1',[target]);
+      if(!validIsoDateText(startDate)||!validIsoDateText(endDate)||endDate<startDate)
+        throw new Error('Ungültiger Abwesenheitszeitraum.');
+
+      const eq=await client.query(
+        'SELECT payload FROM employee_admin_shadow WHERE employee_name=$1 LIMIT 1 FOR UPDATE',[target]
+      );
       if(!eq.rowCount)throw new Error('Mitarbeiter wurde nicht gefunden.');
       const profile=Object.assign({name:target},eq.rows[0].payload||{});
-      const id=String(body.absenceId||'').trim()||('ABS-'+crypto.randomUUID());
-      const dates=isoDateList(start,end),holidayCache=new Map(),creditRows=[];
-      let creditedHours=0,days=0;
-      for(const date of dates){
+      const allCurrentDates=isoDateList(startDate,endDate);
+
+      const [statusQ,workQ]=await Promise.all([
+        client.query(
+          'SELECT status_date,status FROM day_status_shadow WHERE employee_name=$1 AND status_date>=$2 AND status_date<=$3',
+          [target,startDate,endDate]
+        ),
+        client.query(
+          'SELECT DISTINCT entry_date FROM time_entries_shadow WHERE employee_name=$1 AND entry_date>=$2 AND entry_date<=$3',
+          [target,startDate,endDate]
+        )
+      ]);
+      const statusMap=new Map(statusQ.rows.map(r=>[berlinDateOnly(r.status_date),String(r.status||'Arbeiten')]));
+      const workDatesSet=new Set(workQ.rows.map(r=>berlinDateOnly(r.entry_date)));
+      const holidayCache=new Map(),workDates=[],conflicts=[];
+      for(const date of allCurrentDates){
         const dow=isoWeekday(date);if(dow<1||dow>5)continue;
         const year=Number(date.slice(0,4));
         if(!holidayCache.has(year))holidayCache.set(year,new Set(bavariaNurembergHolidayDates(year)));
-        if(holidayCache.get(year).has(date))continue;
-        const credit=Math.round(profileHoursForDate(profile,date)*100)/100;
-        if(!(credit>0))continue;
-        creditRows.push({date,credit});creditedHours=Math.round((creditedHours+credit)*100)/100;days++;
+        const status=statusMap.get(date)||'Arbeiten';
+        if(status==='Feiertag'||holidayCache.get(year).has(date))continue;
+        if(status&&status!=='Arbeiten'){conflicts.push(date);continue;}
+        if(workDatesSet.has(date)){conflicts.push(date);continue;}
+        workDates.push(date);
       }
+      if(conflicts.length)
+        throw new Error('Für folgende Tage bestehen bereits Arbeitszeiten oder Abwesenheiten: '+conflicts.map(germanDateLabel).join(', ')+'. Bitte zuerst prüfen/löschen.');
+
+      let caseId='',mode='',employerPayThrough='',payer='',caseDays=0,note='';
+      let paidSet=new Set();
+      if(type==='Krank'){
+        mode=['Neu','Fortsetzung','Unklar'].includes(sicknessMode)?sicknessMode:'Neu';
+        const priorQ=await client.query(
+          `SELECT id,start_date,end_date,sickness_case_id,sickness_mode
+             FROM absences_shadow
+            WHERE active=true AND employee_name=$1 AND absence_type='Krank'
+            ORDER BY start_date ASC,id ASC FOR UPDATE`,[target]
+        );
+        const prior=priorQ.rows.map(r=>({
+          id:String(r.id||''),start:berlinDateOnly(r.start_date),end:berlinDateOnly(r.end_date),
+          caseId:String(r.sickness_case_id||r.id||''),mode:String(r.sickness_mode||'Altbestand')
+        }));
+        const addMonths=(iso,months)=>{
+          const p=String(iso||'').split('-').map(Number);
+          if(p.length!==3||!p[0])return '';
+          const d=new Date(Date.UTC(p[0],p[1]-1,p[2],12));
+          d.setUTCMonth(d.getUTCMonth()+Number(months||0));
+          return d.toISOString().slice(0,10);
+        };
+        if(mode==='Fortsetzung'){
+          if(!continuationCaseId)throw new Error('Bitte den fortgesetzten Krankheitsfall auswählen.');
+          const match=prior.find(r=>r.caseId===continuationCaseId||r.id===continuationCaseId);
+          if(!match)throw new Error('Der gewählte frühere Krankheitsfall wurde nicht gefunden.');
+          caseId=match.caseId||match.id;
+          const oldDates=[];
+          for(const r of prior.filter(x=>x.caseId===caseId))oldDates.push(...isoDateList(r.start,r.end));
+          const sorted=[...new Set(oldDates)].sort(),first=sorted[0]||'',last=sorted[sorted.length-1]||'';
+          if((last&&startDate>=addMonths(last,6))||(first&&startDate>=addMonths(first,12))){
+            note='Fortsetzungserkrankung nach 6-/12-Monats-Regel: neuer Entgeltfortzahlungsanspruch wurde als neuer Fristblock gestartet.';
+            caseId=crypto.randomUUID();
+          }
+        }else{
+          caseId=crypto.randomUUID();
+        }
+        if(mode==='Unklar')note='Fortsetzungserkrankung unklar – vor Lohnabrechnung prüfen.';
+
+        const priorDates=[];
+        for(const r of prior.filter(x=>x.caseId===caseId))priorDates.push(...isoDateList(r.start,r.end));
+        const caseDates=[...new Set(priorDates.concat(allCurrentDates))].sort();
+        caseDays=caseDates.length;
+        const entryDate=await employeeEntryDateForOverview(target);
+        const eligibleFrom=entryDate?isoAddDays(entryDate,28):'';
+        const eligible=caseDates.filter(d=>!eligibleFrom||d>=eligibleFrom);
+        paidSet=new Set(eligible.slice(0,42));
+        if(eligible.length>=42)employerPayThrough=eligible[41];
+        const currentEligible=allCurrentDates.filter(d=>!eligibleFrom||d>=eligibleFrom);
+        const currentPaid=currentEligible.filter(d=>paidSet.has(d));
+        if(currentEligible.length===0)payer='Krankenkasse/prüfen (4-Wochen-Wartezeit)';
+        else if(currentPaid.length===0)payer='Krankengeld/Krankenkasse';
+        else if(currentPaid.length<currentEligible.length)payer='Arbeitgeber / Krankengeld';
+        else payer='Arbeitgeber';
+      }
+
+      const creditRows=[];
+      let creditedHours=0;
+      for(const date of workDates){
+        let credit=Math.round(profileHoursForDate(profile,date)*100)/100;
+        if(type==='Krank'&&!paidSet.has(date))credit=0;
+        creditRows.push({date,credit});
+        creditedHours=Math.round((creditedHours+credit)*100)/100;
+      }
+
+      if(type==='Freizeitausgleich'){
+        await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",['timebank:'+target]);
+        const bq=await client.query(
+          'SELECT COALESCE(SUM(hours),0)::numeric AS balance FROM time_bank_shadow WHERE employee_name=$1',[target]
+        );
+        const available=Math.round(Math.max(0,Number(bq.rows[0]?.balance||0))*100)/100;
+        if(!(creditedHours>0))throw new Error('Für diesen Zeitraum sind keine Sollstunden hinterlegt.');
+        if(creditedHours>available+0.001)
+          throw new Error('Nicht genügend Zeitguthaben. Benötigt: '+creditedHours.toFixed(2).replace('.',',')+' Std., verfügbar: '+available.toFixed(2).replace('.',',')+' Std.');
+      }
+
+      const id=String(body.absenceId||'').trim()||('ABS-'+crypto.randomUUID());
       await client.query(
         `INSERT INTO absences_shadow(
            id,employee_name,absence_type,start_date,end_date,created_at_text,created_by,active,
            sickness_case_id,sickness_mode,employer_pay_through,payer,sickness_case_days,note,
            credited_hours,shadow_updated_at
-         ) VALUES($1,$2,'Urlaub',$3,$4,$5,$6,true,'','','','',0,'',$7,now())
-         ON CONFLICT(id) DO UPDATE SET employee_name=EXCLUDED.employee_name,absence_type='Urlaub',
-           start_date=EXCLUDED.start_date,end_date=EXCLUDED.end_date,created_by=EXCLUDED.created_by,
-           active=true,credited_hours=EXCLUDED.credited_hours,shadow_updated_at=now()`,
-        [id,target,start,end,nowIso,by,creditedHours]
+         ) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9,$10,$11,$12,$13,$14,now())
+         ON CONFLICT(id) DO UPDATE SET employee_name=EXCLUDED.employee_name,absence_type=EXCLUDED.absence_type,
+           start_date=EXCLUDED.start_date,end_date=EXCLUDED.end_date,created_by=EXCLUDED.created_by,active=true,
+           sickness_case_id=EXCLUDED.sickness_case_id,sickness_mode=EXCLUDED.sickness_mode,
+           employer_pay_through=EXCLUDED.employer_pay_through,payer=EXCLUDED.payer,
+           sickness_case_days=EXCLUDED.sickness_case_days,note=EXCLUDED.note,
+           credited_hours=EXCLUDED.credited_hours,shadow_updated_at=now()`,
+        [id,target,type,startDate,endDate,nowIso,by,caseId,mode,employerPayThrough,payer,caseDays,note,creditedHours]
       );
+
       for(const x of creditRows){
+        const source=type==='Krank'?(x.credit>0?'Chef Abwesenheit':'Krankengeld / keine AG-Gutschrift'):'Chef Abwesenheit';
         await client.query(
           `INSERT INTO day_status_shadow(
              employee_name,status_date,status,changed_at_text,source,reference,credited_hours,
              credited_hours_missing,shadow_updated_at
-           ) VALUES($1,$2,'Urlaub',$3,'Chef Abwesenheit',$4,$5,false,now())
-           ON CONFLICT(employee_name,status_date) DO UPDATE SET status='Urlaub',
-             changed_at_text=EXCLUDED.changed_at_text,source='Chef Abwesenheit',reference=EXCLUDED.reference,
+           ) VALUES($1,$2,$3,$4,$5,$6,$7,false,now())
+           ON CONFLICT(employee_name,status_date) DO UPDATE SET status=EXCLUDED.status,
+             changed_at_text=EXCLUDED.changed_at_text,source=EXCLUDED.source,reference=EXCLUDED.reference,
              credited_hours=EXCLUDED.credited_hours,credited_hours_missing=false,shadow_updated_at=now()`,
-          [target,x.date,nowIso,id,x.credit]
+          [target,x.date,type,nowIso,source,id,x.credit]
         );
       }
-      legacyPayload=Object.assign({},body,{absenceId:id});
-      result={ok:true,id,days,creditedHours};
+
+      if(type==='Freizeitausgleich'){
+        const ref='absence:'+id;
+        const oldTb=await client.query('SELECT id FROM time_bank_shadow WHERE employee_name=$1 AND reference=$2 LIMIT 1',[target,ref]);
+        if(!oldTb.rowCount){
+          await client.query(
+            `INSERT INTO time_bank_shadow(
+               id,employee_name,hours,booking_type,booking_year,booking_month,reference,reason,
+               created_at_text,created_iso,created_by,shadow_updated_at
+             ) VALUES($1,$2,$3,'Freizeitausgleich',$4,$5,$6,$7,$8,$9,$10,now())`,
+            ['TB-'+crypto.randomUUID(),target,-creditedHours,Number(startDate.slice(0,4)),Number(startDate.slice(5,7)),
+             ref,'Freizeitausgleich '+germanDateLabel(startDate)+' bis '+germanDateLabel(endDate),nowIso,berlinTodayIso(),by]
+          );
+        }
+      }
+      const bal=await client.query('SELECT COALESCE(SUM(hours),0)::numeric AS h FROM time_bank_shadow WHERE employee_name=$1',[target]);
+      const timeBankBalance=Math.round(Math.max(0,Number(bal.rows[0]?.h||0))*100)/100;
+      skipLegacySync=true;
+      result={
+        ok:true,id,days:workDates.length,creditedHours,timeBankBalance,
+        sickness:type==='Krank'?{caseId,mode,caseCalendarDays:caseDays,employerPayThrough,payer,note}:null
+      };
     }else if(action==='deleteAbsence'){
       const id=String(body.id||'').trim();if(!id)throw new Error('Abwesenheit nicht gefunden.');
       const q=await client.query(
@@ -10355,7 +10477,12 @@ async function tryDirectPostgresWrite(action,body){
       );
       if(!q.rowCount||q.rows[0].active===false)throw new Error('Abwesenheit nicht gefunden.');
       const row=q.rows[0],target=String(row.employee_name||''),type=String(row.absence_type||'');
-      if(type==='Freizeitausgleich')throw new Error('Freizeitausgleich wird weiterhin über Google verarbeitet.');
+      let credited=0;
+      if(type==='Freizeitausgleich'){
+        const cr=await client.query('SELECT COALESCE(SUM(credited_hours),0)::numeric AS h FROM day_status_shadow WHERE reference=$1',[id]);
+        credited=Math.round(Math.max(0,Number(cr.rows[0]?.h||0))*100)/100;
+        await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",['timebank:'+target]);
+      }
       const statuses=await client.query(
         `SELECT employee_name,status_date,status FROM day_status_shadow WHERE reference=$1 FOR UPDATE`,[id]
       );
@@ -10374,7 +10501,21 @@ async function tryDirectPostgresWrite(action,body){
           }
         }
       }
+      if(type==='Freizeitausgleich'&&credited>0){
+        const reversalRef='absence-reversal:'+id;
+        const oldRev=await client.query('SELECT id FROM time_bank_shadow WHERE employee_name=$1 AND reference=$2 LIMIT 1',[target,reversalRef]);
+        if(!oldRev.rowCount){
+          await client.query(
+            `INSERT INTO time_bank_shadow(
+               id,employee_name,hours,booking_type,booking_year,booking_month,reference,reason,
+               created_at_text,created_iso,created_by,shadow_updated_at
+             ) VALUES($1,$2,$3,'Freizeitausgleich Storno',0,0,$4,'Freizeitausgleich gelöscht',$5,$6,$7,now())`,
+            ['TB-'+crypto.randomUUID(),target,credited,reversalRef,nowIso,berlinTodayIso(),by]
+          );
+        }
+      }
       const bal=await client.query('SELECT COALESCE(SUM(hours),0)::numeric AS h FROM time_bank_shadow WHERE employee_name=$1',[target]);
+      skipLegacySync=true;
       result={ok:true,timeBankBalance:Math.round(Math.max(0,Number(bal.rows[0]?.h||0))*100)/100};
     }else if(action==='movePlannerWorker'){
       const id=String(body.id||'').trim(),direction=Number(body.direction)||0;
@@ -10671,7 +10812,7 @@ async function tryDirectPostgresWrite(action,body){
       );
       result={ok:true};
     }
-    outboxId=await enqueueLegacyWriteWithClient(client,legacyAction,legacyPayload);
+    if(!skipLegacySync)outboxId=await enqueueLegacyWriteWithClient(client,legacyAction,legacyPayload);
     await client.query('COMMIT');
   }catch(e){
     try{await client.query('ROLLBACK');}catch(_e){}
@@ -10727,13 +10868,17 @@ async function tryDirectPostgresWrite(action,body){
       pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getOfferReports','getOfferStatistics','getDashboardSummary51')")
     ]);
   }
-  if(action==='saveAbsence' && String(body.type||'')==='Urlaub'){
-    const sy=Number(String(body.startDate||'').slice(0,4))||0,ey=Number(String(body.endDate||'').slice(0,4))||sy;
-    for(let y=sy;y<=ey;y++)if(y)await pgSyncAutoClosures(y);
+  if(action==='saveAbsence'){
+    const type=String(body.type||''),sy=Number(String(body.startDate||'').slice(0,4))||0,ey=Number(String(body.endDate||'').slice(0,4))||sy;
+    if(type==='Urlaub')for(let y=sy;y<=ey;y++)if(y)await pgSyncAutoClosures(y);
     await Promise.all([
-      pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'absences%' OR shadow_name LIKE 'vacation_full:%' OR shadow_name LIKE 'absence_overview:%' OR shadow_name LIKE 'day_data:%' OR shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'month_data:%' OR shadow_name LIKE 'boss_day_closures:%'"),
+      pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'absences%' OR shadow_name LIKE 'vacation_full:%' OR shadow_name LIKE 'absence_overview:%' OR shadow_name LIKE 'planner_availability:%' OR shadow_name LIKE 'day_data:%' OR shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'month_data:%' OR shadow_name LIKE 'boss_day_closures:%'"),
       pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getMonthPayrollAudit','getPayrollCycleState','getDashboardSummary51')")
     ]);
+    if(type==='Krank')await invalidateShadowVerify('sickness_alerts');
+    if(type==='Freizeitausgleich'){
+      await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'time_bank:%' OR shadow_name LIKE 'my_time_bank:%' OR shadow_name='employee_admin'");
+    }
   }
   if(action==='forceCompletePayrollCycle'){
     await Promise.all([
