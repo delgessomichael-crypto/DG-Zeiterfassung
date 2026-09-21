@@ -8643,7 +8643,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive',
-  'setRegieObjectJobStatus'
+  'setRegieObjectJobStatus','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
 function berlinTodayIso(){
@@ -8660,7 +8660,7 @@ async function invalidateLegacySnapshotsAfterDirectWrite(action,body){
   await invalidateReadCache(action);
   const a=String(action||'');
   const tasks=[];
-  if(/Payroll|Conflict|MonthlyAdjustment|MonthClosure|TimeBank|Absence|Vacation|Entry|Day/i.test(a)){
+  if(/Payroll|Conflict|MonthlyAdjustment|MonthClosure|TimeBank|Absence|Vacation|Assignment|Entry|Day/i.test(a)){
     tasks.push(pool.query('TRUNCATE boss_month_views_shadow'));
     tasks.push(pool.query(
       "DELETE FROM exact_views_shadow WHERE action IN ('getMonthPayrollAudit','getPayrollCycleState')"
@@ -8685,13 +8685,41 @@ async function tryDirectPostgresWrite(action,body){
     const item=body&&body.item||{};
     if(!String(item.id||'').trim()||String(item.inquiryId||'').trim())return null;
   }
-  const session=await localSessionForBody(body,true);if(!session)return null;
-  const by=String(body.employee||session.employeeName||'').trim(),nowIso=new Date().toISOString();
+  const employeeAssignmentAction=['confirmEmployeeAssignment','reportEmployeeAssignmentIssue'].includes(action);
+  const session=await localSessionForBody(body,!employeeAssignmentAction);if(!session)return null;
+  const by=String(session.employee||body.employee||'').trim(),nowIso=new Date().toISOString();
   const client=await pool.connect();
   let result=null,outboxId=0,legacyAction=action,legacyPayload=body;
   try{
     await client.query('BEGIN');
-    if(['saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder'].includes(action)){
+    if(['confirmEmployeeAssignment','reportEmployeeAssignmentIssue'].includes(action)){
+      const id=String(body.assignmentId||'').trim();
+      if(!id)throw new Error('Mitarbeiterzuordnung wurde nicht gefunden.');
+      const q=await client.query(
+        'SELECT employee_name,status FROM assignments_shadow WHERE id=$1 FOR UPDATE',[id]
+      );
+      if(!q.rowCount||String(q.rows[0].employee_name||'')!==by)
+        throw new Error('Mitarbeiterzuordnung wurde nicht gefunden.');
+      if(String(q.rows[0].status||'')==='Ersetzt')
+        throw new Error(action==='confirmEmployeeAssignment'?'Diese Zuordnung wurde bereits durch einen eigenen Eintrag ersetzt.':'Diese Zuordnung wurde bereits ersetzt.');
+      if(action==='confirmEmployeeAssignment'){
+        await client.query(
+          `UPDATE assignments_shadow
+              SET status='Bestätigt',confirmed_at_text=$2,issue_at_text='',note='',shadow_updated_at=now()
+            WHERE id=$1`,[id,nowIso]
+        );
+        result={ok:true,status:'Bestätigt'};
+      }else{
+        const note=String(body.note||'').trim();
+        if(!note)throw new Error('Bitte kurz beschreiben, was an der Zuordnung nicht stimmt.');
+        await client.query(
+          `UPDATE assignments_shadow
+              SET status='Abweichung',issue_at_text=$2,note=$3,shadow_updated_at=now()
+            WHERE id=$1`,[id,nowIso,note]
+        );
+        result={ok:true,status:'Abweichung'};
+      }
+    }else if(['saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder'].includes(action)){
       const id=String(body.reminderId||'').trim();if(!id)throw new Error('Reminder-ID fehlt.');
       const q=await client.query(
         'SELECT status FROM own_reminders_shadow WHERE id=$1 FOR UPDATE',[id]
