@@ -8642,7 +8642,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive',
+  'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','setDayStatus','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
@@ -9189,6 +9189,25 @@ async function tryDirectPostgresWrite(action,body){
         [objectId,note,nowIso,by]
       );
       result={ok:true,objectId,note,changedAt,changedBy:by};
+    }else if(action==='saveMonthlyAdjustment'){
+      const target=String(body.targetEmployee||'').trim(),year=Number(body.year)||0,month=Number(body.month)||0;
+      const hours=Math.round(Number(body.hours||0)*100)/100,reason=String(body.reason||'').trim();
+      if(!target)throw new Error('Mitarbeiter wurde nicht gefunden.');
+      const emp=await client.query('SELECT 1 FROM employee_admin_shadow WHERE employee_name=$1 LIMIT 1',[target]);
+      if(!emp.rowCount)throw new Error('Mitarbeiter wurde nicht gefunden.');
+      if(!(year>0&&month>=1&&month<=12))throw new Error('Ungültiger Monat.');
+      if(!Number.isFinite(hours)||hours===0||Math.abs(hours)>250)
+        throw new Error('Die Korrektur muss zwischen -250 und +250 Stunden liegen und darf nicht 0 sein.');
+      if(!reason)throw new Error('Bitte einen Grund für die Stundenkorrektur eintragen.');
+      const id='ADJ-'+crypto.randomUUID();
+      await client.query(
+        `INSERT INTO monthly_adjustments_shadow(
+           id,employee_name,adjustment_year,adjustment_month,hours,reason,created_at_text,created_by,shadow_updated_at
+         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,now())`,
+        [id,target,year,month,hours,reason,nowIso,by]
+      );
+      legacyPayload=Object.assign({},body,{adjustmentId:id});
+      result={ok:true,id,hours,_employee:target,_year:year,_month:month};
     }else if(action==='markPayrollIssueReviewed'){
       const issueId=String(body.issueId||'').trim();if(!issueId)throw new Error('Pruef-ID fehlt.');
       const old=await client.query('SELECT 1 FROM payroll_reviews_shadow WHERE issue_id=$1',[issueId]);
@@ -9227,7 +9246,12 @@ async function tryDirectPostgresWrite(action,body){
     throw e;
   }finally{client.release();}
 
-  if(action==='deleteMonthlyAdjustment'&&result&&typeof result==='object'){
+  if(['saveMonthlyAdjustment','deleteMonthlyAdjustment'].includes(action)&&result&&typeof result==='object'){
+    if(action==='saveMonthlyAdjustment'){
+      const employee=result._employee,year=result._year,month=result._month;
+      const monthKey=monthDataVerifyKey({employee,year,month});if(monthKey)await saveShadowVerifyStat(monthKey,1,1,0);
+    }
+
     delete result._employee;delete result._year;delete result._month;
   }
   if(action==='rescheduleOfferReminder'){
