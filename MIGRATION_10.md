@@ -57,3 +57,18 @@ The existing 9.0 app remains the production system until:
 4. record counts and checksums remain clean,
 5. office and employee workflows pass acceptance testing,
 6. a controlled cutover is approved.
+
+
+## Progress update — 2026-09-21 07:43 CEST
+
+Additional native Railway/PostgreSQL paths:
+- office system health check
+- native payroll audit implemented with guarded Google comparison
+- native boss-month calculation implemented with guarded Google comparison
+
+Current intentional Google-bound reads:
+- employee calendar events
+- planner events that merge external Google Calendar entries
+- maintenance attachment/file retrieval from Google Drive
+
+The boss-month and payroll-audit native paths remain locked until the first September 2026 Google result is observed and matches PostgreSQL exactly. Opening those views once in the app is sufficient to trigger the comparison.
