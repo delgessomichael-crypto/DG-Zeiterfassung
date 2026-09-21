@@ -765,6 +765,7 @@ async function initDb() {
   await bootstrapOfferNativeV15();
   await bootstrapObjectReportsV16();
   await bootstrapDashboardNativeV17();
+  await bootstrapBossMonthComparisonV18();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -7964,6 +7965,41 @@ async function directDashboardNativeRead(body){
   if(!(await shadowReadyForDirectRead(dashboardNativeKey(),2)))return null;
   return postgresDashboardSummaryNative();
 }
+async function bootstrapBossMonthComparisonV18(){
+  if(!pool)return;
+  const now=berlinNowParts(),year=now.year,month=now.month;
+  const marker='boss_month_compare_v18:'+year+'-'+String(month).padStart(2,'0');
+  const q=await pool.query(
+    `SELECT payload,refreshed_at FROM boss_month_views_shadow
+      WHERE view_year=$1 AND view_month=$2
+      ORDER BY refreshed_at DESC LIMIT 1`,
+    [year,month]
+  );
+  if(!q.rowCount){
+    console.log('BOSS_MONTH_COMPARE_V18 no_google_snapshot year='+year+' month='+month);
+    return;
+  }
+  const google=q.rows[0].payload;
+  if(!Array.isArray(google)){
+    console.log('BOSS_MONTH_COMPARE_V18 invalid_google_snapshot');
+    return;
+  }
+  const pg=await postgresBossMonthData({year,month});
+  if(!Array.isArray(pg))return;
+  const same=stableJsonString(google)===stableJsonString(pg);
+  const key=bossMonthNativeKey({year,month});
+  await saveShadowVerifyStat(key,google.length,pg.length,same?0:1);
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+     ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
+    [marker,JSON.stringify({
+      at:new Date().toISOString(),key,googleRows:google.length,postgresRows:pg.length,
+      match:same,googleRefreshedAt:q.rows[0].refreshed_at||null
+    })]
+  );
+  console.log('BOSS_MONTH_COMPARE_V18 key='+key+' match='+same+' google='+google.length+' postgres='+pg.length);
+}
+
 async function bootstrapDashboardNativeV17(){
   if(!pool)return;
   const now=berlinNowParts();
