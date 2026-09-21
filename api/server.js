@@ -8643,7 +8643,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','deletePlannerEvent','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
+  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','savePlannerEvent','deletePlannerEvent','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','updateEmployeeEntry','deleteEntry','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
@@ -8726,6 +8726,10 @@ async function tryDirectPostgresWrite(action,body){
   }
   if(action==='setRegieReportsOfferStatus'){
     if(!String(body&&body.offerId||'').trim())return null;
+  }
+  if(action==='savePlannerEvent'){
+    const item=body&&body.item||{};
+    if(!String(item.id||'').trim())return null;
   }
   if(action==='updateEmployeeEntry'){
     const entryId=String(body&&body.entryId||'').trim(),item=body&&body.item||{};
@@ -9532,6 +9536,46 @@ async function tryDirectPostgresWrite(action,body){
       }
       const bal=await client.query('SELECT COALESCE(SUM(hours),0)::numeric AS h FROM time_bank_shadow WHERE employee_name=$1',[target]);
       result={ok:true,timeBankBalance:Math.round(Math.max(0,Number(bal.rows[0]?.h||0))*100)/100};
+    }else if(action==='savePlannerEvent'){
+      const item=body.item||{},id=String(item.id||'').trim();
+      if(!id)throw new Error('Termin-ID fehlt.');
+      const customer=String(item.customer||'').trim(),address=String(item.address||'').trim(),rawTask=String(item.task||'').trim();
+      const type=(String(item.type||'')==='Wartung'||/^\[WARTUNG\]/i.test(rawTask))?'Wartung':'Auftrag';
+      const task=rawTask.replace(/^\[WARTUNG\]\s*/i,'').trim(),date=String(item.date||'').trim();
+      const start=String(item.start||'').trim(),end=String(item.end||'').trim();
+      const employeeIds=[...new Set((Array.isArray(item.employeeIds)?item.employeeIds:[]).map(x=>String(x||'').trim()).filter(Boolean))];
+      if(!customer||!address||!task)throw new Error('Kunde, Adresse und Tätigkeit sind Pflichtfelder.');
+      if(!validIsoDateText(date)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(start)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(end)||end<=start)
+        throw new Error('Ungültiges Datum oder Von/Bis.');
+      if(!employeeIds.length)throw new Error('Mindestens einen Mitarbeiter auswählen.');
+      const oldQ=await client.query('SELECT * FROM planner_events_shadow WHERE id=$1 FOR UPDATE',[id]);
+      if(!oldQ.rowCount)throw new Error('DG-Termin wurde nicht gefunden.');
+      const workers=await client.query(
+        'SELECT id,display_name,employee_name,active FROM planner_workers_shadow WHERE id=ANY($1::text[])',[employeeIds]
+      );
+      const wmap=new Map(workers.rows.map(r=>[String(r.id),r]));
+      const names=[];
+      for(const wid of employeeIds){
+        const w=wmap.get(wid);if(!w||w.active===false)throw new Error('Mitarbeiter nicht aktiv.');
+        names.push(String(w.display_name||w.employee_name||wid));
+      }
+      const old=oldQ.rows[0];
+      const maintenanceCustomerId=type==='Wartung'?String(item.maintenanceCustomerId||old.maintenance_customer_id||'').trim():'';
+      const maintenanceObjectId=type==='Wartung'?String(item.maintenanceObjectId||old.maintenance_object_id||'').trim():'';
+      const maintenanceDeviceId=type==='Wartung'?String(item.maintenanceDeviceId||old.maintenance_device_id||'').trim():'';
+      if(maintenanceDeviceId){
+        const md=await client.query('SELECT active FROM maintenance_devices_shadow WHERE id=$1 LIMIT 1',[maintenanceDeviceId]);
+        if(!md.rowCount||md.rows[0].active===false)throw new Error('Das zugeordnete Wartungsgerät wurde nicht gefunden oder ist inaktiv.');
+      }
+      await client.query(
+        `UPDATE planner_events_shadow SET customer=$2,address=$3,task=$4,event_date=$5,start_time=$6,end_time=$7,
+           employee_ids_json=$8,employee_names_json=$9,updated_at_text=$10,updated_by=$11,event_type=$12,
+           maintenance_customer_id=$13,maintenance_object_id=$14,maintenance_device_id=$15,shadow_updated_at=now()
+         WHERE id=$1`,
+        [id,customer,address,task,date,start,end,JSON.stringify(employeeIds),JSON.stringify(names),nowIso,by,type,
+         maintenanceCustomerId,maintenanceObjectId,maintenanceDeviceId]
+      );
+      result={ok:true,id,type,maintenanceDeviceId};
     }else if(action==='deletePlannerEvent'){
       const id=String(body.id||'').trim();if(!id)throw new Error('Termin nicht gefunden.');
       const q=await client.query('SELECT id FROM planner_events_shadow WHERE id=$1 FOR UPDATE',[id]);
@@ -9779,7 +9823,7 @@ async function tryDirectPostgresWrite(action,body){
     }
     await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'planner_availability:%' OR shadow_name LIKE 'day_data:%' OR shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'month_data:%' OR shadow_name LIKE 'boss_day_closures:%'");
   }
-  if(action==='deletePlannerEvent'){
+  if(['savePlannerEvent','deletePlannerEvent'].includes(action)){
     await Promise.all([
       pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'planner_events:%' OR shadow_name LIKE 'planner_availability:%' OR shadow_name='maintenance_contracts'"),
       pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getPlannerEvents','getMaintenanceContracts','getMaintenanceOverview','getDashboardSummary51')")
