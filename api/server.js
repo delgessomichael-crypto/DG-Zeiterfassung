@@ -1843,7 +1843,7 @@ async function mirrorRegieMetadataWrite(action,body,parsed){
       await markInquiryViewFresh(key);
     }
   }
-  if(['saveManualOrderNote','setManualOrderStatus','deleteManualOrder'].includes(action)){
+  if(['saveManualOrder','saveManualOrderNote','setManualOrderStatus','deleteManualOrder'].includes(action)){
     const q=await pool.query('SELECT COUNT(*)::int AS n FROM manual_orders_shadow');
     const n=Number(q.rows[0]?.n||0);await saveShadowVerifyStat('manual_orders',n,n,0);
   }
@@ -8669,7 +8669,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
-  'reopenInquiryReminder','archiveInquiryReminder','rescheduleOfferReminder'
+  'reopenInquiryReminder','archiveInquiryReminder','rescheduleOfferReminder','saveManualOrder'
 ]);
 
 function berlinTodayIso(){
@@ -8683,6 +8683,10 @@ function validIsoDateText(v){
 }
 async function tryDirectPostgresWrite(action,body){
   if(!DIRECT_POSTGRES_WRITE_ACTIONS.has(action)||!pool||!GOOGLE_BACKEND_URL||!legacyOutboxCryptoKey())return null;
+  if(action==='saveManualOrder'){
+    const item=body&&body.item||{};
+    if(!String(item.id||'').trim()||String(item.inquiryId||'').trim())return null;
+  }
   const session=await localSessionForBody(body,true);if(!session)return null;
   const by=String(body.employee||session.employeeName||'').trim(),nowIso=new Date().toISOString();
   const client=await pool.connect();
@@ -8826,6 +8830,40 @@ async function tryDirectPostgresWrite(action,body){
         );
         result={ok:true};
       }
+    }else if(action==='saveManualOrder'){
+      const item=body.item||{},id=String(item.id||'').trim();
+      const customer=String(item.customer||'').trim();
+      if(!id)throw new Error('Auftrag-ID fehlt.');
+      if(!customer)throw new Error('Kundenname fehlt.');
+      if(String(item.inquiryId||'').trim())throw new Error('Anfrage-Aufträge werden weiterhin über Google verarbeitet.');
+      const status=String(item.status||'Offen').trim()||'Offen';
+      const allowed=['Ohne Termin','Termin zu vereinbaren','Offen','Laufend','Abgeschlossen'];
+      if(!allowed.includes(status))throw new Error('Ungültiger Auftragsstatus.');
+      const old=await client.query(
+        'SELECT created_at_text,started_at_text,completed_at_text,internal_note FROM manual_orders_shadow WHERE id=$1 FOR UPDATE',
+        [id]
+      );
+      const prior=old.rows[0]||{};
+      const createdAt=String(prior.created_at_text||nowIso);
+      const startedAt=String(prior.started_at_text||'')||(status==='Laufend'?nowIso:'');
+      const completedAt=String(prior.completed_at_text||'')||(status==='Abgeschlossen'?nowIso:'');
+      const internalNote=item.internalNote===undefined?String(prior.internal_note||''):String(item.internalNote||'');
+      await client.query(
+        `INSERT INTO manual_orders_shadow(
+          id,customer,address,phone,email,description,source,inquiry_id,status,
+          created_at_text,started_at_text,completed_at_text,changed_at_text,changed_by,internal_note,shadow_updated_at
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,now())
+        ON CONFLICT(id) DO UPDATE SET
+          customer=EXCLUDED.customer,address=EXCLUDED.address,phone=EXCLUDED.phone,email=EXCLUDED.email,
+          description=EXCLUDED.description,source=EXCLUDED.source,status=EXCLUDED.status,
+          started_at_text=EXCLUDED.started_at_text,completed_at_text=EXCLUDED.completed_at_text,
+          changed_at_text=EXCLUDED.changed_at_text,changed_by=EXCLUDED.changed_by,
+          internal_note=EXCLUDED.internal_note,shadow_updated_at=now()`,
+        [id,customer,String(item.address||''),String(item.phone||''),String(item.email||''),
+         String(item.description||''),String(item.source||'Manuell'),status,createdAt,startedAt,completedAt,
+         nowIso,by,internalNote]
+      );
+      result={ok:true,id};
     }else if(['saveManualOrderNote','setManualOrderStatus','deleteManualOrder'].includes(action)){
       const id=String(body.id||'').trim();if(!id)throw new Error('Auftrag-ID fehlt.');
       const q=await client.query(
