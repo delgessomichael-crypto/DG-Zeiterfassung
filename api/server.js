@@ -8643,7 +8643,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive',
-  'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
+  'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','setDayStatus','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
 function berlinTodayIso(){
@@ -8774,6 +8774,68 @@ async function tryDirectPostgresWrite(action,body){
           WHERE id=$1`,[entryId,nowIso,by]
       );
       result={ok:true,id:entryId,billedBy:by,billedAt:shadowGermanDateTime(nowIso)};
+    }else if(action==='setDayStatus'){
+      const target=String(body.employee||'').trim(),date=String(body.date||'').trim(),status=String(body.status||'').trim();
+      const allowed=['Arbeiten','Krank','Urlaub','Feiertag'];
+      if(!target||target!==by)throw new Error('Mitarbeiter stimmt nicht mit der Anmeldung überein.');
+      if(!validIsoDateText(date))throw new Error('Ungültiges Datum.');
+      if(!allowed.includes(status))throw new Error('Ungültiger Tagesstatus.');
+      const oldQ=await client.query(
+        'SELECT status FROM day_status_shadow WHERE employee_name=$1 AND status_date=$2 FOR UPDATE',[target,date]
+      );
+      const oldStatus=String(oldQ.rows[0]?.status||'Arbeiten');
+      const closureQ=await client.query(
+        'SELECT legacy_col5 FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 FOR UPDATE',[target,date]
+      );
+      if(closureQ.rowCount&&!/^Automatisch:\\s*(Urlaub|Feiertag)/i.test(String(closureQ.rows[0].legacy_col5||'')))
+        throw new Error('Der Tag wurde bereits abgeschlossen.');
+      if(status!=='Arbeiten'){
+        const work=await client.query(
+          'SELECT 1 FROM time_entries_shadow WHERE employee_name=$1 AND entry_date=$2 LIMIT 1',[target,date]
+        );
+        if(work.rowCount)throw new Error('Für diesen Tag sind bereits Arbeitszeiten erfasst. Bitte zuerst die Einträge löschen.');
+      }
+      const profile=await employeeAutomationProfile(target);
+      const credit=status==='Arbeiten'?0:profileHoursForDate(profile,date);
+      if(status==='Arbeiten'){
+        await client.query('DELETE FROM day_status_shadow WHERE employee_name=$1 AND status_date=$2',[target,date]);
+      }else{
+        await client.query(
+          `INSERT INTO day_status_shadow(
+             employee_name,status_date,status,changed_at_text,source,reference,credited_hours,credited_hours_missing,shadow_updated_at
+           ) VALUES($1,$2,$3,$4,'Mitarbeiter','',$5,false,now())
+           ON CONFLICT(employee_name,status_date) DO UPDATE SET
+             status=EXCLUDED.status,changed_at_text=EXCLUDED.changed_at_text,source='Mitarbeiter',reference='',
+             credited_hours=EXCLUDED.credited_hours,credited_hours_missing=false,shadow_updated_at=now()`,
+          [target,date,status,nowIso,credit]
+        );
+      }
+      if(['Urlaub','Feiertag'].includes(status)&&date>='2026-09-07'){
+        const note='Automatisch: '+status+' · Mitarbeiter';
+        if(closureQ.rowCount){
+          if(/^Automatisch:\\s*(Urlaub|Feiertag)/i.test(String(closureQ.rows[0].legacy_col5||''))){
+            await client.query(
+              `UPDATE day_closures_shadow SET closed_at_text=$3,gross_total=$4,legacy_col5=$5,legacy_col6='',
+                 pause_minutes=0,net_total=$4,updated_at_text=$3,update_reason='DG 7.2 Statusautomatik',shadow_updated_at=now()
+               WHERE employee_name=$1 AND closure_date=$2`,[target,date,nowIso,credit,note]
+            );
+          }
+        }else{
+          await client.query(
+            `INSERT INTO day_closures_shadow(
+               employee_name,closure_date,closed_at_text,gross_total,legacy_col5,legacy_col6,pause_minutes,
+               net_total,updated_at_text,update_reason,shadow_updated_at
+             ) VALUES($1,$2,$3,$4,$5,'',0,$4,'','DG 7.2 Statusautomatik',now())`,
+            [target,date,nowIso,credit,note]
+          );
+        }
+      }else if(status==='Arbeiten'&&['Urlaub','Feiertag'].includes(oldStatus)&&closureQ.rowCount){
+        const note=String(closureQ.rows[0].legacy_col5||'');
+        if(/^Automatisch:\\s*(Urlaub|Feiertag)/i.test(note)&&note.toLowerCase().includes(oldStatus.toLowerCase())){
+          await client.query('DELETE FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2',[target,date]);
+        }
+      }
+      result={ok:true,status};
     }else if(['markRegieObjectBilled','markRegieObjectsBilled'].includes(action)){
       const requested=action==='markRegieObjectBilled'?[String(body.objectId||'').trim()]:
         (Array.isArray(body.objectIds)?body.objectIds.map(x=>String(x||'').trim()).filter(Boolean):[]);
@@ -9173,7 +9235,7 @@ async function tryDirectPostgresWrite(action,body){
     const n=Number(q.rows[0]?.n||0);
     await saveShadowVerifyStat('offer_reminders',n,n,0);
   }
-  if(['reopenInquiryReminder','archiveInquiryReminder'].includes(action)){
+  if(['reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder'].includes(action)){
     for(const includeDone of [false,true]){
       const rows=await postgresInquiryReminderView(includeDone),key=inquiryReminderViewKey(includeDone);
       await saveShadowVerifyStat(key,rows.length,rows.length,0);
@@ -9183,7 +9245,7 @@ async function tryDirectPostgresWrite(action,body){
       await saveShadowVerifyStat(key,rows.length,rows.length,0);
     }
   }
-  if(['saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry'].includes(action)){
+  if(['updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry'].includes(action)){
     for(const status of ['Offen','Alle','Kontaktiert','Erledigt','Archiviert']){
       const rows=await postgresCustomerInquiryView(status),key=customerInquiryViewKey(status);
       await saveShadowVerifyStat(key,rows.length,rows.length,0);
@@ -9193,6 +9255,16 @@ async function tryDirectPostgresWrite(action,body){
     const q=await pool.query('SELECT COUNT(*)::int AS n FROM manual_orders_shadow');
     const n=Number(q.rows[0]?.n||0);
     await saveShadowVerifyStat('manual_orders',n,n,0);
+  }
+  if(action==='setDayStatus'){
+    const employee=String(body.employee||''),date=String(body.date||'');
+    const p=date.split('-').map(Number),year=p[0]||0,month=p[1]||0;
+    if(employee&&year&&month){
+      const dayKey=dayDataVerifyKey({date},employee);if(dayKey)await saveShadowVerifyStat(dayKey,1,1,0);
+      const weekKey=weekVerifyKey({referenceDate:date},employee);if(weekKey)await saveShadowVerifyStat(weekKey,1,1,0);
+      const monthKey=monthDataVerifyKey({employee,year,month});if(monthKey)await saveShadowVerifyStat(monthKey,1,1,0);
+      const bossKey=bossDayClosuresVerifyKey({year,month});if(bossKey)await saveShadowVerifyStat(bossKey,1,1,0);
+    }
   }
   if(action==='setRegieObjectJobStatus'){
     for(const bodyView of [{status:'Offen',year:0,month:0},{status:'Abgerechnet',year:0,month:0}]){
