@@ -8643,7 +8643,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','saveEmployeeAdmin','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
+  'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','syncHolidays','saveEmployeeAdmin','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
@@ -9486,6 +9486,11 @@ async function tryDirectPostgresWrite(action,body){
         [target,JSON.stringify(payload)]
       );
       result={ok:true,_employeeActiveTarget:target};
+    }else if(action==='syncHolidays'){
+      const year=Number(body.year)||0;
+      if(!(year>=2020&&year<=2100))throw new Error('Ungültiges Jahr.');
+      await mirrorHolidayYear(year);
+      result={ok:true,year};
     }else if(action==='saveVacationEntitlement'){
       const employee=String(body.targetEmployee||'').trim(),year=Number(body.year)||0;
       const entitlement=Math.max(0,Number(body.entitlement)||0);
@@ -10260,6 +10265,14 @@ async function tryDirectPostgresWrite(action,body){
       pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'maintenance_%'"),
       pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getMaintenanceArchive','getMaintenanceOverview','getDashboardSummary51')")
     ]);
+  }
+  if(action==='syncHolidays'){
+    const year=Number(body.year)||0;
+    await Promise.all([
+      pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'day_data:%' OR shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'month_data:%' OR shadow_name LIKE 'boss_day_closures:%' OR shadow_name LIKE 'vacation_full:%'"),
+      pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getMonthPayrollAudit','getPayrollCycleState','getDashboardSummary51')")
+    ]);
+    if(year)await mirrorHolidayYear(year);
   }
   if(action==='setMonthClosureStatus'){
     const employee=String(body.targetEmployee||''),year=Number(body.year)||0,month=Number(body.month)||0;
