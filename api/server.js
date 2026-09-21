@@ -8643,7 +8643,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','deleteMaintenanceDevice','deleteMaintenanceCustomer',
-  'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','setDayStatus','manualCloseBossDay','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
+  'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
 function berlinTodayIso(){
@@ -8677,6 +8677,42 @@ async function invalidateLegacySnapshotsAfterDirectWrite(action,body){
     ));
   }
   if(tasks.length)await Promise.all(tasks);
+}
+
+async function recalcClosedDayAfterDirectCorrection(client,employee,date,reason,nowIso){
+  const closure=await client.query(
+    'SELECT 1 FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 FOR UPDATE',[employee,date]
+  );
+  if(!closure.rowCount)return false;
+  const own=await client.query(
+    'SELECT COALESCE(SUM(hours),0)::numeric AS h FROM time_entries_shadow WHERE employee_name=$1 AND entry_date=$2',[employee,date]
+  );
+  const assigned=await client.query(
+    `SELECT COALESCE(SUM(a.hours),0)::numeric AS h
+       FROM assignments_shadow a JOIN time_entries_shadow t ON t.id=a.source_entry_id
+      WHERE a.employee_name=$1 AND COALESCE(a.status,'Zugeordnet')<>'Ersetzt' AND t.entry_date=$2`,
+    [employee,date]
+  );
+  const statusQ=await client.query(
+    'SELECT status,credited_hours,credited_hours_missing FROM day_status_shadow WHERE employee_name=$1 AND status_date=$2 LIMIT 1',[employee,date]
+  );
+  const grossWork=Math.round((Number(own.rows[0]?.h||0)+Number(assigned.rows[0]?.h||0))*100)/100;
+  const pause=grossWork>=6?1:0;
+  const st=statusQ.rows[0]||{};
+  const status=String(st.status||'Arbeiten');
+  let credit=0;
+  if(status!=='Arbeiten'){
+    credit=await effectiveStatusCredit(employee,date,status,st.credited_hours,st.credited_hours_missing);
+  }
+  const gross=Math.round((grossWork+Number(credit||0))*100)/100;
+  const net=Math.round((Math.max(0,grossWork-pause)+Number(credit||0))*100)/100;
+  await client.query(
+    `UPDATE day_closures_shadow
+        SET gross_total=$3,pause_minutes=$4,net_total=$5,updated_at_text=$6,update_reason=$7,shadow_updated_at=now()
+      WHERE employee_name=$1 AND closure_date=$2`,
+    [employee,date,gross,Math.round(pause*60),net,nowIso,String(reason||'Büro-Korrektur')]
+  );
+  return true;
 }
 
 async function tryDirectPostgresWrite(action,body){
@@ -8774,6 +8810,82 @@ async function tryDirectPostgresWrite(action,body){
           WHERE id=$1`,[entryId,nowIso,by]
       );
       result={ok:true,id:entryId,billedBy:by,billedAt:shadowGermanDateTime(nowIso)};
+    }else if(action==='updateBossDayEntry'){
+      const target=String(body.targetEmployee||'').trim(),date=String(body.date||'').trim();
+      const entryId=String(body.entryId||'').trim(),start=String(body.start||'').trim(),end=String(body.end||'').trim();
+      const reason=String(body.reason||'').trim();
+      if(!reason)throw new Error('Bitte einen Grund für die Korrektur eintragen.');
+      if(!target||!validIsoDateText(date)||!entryId)throw new Error('Eintrag wurde nicht gefunden.');
+      if(entryId.startsWith('assigned:'))throw new Error('Mitarbeit-Zuordnungen können hier nicht direkt korrigiert werden. Bitte den Quellbericht prüfen.');
+      let sm=pgTimeToMinutes(start),em=pgTimeToMinutes(end);
+      if(sm===null||em===null||sm===em)throw new Error('Von/Bis-Zeit ist ungültig.');
+      if(em<sm)em+=1440;
+      const hours=Math.round(((em-sm)/60)*100)/100;
+      if(!(hours>0&&hours<=24))throw new Error('Zeitspanne ist ungültig.');
+      const q=await client.query(
+        `SELECT employee_name,entry_date,billing_status FROM time_entries_shadow WHERE id=$1 FOR UPDATE`,[entryId]
+      );
+      if(!q.rowCount)throw new Error('Eintrag wurde nicht gefunden.');
+      const row=q.rows[0];
+      if(String(row.employee_name||'')!==target||berlinDateOnly(row.entry_date)!==date)
+        throw new Error('Eintrag gehört nicht zu Mitarbeiter/Datum.');
+      const wasBilled=String(row.billing_status||'Offen')==='Abgerechnet';
+      await client.query(
+        `UPDATE time_entries_shadow SET start_time=$2,end_time=$3,hours=$4,shadow_updated_at=now() WHERE id=$1`,
+        [entryId,start,end,hours]
+      );
+      await recalcClosedDayAfterDirectCorrection(client,target,date,'Büro-Zeitkorrektur',nowIso);
+      result={ok:true,entryId,employee:target,date,start,end,hours,wasBilled};
+    }else if(action==='deleteBossDayEntry'){
+      const target=String(body.targetEmployee||'').trim(),date=String(body.date||'').trim();
+      const entryId=String(body.entryId||'').trim(),reason=String(body.reason||'').trim();
+      if(!target)throw new Error('Mitarbeiter wurde nicht gefunden.');
+      if(!validIsoDateText(date))throw new Error('Ungültiges Datum.');
+      if(!entryId)throw new Error('Eintrag-ID fehlt.');
+      if(!reason)throw new Error('Bitte einen Grund für das Entfernen des Eintrags angeben.');
+      const affected=new Set([target]);
+      let deletedHours=0,customer='',sourceEntryId='',deletedType='Eigener Eintrag',wasBilled=false;
+      if(entryId.startsWith('assigned:')){
+        const assignmentId=entryId.slice('assigned:'.length);
+        const aq=await client.query(
+          `SELECT a.id,a.source_entry_id,a.employee_name,a.hours,t.entry_date,t.customer,t.billing_status
+             FROM assignments_shadow a JOIN time_entries_shadow t ON t.id=a.source_entry_id
+            WHERE a.id=$1 FOR UPDATE`,[assignmentId]
+        );
+        if(!aq.rowCount)throw new Error('Mitarbeit-Eintrag wurde nicht gefunden.');
+        const a=aq.rows[0];
+        if(String(a.employee_name||'')!==target)throw new Error('Dieser Mitarbeit-Eintrag gehört nicht zum ausgewählten Mitarbeiter.');
+        if(berlinDateOnly(a.entry_date)!==date)throw new Error('Datum des Mitarbeit-Eintrags stimmt nicht überein.');
+        sourceEntryId=String(a.source_entry_id||'');deletedHours=Number(a.hours||0);deletedType='Mitarbeit';
+        customer=String(a.customer||'');wasBilled=String(a.billing_status||'Offen')==='Abgerechnet';
+        await client.query('DELETE FROM assignments_shadow WHERE id=$1',[assignmentId]);
+      }else{
+        const tq=await client.query(
+          `SELECT id,employee_name,entry_date,customer,hours,billing_status FROM time_entries_shadow WHERE id=$1 FOR UPDATE`,[entryId]
+        );
+        if(!tq.rowCount)throw new Error('Eintrag wurde nicht gefunden.');
+        const t=tq.rows[0];
+        if(String(t.employee_name||'')!==target||berlinDateOnly(t.entry_date)!==date)
+          throw new Error('Eintrag gehört nicht zum ausgewählten Mitarbeiter bzw. Tag.');
+        deletedHours=Number(t.hours||0);customer=String(t.customer||'');sourceEntryId=entryId;
+        wasBilled=String(t.billing_status||'Offen')==='Abgerechnet';
+        const assignees=await client.query(
+          `SELECT employee_name FROM assignments_shadow
+            WHERE source_entry_id=$1 AND COALESCE(status,'Zugeordnet')<>'Ersetzt'`,[entryId]
+        );
+        for(const r of assignees.rows)if(String(r.employee_name||''))affected.add(String(r.employee_name));
+        await client.query('DELETE FROM assignments_shadow WHERE source_entry_id=$1',[entryId]);
+        await client.query(
+          `UPDATE assignments_shadow SET status='Zugeordnet',replaced_by_entry_id='',shadow_updated_at=now()
+            WHERE replaced_by_entry_id=$1`,[entryId]
+        );
+        await client.query('DELETE FROM time_entries_shadow WHERE id=$1',[entryId]);
+      }
+      for(const empName of affected){
+        await recalcClosedDayAfterDirectCorrection(client,empName,date,'Büro: Fehleintrag gelöscht · '+reason,nowIso);
+      }
+      result={ok:true,id:entryId,sourceEntryId,employee:target,date,customer,hours:Math.round(deletedHours*100)/100,
+        type:deletedType,affectedEmployees:[...affected],deletedBy:by,deletedAt:shadowGermanDateTime(nowIso),reason,wasBilled};
     }else if(action==='manualCloseBossDay'){
       const target=String(body.targetEmployee||'').trim(),date=String(body.date||'').trim();
       if(!target)throw new Error('Mitarbeiter wurde nicht gefunden.');
@@ -9351,6 +9463,16 @@ async function tryDirectPostgresWrite(action,body){
     const q=await pool.query('SELECT COUNT(*)::int AS n FROM manual_orders_shadow');
     const n=Number(q.rows[0]?.n||0);
     await saveShadowVerifyStat('manual_orders',n,n,0);
+  }
+  if(['updateBossDayEntry','deleteBossDayEntry'].includes(action)){
+    const employee=String(body.targetEmployee||''),date=String(body.date||'');
+    const p=date.split('-').map(Number),year=p[0]||0,month=p[1]||0;
+    if(employee&&year&&month){
+      const dayKey=dayDataVerifyKey({date},employee);if(dayKey)await saveShadowVerifyStat(dayKey,1,1,0);
+      const weekKey=weekVerifyKey({referenceDate:date},employee);if(weekKey)await saveShadowVerifyStat(weekKey,1,1,0);
+      const monthKey=monthDataVerifyKey({employee,year,month});if(monthKey)await saveShadowVerifyStat(monthKey,1,1,0);
+      const bossKey=bossDayClosuresVerifyKey({year,month});if(bossKey)await saveShadowVerifyStat(bossKey,1,1,0);
+    }
   }
   if(action==='manualCloseBossDay'){
     const employee=String(body.targetEmployee||''),date=String(body.date||'');
