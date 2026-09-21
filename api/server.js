@@ -718,6 +718,7 @@ function legacyOutboxTerminalSuccess(action,parsed){
   if(['completeOwnReminder','deleteOwnReminder'].includes(action)&&msg.includes('bereits erledigt'))return true;
   if(action==='deleteManualOrder'&&msg.includes('auftrag nicht gefunden'))return true;
   if(['reopenInquiryReminder','archiveInquiryReminder'].includes(action)&&msg.includes('reminder ist bereits erledigt'))return true;
+  if(action==='deleteMonthlyAdjustment'&&msg.includes('stundenkorrektur wurde nicht gefunden'))return true;
   return false;
 }
 let legacyOutboxFlushRunning=false;
@@ -1818,6 +1819,13 @@ async function mirrorRegieMetadataWrite(action,body,parsed){
     return;
   }
 
+  if(action==='deleteMonthlyAdjustment'){
+    await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'boss_month_native:%' OR shadow_name LIKE 'payroll_audit_native:%' OR shadow_name LIKE 'month_data:%'");
+    await pool.query('TRUNCATE boss_month_views_shadow');
+    if(result&&typeof result==='object'){
+      delete result._employee;delete result._year;delete result._month;
+    }
+  }
   if(action==='rescheduleOfferReminder'){
     const q=await pool.query('SELECT COUNT(*)::int AS n FROM offer_reminders_shadow');
     const n=Number(q.rows[0]?.n||0);
@@ -8669,7 +8677,8 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
-  'reopenInquiryReminder','archiveInquiryReminder','rescheduleOfferReminder','saveManualOrder'
+  'reopenInquiryReminder','archiveInquiryReminder','rescheduleOfferReminder','saveManualOrder',
+  'deleteMonthlyAdjustment'
 ]);
 
 function berlinTodayIso(){
@@ -8735,6 +8744,16 @@ async function tryDirectPostgresWrite(action,body){
         );
         result={ok:true,id};
       }
+    }else if(action==='deleteMonthlyAdjustment'){
+      const id=String(body.adjustmentId||'').trim();if(!id)throw new Error('Korrektur-ID fehlt.');
+      const q=await client.query(
+        'SELECT employee_name,adjustment_year,adjustment_month FROM monthly_adjustments_shadow WHERE id=$1 FOR UPDATE',
+        [id]
+      );
+      if(!q.rowCount)throw new Error('Stundenkorrektur wurde nicht gefunden.');
+      const row=q.rows[0];
+      await client.query('DELETE FROM monthly_adjustments_shadow WHERE id=$1',[id]);
+      result={ok:true,_employee:String(row.employee_name||''),_year:Number(row.adjustment_year)||0,_month:Number(row.adjustment_month)||0};
     }else if(action==='rescheduleOfferReminder'){
       const rid=String(body.reminderId||'').trim();if(!rid)throw new Error('Reminder-ID fehlt.');
       const rq=await client.query(
