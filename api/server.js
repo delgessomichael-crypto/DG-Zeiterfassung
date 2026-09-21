@@ -8678,7 +8678,8 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive'
+  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive',
+  'setRegieObjectJobStatus'
 ]);
 
 function berlinTodayIso(){
@@ -8768,6 +8769,32 @@ async function tryDirectPostgresWrite(action,body){
         );
         result={ok:true,id};
       }
+    }else if(action==='setRegieObjectJobStatus'){
+      const objectId=String(body.objectId||'').trim(),jobStatus=String(body.jobStatus||'').trim();
+      if(!objectId)throw new Error('Objekt-ID fehlt.');
+      if(!['Laufend','Abgeschlossen'].includes(jobStatus))throw new Error('Ungültiger Auftragsstatus.');
+      const mq=await client.query('SELECT merge_id FROM regie_merges_shadow WHERE object_id=$1 LIMIT 1',[objectId]);
+      const mergeId=String(mq.rows[0]?.merge_id||'');
+      let objectIds=[objectId];
+      if(mergeId){
+        const iq=await client.query('SELECT object_id FROM regie_merges_shadow WHERE merge_id=$1 ORDER BY object_id',[mergeId]);
+        objectIds=iq.rows.map(r=>String(r.object_id||'')).filter(Boolean);
+        if(!objectIds.includes(objectId))objectIds.push(objectId);
+      }
+      const matched=await client.query(
+        `SELECT id,job_status FROM time_entries_shadow
+          WHERE object_id=ANY($1::text[]) AND COALESCE(billing_status,'Offen')='Offen'
+          FOR UPDATE`,
+        [objectIds]
+      );
+      if(!matched.rowCount)throw new Error('Für dieses Objekt wurden keine passenden offenen Regieberichte zum Ändern gefunden.');
+      const changed=matched.rows.filter(r=>String(r.job_status||'Abgeschlossen')!==jobStatus).length;
+      await client.query(
+        `UPDATE time_entries_shadow SET job_status=$2,shadow_updated_at=now()
+          WHERE object_id=ANY($1::text[]) AND COALESCE(billing_status,'Offen')='Offen'`,
+        [objectIds,jobStatus]
+      );
+      result={ok:true,objectId,objectIds,jobStatus,count:changed,changedBy:by,changedAt:shadowGermanDateTime(nowIso)};
     }else if(action==='setPlannerWorkerActive'){
       const id=String(body.id||'').trim(),active=Boolean(body.active);
       if(!id)throw new Error('Kalender-Mitarbeiter nicht gefunden.');
@@ -9035,6 +9062,13 @@ async function tryDirectPostgresWrite(action,body){
     throw e;
   }finally{client.release();}
 
+  if(action==='setRegieObjectJobStatus'){
+    for(const bodyView of [{status:'Offen',year:0,month:0},{status:'Abgerechnet',year:0,month:0}]){
+      const rows=await postgresRegieReports(bodyView),key=regieReportsVerifyKey(bodyView);
+      await saveShadowVerifyStat(key,Array.isArray(rows)?rows.length:0,Array.isArray(rows)?rows.length:0,0);
+    }
+    await saveShadowVerifyStat(dashboardNativeKey(),1,1,0);
+  }
   if(action==='setPlannerWorkerActive'){
     const q=await pool.query(
       `SELECT id,employee_name,display_name,provider,calendar_id,active,sort_order
