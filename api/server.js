@@ -8678,7 +8678,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive'
+  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive'
 ]);
 
 function berlinTodayIso(){
@@ -8768,6 +8768,18 @@ async function tryDirectPostgresWrite(action,body){
         );
         result={ok:true,id};
       }
+    }else if(action==='setPlannerWorkerActive'){
+      const id=String(body.id||'').trim(),active=Boolean(body.active);
+      if(!id)throw new Error('Kalender-Mitarbeiter nicht gefunden.');
+      const q=await client.query(
+        'SELECT 1 FROM planner_workers_shadow WHERE id=$1 FOR UPDATE',[id]
+      );
+      if(!q.rowCount)throw new Error('Kalender-Mitarbeiter nicht gefunden.');
+      await client.query(
+        'UPDATE planner_workers_shadow SET active=$2,shadow_updated_at=now() WHERE id=$1',
+        [id,active]
+      );
+      result={ok:true,_plannerWorkerId:id};
     }else if(action==='setEmployeeActive'){
       const target=String(body.targetName||'').trim();
       const active=Boolean(body.active);
@@ -9023,6 +9035,19 @@ async function tryDirectPostgresWrite(action,body){
     throw e;
   }finally{client.release();}
 
+  if(action==='setPlannerWorkerActive'){
+    const q=await pool.query(
+      `SELECT id,employee_name,display_name,provider,calendar_id,active,sort_order
+         FROM planner_workers_shadow ORDER BY sort_order ASC,display_name ASC`
+    );
+    result=q.rows.map(r=>({
+      id:String(r.id||''),employeeName:String(r.employee_name||''),
+      displayName:String(r.display_name||r.employee_name||''),provider:String(r.provider||'google'),
+      calendarId:String(r.calendar_id||''),active:Boolean(r.active),sortOrder:Number(r.sort_order||999)
+    }));
+    await saveShadowVerifyStat('planner_workers',result.length,result.length,0);
+    await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'planner_availability:%'");
+  }
   if(action==='setEmployeeActive'){
     employeeNamesCache=null;
     employeeSnapshotDirtyCache=false;
