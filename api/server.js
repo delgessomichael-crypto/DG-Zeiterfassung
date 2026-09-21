@@ -120,6 +120,24 @@ CREATE TABLE IF NOT EXISTS write_action_stats (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS legacy_write_outbox (
+  id BIGSERIAL PRIMARY KEY,
+  action TEXT NOT NULL,
+  payload_ciphertext TEXT NOT NULL,
+  payload_iv TEXT NOT NULL,
+  payload_tag TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  delivered_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS legacy_write_outbox_pending_idx
+  ON legacy_write_outbox(status,next_attempt_at,id);
+
 CREATE TABLE IF NOT EXISTS manual_orders_shadow (
   id TEXT PRIMARY KEY,
   customer TEXT,
@@ -665,11 +683,108 @@ VALUES
 ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=now();
 `;
 
+function legacyOutboxCryptoKey(){
+  if(!MIGRATION_TOKEN)return null;
+  return crypto.createHash('sha256').update(MIGRATION_TOKEN+'|dg-legacy-outbox-v1','utf8').digest();
+}
+function encryptLegacyOutboxPayload(payload){
+  const key=legacyOutboxCryptoKey();if(!key)throw new Error('Legacy outbox key unavailable');
+  const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv('aes-256-gcm',key,iv);
+  const ciphertext=Buffer.concat([cipher.update(JSON.stringify(payload||{}),'utf8'),cipher.final()]);
+  return {ciphertext:ciphertext.toString('base64'),iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64')};
+}
+function decryptLegacyOutboxPayload(row){
+  const key=legacyOutboxCryptoKey();if(!key)throw new Error('Legacy outbox key unavailable');
+  const decipher=crypto.createDecipheriv('aes-256-gcm',key,Buffer.from(String(row.payload_iv||''),'base64'));
+  decipher.setAuthTag(Buffer.from(String(row.payload_tag||''),'base64'));
+  const plain=Buffer.concat([
+    decipher.update(Buffer.from(String(row.payload_ciphertext||''),'base64')),
+    decipher.final()
+  ]).toString('utf8');
+  return JSON.parse(plain);
+}
+async function enqueueLegacyWriteWithClient(client,action,payload){
+  const enc=encryptLegacyOutboxPayload(payload);
+  const q=await client.query(
+    `INSERT INTO legacy_write_outbox(action,payload_ciphertext,payload_iv,payload_tag)
+     VALUES($1,$2,$3,$4) RETURNING id`,
+    [String(action||''),enc.ciphertext,enc.iv,enc.tag]
+  );
+  return Number(q.rows[0]?.id||0);
+}
+function legacyOutboxTerminalSuccess(action,parsed){
+  if(parsed&&parsed.ok!==false)return true;
+  const msg=String(parsed&&parsed.error||'').toLowerCase();
+  if(['completeOwnReminder','deleteOwnReminder'].includes(action)&&msg.includes('bereits erledigt'))return true;
+  return false;
+}
+let legacyOutboxFlushRunning=false;
+async function flushLegacyWriteOutbox(limit=12){
+  if(legacyOutboxFlushRunning||!pool||!GOOGLE_BACKEND_URL||!legacyOutboxCryptoKey())return;
+  legacyOutboxFlushRunning=true;
+  try{
+    const q=await pool.query(
+      `SELECT id,action,payload_ciphertext,payload_iv,payload_tag,attempts
+         FROM legacy_write_outbox
+        WHERE ((status IN ('pending','failed') AND next_attempt_at<=now())
+            OR (status='sending' AND updated_at<now()-interval '5 minutes'))
+        ORDER BY id ASC LIMIT $1`,
+      [Math.max(1,Math.min(50,Number(limit)||12))]
+    );
+    for(const row of q.rows){
+      await pool.query(
+        `UPDATE legacy_write_outbox SET status='sending',attempts=attempts+1,updated_at=now()
+          WHERE id=$1`,[row.id]
+      );
+      let payload,raw='',parsed=null,httpStatus=0,started=Date.now();
+      try{
+        payload=decryptLegacyOutboxPayload(row);
+        const upstream=await fetch(GOOGLE_BACKEND_URL,{
+          method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+          body:JSON.stringify(payload),redirect:'follow'
+        });
+        httpStatus=upstream.status;raw=await upstream.text();
+        try{parsed=JSON.parse(raw);}catch(_e){}
+        if(!upstream.ok||!legacyOutboxTerminalSuccess(String(row.action||''),parsed)){
+          throw new Error((parsed&&parsed.error)||('HTTP '+upstream.status));
+        }
+        await pool.query(
+          `UPDATE legacy_write_outbox
+              SET status='delivered',last_error=NULL,delivered_at=now(),updated_at=now()
+            WHERE id=$1`,[row.id]
+        );
+        await pool.query(
+          `INSERT INTO legacy_action_log(action,request_payload,response_ok,response_payload,http_status,duration_ms)
+           VALUES($1,$2::jsonb,true,$3::jsonb,$4,$5)`,
+          [String(row.action||''),JSON.stringify(sanitizedLogPayload(payload)),
+           parsed?JSON.stringify(sanitizeForLog(parsed)):null,httpStatus,Math.max(0,Date.now()-started)]
+        );
+        console.log('LEGACY_OUTBOX delivered id='+row.id+' action='+row.action);
+      }catch(e){
+        const attempts=Number(row.attempts||0)+1;
+        const delay=Math.min(3600,Math.max(10,Math.pow(2,Math.min(8,attempts))*5));
+        await pool.query(
+          `UPDATE legacy_write_outbox
+              SET status='failed',last_error=$2,next_attempt_at=now()+($3::text||' seconds')::interval,updated_at=now()
+            WHERE id=$1`,
+          [row.id,String(e.message||e).slice(0,1000),String(delay)]
+        );
+        console.error('LEGACY_OUTBOX failed id='+row.id+' action='+row.action+' error='+e.message);
+        break; // preserve write order
+      }
+    }
+  }finally{legacyOutboxFlushRunning=false;}
+}
+function kickLegacyOutbox(){
+  setTimeout(()=>flushLegacyWriteOutbox().catch(e=>console.error('legacy outbox flush failed',e.message)),0);
+}
+
 async function cleanupInternalData() {
   if (!pool) return;
   await pool.query("DELETE FROM response_cache WHERE created_at < now() - interval '24 hours'");
   await pool.query("DELETE FROM legacy_action_log WHERE created_at < now() - interval '30 days'");
   await pool.query("DELETE FROM railway_sessions WHERE expires_at < now() - interval '7 days' OR revoked_at < now() - interval '7 days'");
+  await pool.query("DELETE FROM legacy_write_outbox WHERE status='delivered' AND delivered_at < now() - interval '30 days'");
 }
 
 async function logLatencySummary() {
@@ -784,6 +899,12 @@ async function initDb() {
     refreshGooglePing().catch(e => console.error('scheduled Google ping failed', e.message));
   }, GOOGLE_PING_REFRESH_MS);
   if (typeof pingTimer.unref === 'function') pingTimer.unref();
+
+  const legacyOutboxTimer = setInterval(() => {
+    flushLegacyWriteOutbox().catch(e => console.error('legacy outbox scheduled flush failed', e.message));
+  }, 10 * 1000);
+  if (typeof legacyOutboxTimer.unref === 'function') legacyOutboxTimer.unref();
+  kickLegacyOutbox();
 }
 
 function cors(req, res) {
@@ -8512,6 +8633,134 @@ function directMinimumWageRead(body){
   return current?{date,from:current.from,amount:Number(current.amount)||0}:{date,from:'',amount:0};
 }
 
+const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
+  'saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder',
+  'saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed'
+]);
+
+function berlinTodayIso(){
+  const n=berlinNowParts();
+  return String(n.year)+'-'+String(n.month).padStart(2,'0')+'-'+String(n.day).padStart(2,'0');
+}
+function validIsoDateText(v){
+  const s=String(v||'');if(!/^\d{4}-\d{2}-\d{2}$/.test(s))return false;
+  const p=s.split('-').map(Number),d=new Date(Date.UTC(p[0],p[1]-1,p[2],12));
+  return d.getUTCFullYear()===p[0]&&d.getUTCMonth()===p[1]-1&&d.getUTCDate()===p[2];
+}
+async function tryDirectPostgresWrite(action,body){
+  if(!DIRECT_POSTGRES_WRITE_ACTIONS.has(action)||!pool||!GOOGLE_BACKEND_URL||!legacyOutboxCryptoKey())return null;
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const by=String(body.employee||session.employeeName||'').trim(),nowIso=new Date().toISOString();
+  const client=await pool.connect();
+  let result=null,outboxId=0;
+  try{
+    await client.query('BEGIN');
+    if(['saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder'].includes(action)){
+      const id=String(body.reminderId||'').trim();if(!id)throw new Error('Reminder-ID fehlt.');
+      const q=await client.query(
+        'SELECT status FROM own_reminders_shadow WHERE id=$1 FOR UPDATE',[id]
+      );
+      if(!q.rowCount)throw new Error('Eigener Reminder wurde nicht gefunden.');
+      const status=String(q.rows[0].status||'Offen');
+      if(action!=='deleteOwnReminder'&&status!=='Offen')throw new Error('Reminder ist bereits erledigt.');
+      if(action==='saveOwnReminderInternalNote'){
+        const note=String(body.note==null?'':body.note).trim();
+        if(note.length>5000)throw new Error('Die interne Notiz ist zu lang.');
+        await client.query(
+          `UPDATE own_reminders_shadow
+              SET internal_note=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now()
+            WHERE id=$1`,[id,note,nowIso,by]
+        );
+        result={ok:true,id,internalNote:note};
+      }else if(action==='rescheduleOwnReminder'){
+        const due=String(body.dueDate||'').trim();
+        if(!validIsoDateText(due))throw new Error('Bitte ein gültiges Fälligkeitsdatum wählen.');
+        if(due<berlinTodayIso())throw new Error('Das Fälligkeitsdatum darf nicht in der Vergangenheit liegen.');
+        await client.query(
+          `UPDATE own_reminders_shadow
+              SET due_date_text=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now()
+            WHERE id=$1`,[id,due,nowIso,by]
+        );
+        result={ok:true,id,dueDate:due};
+      }else if(action==='completeOwnReminder'){
+        await client.query(
+          `UPDATE own_reminders_shadow
+              SET status='Erledigt',result='Erledigt',changed_at_text=$2,changed_by=$3,shadow_updated_at=now()
+            WHERE id=$1`,[id,nowIso,by]
+        );
+        result={ok:true,id};
+      }else{
+        await client.query(
+          `UPDATE own_reminders_shadow
+              SET status='Gelöscht',result='Gelöscht',changed_at_text=$2,changed_by=$3,shadow_updated_at=now()
+            WHERE id=$1`,[id,nowIso,by]
+        );
+        result={ok:true,id};
+      }
+    }else if(action==='saveObjectInternalNote'){
+      const objectId=String(body.objectId||'').trim();if(!objectId)throw new Error('Objekt-ID fehlt.');
+      const note=String(body.note==null?'':body.note).trim();
+      const changedAt=shadowGermanDateTime(nowIso);
+      await client.query(
+        `INSERT INTO object_notes_shadow(object_id,note,changed_at_text,changed_by,shadow_updated_at)
+         VALUES($1,$2,$3,$4,now())
+         ON CONFLICT(object_id) DO UPDATE SET note=EXCLUDED.note,changed_at_text=EXCLUDED.changed_at_text,
+           changed_by=EXCLUDED.changed_by,shadow_updated_at=now()`,
+        [objectId,note,nowIso,by]
+      );
+      result={ok:true,objectId,note,changedAt,changedBy:by};
+    }else if(action==='markPayrollIssueReviewed'){
+      const issueId=String(body.issueId||'').trim();if(!issueId)throw new Error('Pruef-ID fehlt.');
+      const old=await client.query('SELECT 1 FROM payroll_reviews_shadow WHERE issue_id=$1',[issueId]);
+      if(old.rowCount){
+        await client.query('COMMIT');
+        return {result:{ok:true,alreadyReviewed:true},outboxId:0};
+      }
+      await client.query(
+        `INSERT INTO payroll_reviews_shadow(
+          issue_id,review_year,review_month,employee_name,review_date,reviewed_at_text,reviewed_by,note,shadow_updated_at
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,now())`,
+        [issueId,Number(body.year)||0,Number(body.month)||0,String(body.targetEmployee||''),
+         String(body.date||''),nowIso,by,String(body.note||'')]
+      );
+      result={ok:true};
+    }else if(action==='markConflictReviewed'){
+      const conflictId=String(body.conflictId||'').trim();if(!conflictId)throw new Error('Konflikt-ID fehlt.');
+      const old=await client.query('SELECT 1 FROM conflict_reviews_shadow WHERE conflict_id=$1',[conflictId]);
+      if(old.rowCount){
+        await client.query('COMMIT');
+        return {result:{ok:true,alreadyReviewed:true},outboxId:0};
+      }
+      await client.query(
+        `INSERT INTO conflict_reviews_shadow(
+          conflict_id,employee_name,review_year,review_month,conflict_date,reviewed_at_text,reviewed_by,shadow_updated_at
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,now())`,
+        [conflictId,String(body.targetEmployee||''),Number(body.year)||0,Number(body.month)||0,
+         String(body.date||''),nowIso,by]
+      );
+      result={ok:true};
+    }
+    outboxId=await enqueueLegacyWriteWithClient(client,action,body);
+    await client.query('COMMIT');
+  }catch(e){
+    try{await client.query('ROLLBACK');}catch(_e){}
+    throw e;
+  }finally{client.release();}
+
+  if(action==='saveObjectInternalNote'){
+    const q=await pool.query('SELECT COUNT(*)::int AS n FROM object_notes_shadow');
+    const n=Number(q.rows[0]?.n||0);await saveShadowVerifyStat('object_notes:base',n,n,0);
+  }
+  if(['saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder'].includes(action)){
+    const q=await pool.query('SELECT COUNT(*)::int AS n FROM own_reminders_shadow');
+    const n=Number(q.rows[0]?.n||0);await saveShadowVerifyStat('own_reminders',n,n,0);
+  }
+  await bumpWriteStat(action,true);
+  console.log('POSTGRES_WRITE action='+action+' legacy_outbox='+outboxId);
+  kickLegacyOutbox();
+  return {result,outboxId};
+}
+
 async function proxyLegacy(req, res, body) {
   const action = String(body && body.action || '');
   if (action === 'ping') return handlePing(req,res);
@@ -8538,6 +8787,20 @@ async function proxyLegacy(req, res, body) {
       }
     } catch(e) {
       console.error('Direct Postgres read failed; falling back to Google:',action,e.message);
+    }
+  }
+  if (DIRECT_POSTGRES_WRITE_ACTIONS.has(action)) {
+    try {
+      const directWrite=await tryDirectPostgresWrite(action,body);
+      if(directWrite!==null) {
+        return json(res,200,{
+          ok:true,data:directWrite.result,source:'postgres-primary',
+          legacySync:directWrite.outboxId?'queued':'already-synced'
+        },req);
+      }
+    } catch(e) {
+      console.error('Direct Postgres write failed:',action,e.message);
+      return json(res,400,{ok:false,error:e.message},req);
     }
   }
   if (!GOOGLE_BACKEND_URL) return json(res, 503, {ok:false,error:'Google backend not configured'}, req);
@@ -8987,6 +9250,7 @@ async function health() {
   let dayClosureSourceAudit = null;
   let activeRailwaySessions = 0;
   let directReadReady = {};
+  let legacyWriteOutbox = {pending:0,failed:0,sending:0,delivered:0};
   if (pool) {
     try {
       const q = await pool.query('SELECT 1 AS ok');
@@ -9074,6 +9338,10 @@ async function health() {
           LIMIT 20`
       );
       writeStats=writeQ.rows;
+      const outboxQ=await pool.query(
+        `SELECT status,COUNT(*)::int AS n FROM legacy_write_outbox GROUP BY status`
+      );
+      for(const r of outboxQ.rows)legacyWriteOutbox[String(r.status||'pending')]=Number(r.n||0);
       dayClosureSourceAudit=await auditDayClosureSourceDuplicates();
       const sessionQ=await pool.query(
         'SELECT COUNT(*)::int AS n FROM railway_sessions WHERE revoked_at IS NULL AND expires_at>now()'
@@ -9211,7 +9479,8 @@ async function health() {
     writeStats,
     dayClosureSourceAudit,
     activeRailwaySessions,
-    directReadReady
+    directReadReady,
+    legacyWriteOutbox
   };
 }
 
@@ -9341,6 +9610,7 @@ initDb()
     console.log('READINESS: database='+h.database+' employeeReadSource='+h.employeeReadSource+' employeeSnapshotDirty='+h.employeeSnapshotDirty+' employeeCount='+(h.postgresEmployeeSnapshotCount==null?'n/a':h.postgresEmployeeSnapshotCount));
     if(h.shadowCounts)console.log('SHADOW_COUNTS manual_orders='+h.shadowCounts.manualOrders+' own_reminders='+h.shadowCounts.ownReminders+' offer_reminders='+h.shadowCounts.offerReminders+' planner_workers='+h.shadowCounts.plannerWorkers+' planner_events='+h.shadowCounts.plannerEvents+' maintenance_customers='+h.shadowCounts.maintenanceCustomers+' maintenance_objects='+h.shadowCounts.maintenanceObjects+' maintenance_devices='+h.shadowCounts.maintenanceDevices+' maintenance_repairs='+h.shadowCounts.maintenanceRepairs+' maintenance_manual='+h.shadowCounts.maintenanceManual+' maintenance_attachments='+h.shadowCounts.maintenanceAttachments+' absences='+h.shadowCounts.absences+' vacation_entitlements='+h.shadowCounts.vacationEntitlements+' time_bank='+h.shadowCounts.timeBank+' monthly_adjustments='+h.shadowCounts.monthlyAdjustments+' month_closures='+h.shadowCounts.monthClosures+' payroll_reviews='+h.shadowCounts.payrollReviews+' payroll_closures='+h.shadowCounts.payrollClosures+' conflict_reviews='+h.shadowCounts.conflictReviews+' day_status='+h.shadowCounts.dayStatus+' day_closures='+h.shadowCounts.dayClosures+' time_entries='+h.shadowCounts.timeEntries+' objects='+h.shadowCounts.objects+' regie_merges='+h.shadowCounts.regieMerges+' object_notes='+h.shadowCounts.objectNotes);
     console.log('RAILWAY_SESSIONS active='+Number(h.activeRailwaySessions||0));
+    if(h.legacyWriteOutbox)console.log('LEGACY_OUTBOX pending='+Number(h.legacyWriteOutbox.pending||0)+' failed='+Number(h.legacyWriteOutbox.failed||0)+' sending='+Number(h.legacyWriteOutbox.sending||0)+' delivered='+Number(h.legacyWriteOutbox.delivered||0));
     if(h.directReadReady)console.log('DIRECT_READ_READY employee_admin='+Boolean(h.directReadReady.employeeAdmin)+' manual_orders='+Boolean(h.directReadReady.manualOrders)+' own_reminders='+Boolean(h.directReadReady.ownReminders)+' offer_reminders='+Boolean(h.directReadReady.offerReminders)+' planner_workers='+Boolean(h.directReadReady.plannerWorkers)+' planner_availability='+Number(h.directReadReady.plannerAvailabilityVerified||0)+' absences='+Boolean(h.directReadReady.absences)+' absence_overview='+Number(h.directReadReady.absenceOverviewVerified||0)+' sickness_alerts='+Boolean(h.directReadReady.sicknessAlerts)+' maintenance_search_queries='+Number(h.directReadReady.maintenanceSearchVerifiedQueries||0)+' maintenance_customers='+Number(h.directReadReady.maintenanceCustomersVerified||0)+' maintenance_contracts='+Boolean(h.directReadReady.maintenanceContracts)+' maintenance_overview='+Boolean(h.directReadReady.maintenanceOverview)+' maintenance_archive_queries='+Number(h.directReadReady.maintenanceArchiveVerifiedQueries||0)+' maintenance_device_ids='+Number(h.directReadReady.maintenanceDeviceIdsVerified||0)+' object_note_reads='+Number(h.directReadReady.objectNoteReadsVerified||0)+' object_notes_base='+Boolean(h.directReadReady.objectNotesBase)+' object_reports='+Number(h.directReadReady.objectReportsVerified||0)+' regie_reports='+Number(h.directReadReady.regieReportsVerified||0)+' regie_billing_risk='+Number(h.directReadReady.regieBillingRiskVerified||0)+' regie_attachments='+Number(h.directReadReady.regieAttachmentsVerified||0)+' regie_attachments_base='+Boolean(h.directReadReady.regieAttachmentsBase)+' vacation_keys='+Number(h.directReadReady.vacationVerifiedKeys||0)+' timebank_employees='+Number(h.directReadReady.timeBankVerifiedEmployees||0)+' my_timebank_employees='+Number(h.directReadReady.myTimeBankVerifiedEmployees||0)+' week_data='+Number(h.directReadReady.weekDataVerified||0)+' day_data='+Number(h.directReadReady.dayDataVerified||0)+' month_data='+Number(h.directReadReady.monthDataVerified||0)+' boss_day_closures='+Number(h.directReadReady.bossDayClosuresVerified||0)+' boss_month_views='+Number(h.directReadReady.bossMonthViewsVerified||0)+' payroll_audit_views='+Number(h.directReadReady.payrollAuditViewsVerified||0)+' payroll_cycle_views='+Number(h.directReadReady.payrollCycleViewsVerified||0)+' offer_report_views='+Number(h.directReadReady.offerReportViewsVerified||0)+' offer_statistics='+Boolean(h.directReadReady.offerStatisticsView)+' dashboard='+Boolean(h.directReadReady.dashboardSummaryView));
     if(Array.isArray(h.shadowReadiness)&&h.shadowReadiness.length)console.log('SHADOW_READINESS '+h.shadowReadiness.map(x=>x.shadowName+'='+x.status+'('+x.mismatches+')').join(' | '));
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
