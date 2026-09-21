@@ -755,6 +755,7 @@ async function initDb() {
   await bootstrapVacationReadinessV7();
   await bootstrapCurrentPeriodReadinessV8();
   await bootstrapDayAndBossClosureReadinessV10();
+  await bootstrapAbsenceAndPlannerReadinessV11();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -6943,6 +6944,51 @@ async function initEmployeeAdminShadowFromSnapshot(){
 
 
 
+
+async function bootstrapAbsenceAndPlannerReadinessV11(){
+  if(!pool)return;
+  const now=berlinNowParts();
+  const year=now.year;
+  const today=String(year)+'-'+String(now.month).padStart(2,'0')+'-'+String(now.day).padStart(2,'0');
+  const week=weekRangeFromReference(today);
+  const marker='trusted_absence_planner_bootstrap_v11:'+today;
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);
+  if(done.rowCount)return;
+
+  await mirrorHolidayYear(year);
+  if(week&&week.end.slice(0,4)!==String(year))await mirrorHolidayYear(Number(week.end.slice(0,4)));
+
+  const employees=await pool.query('SELECT employee_name FROM employee_admin_shadow ORDER BY employee_name');
+  let absenceKeys=0;
+  for(const row of employees.rows){
+    const employee=String(row.employee_name||'').trim();if(!employee)continue;
+    const data=await postgresAbsenceOverview(employee,year);
+    if(!data)continue;
+    await saveShadowVerifyStat('absence_overview:'+year+':'+employee,1,1,0);
+    absenceKeys++;
+  }
+
+  let plannerKey='',plannerRows=0;
+  if(week){
+    const body={startDate:week.start,endDate:week.end};
+    const rows=await postgresPlannerAvailability(body);
+    plannerKey=plannerAvailabilityVerifyKey(body);
+    if(Array.isArray(rows)){
+      plannerRows=rows.length;
+      await saveShadowVerifyStat(plannerKey,rows.length,rows.length,0);
+    }
+  }
+
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+     ON CONFLICT(key) DO NOTHING`,
+    [marker,JSON.stringify({
+      at:new Date().toISOString(),today,year,week,absenceKeys,plannerKey,plannerRows,
+      reason:'trusted absence/sickness derivation and current visible planner-week availability'
+    })]
+  );
+  console.log('TRUSTED_ABSENCE_PLANNER_V11 absence_keys='+absenceKeys+' planner_rows='+plannerRows+' planner_key='+plannerKey);
+}
 
 async function bootstrapDayAndBossClosureReadinessV10(){
   if(!pool)return;
