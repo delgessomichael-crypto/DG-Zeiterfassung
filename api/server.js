@@ -8917,7 +8917,7 @@ async function tryDirectPostgresWrite(action,body){
       if(!customer)throw new Error('Kundenname fehlt.');
       if(String(item.inquiryId||'').trim())throw new Error('Anfrage-Aufträge werden weiterhin über Google verarbeitet.');
       const status=String(item.status||'Offen').trim()||'Offen';
-      const allowed=['Ohne Termin','Termin zu vereinbaren','Offen','Laufend','Abgeschlossen'];
+      const allowed=['Ohne Termin','Termin zu vereinbaren','Offen','Laufend','Abgeschlossen','In Regiebericht uebernommen','Offenes Angebot','Angebot Abgelehnt','Angebot zu erstellen'];
       if(!allowed.includes(status))throw new Error('Ungültiger Auftragsstatus.');
       const old=await client.query(
         'SELECT created_at_text,started_at_text,completed_at_text,internal_note FROM manual_orders_shadow WHERE id=$1 FOR UPDATE',
@@ -8960,7 +8960,7 @@ async function tryDirectPostgresWrite(action,body){
         result={ok:true};
       }else if(action==='setManualOrderStatus'){
         const status=String(body.status||'');
-        const allowed=['Ohne Termin','Termin zu vereinbaren','Offen','Laufend','Abgeschlossen'];
+        const allowed=['Ohne Termin','Termin zu vereinbaren','Offen','Laufend','Abgeschlossen','In Regiebericht uebernommen','Offenes Angebot','Angebot Abgelehnt','Angebot zu erstellen'];
         if(!allowed.includes(status))throw new Error('Ungültiger Auftragsstatus.');
         await client.query(
           `UPDATE manual_orders_shadow
