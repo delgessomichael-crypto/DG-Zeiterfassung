@@ -1817,6 +1817,14 @@ async function mirrorRegieMetadataWrite(action,body,parsed){
     return;
   }
 
+  if(['saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry'].includes(action)){
+    const statuses=['Offen','Alle','Kontaktiert','Erledigt','Archiviert'];
+    for(const status of statuses){
+      const rows=await postgresCustomerInquiryView(status),key=customerInquiryViewKey(status);
+      await saveShadowVerifyStat(key,rows.length,rows.length,0);
+      await markInquiryViewFresh(key);
+    }
+  }
   if(['saveManualOrderNote','setManualOrderStatus','deleteManualOrder'].includes(action)){
     const q=await pool.query('SELECT COUNT(*)::int AS n FROM manual_orders_shadow');
     const n=Number(q.rows[0]?.n||0);await saveShadowVerifyStat('manual_orders',n,n,0);
@@ -8641,7 +8649,8 @@ function directMinimumWageRead(body){
 const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder',
   'saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed',
-  'saveManualOrderNote','setManualOrderStatus','deleteManualOrder'
+  'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
+  'saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry'
 ]);
 
 function berlinTodayIso(){
@@ -8702,6 +8711,53 @@ async function tryDirectPostgresWrite(action,body){
             WHERE id=$1`,[id,nowIso,by]
         );
         result={ok:true,id};
+      }
+    }else if(['saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry'].includes(action)){
+      const id=String(body.id||'').trim();if(!id)throw new Error('Anfrage-ID fehlt.');
+      const q=await client.query(
+        'SELECT status FROM customer_inquiries_shadow WHERE id=$1 FOR UPDATE',[id]
+      );
+      if(!q.rowCount)throw new Error('Anfrage nicht gefunden.');
+      if(action==='saveCustomerInquiryNote'){
+        await client.query(
+          `UPDATE customer_inquiries_shadow
+              SET internal_note=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now()
+            WHERE id=$1`,[id,String(body.note||''),nowIso,by]
+        );
+        result={ok:true};
+      }else if(action==='saveCustomerInquiryContact'){
+        let contact=nowIso;
+        const ds=String(body.date||'').trim(),ts=String(body.time||'').trim();
+        if(ds){
+          if(!validIsoDateText(ds))throw new Error('Ungültiges Kontaktdatum.');
+          contact=ds+' '+(ts||'12:00')+':00';
+        }
+        await client.query(
+          `UPDATE customer_inquiries_shadow
+              SET status='Kontaktiert',read_flag=true,contact_at_text=$2,
+                  contact_person=$3,contact_note=$4,changed_at_text=$5,changed_by=$6,shadow_updated_at=now()
+            WHERE id=$1`,
+          [id,contact,String(body.person||''),String(body.note||''),nowIso,by]
+        );
+        result={ok:true};
+      }else if(action==='completeCustomerInquiry'){
+        await client.query(
+          `UPDATE customer_inquiries_shadow
+              SET status='Erledigt',read_flag=true,done_reason=$2,
+                  internal_note=CASE WHEN $3::boolean THEN $4 ELSE internal_note END,
+                  changed_at_text=$5,changed_by=$6,shadow_updated_at=now()
+            WHERE id=$1`,
+          [id,String(body.reason||''),body.note!==undefined,String(body.note||''),nowIso,by]
+        );
+        result={ok:true};
+      }else{
+        await client.query(
+          `UPDATE customer_inquiries_shadow
+              SET status='Archiviert',read_flag=true,done_reason='Termin vereinbart',
+                  changed_at_text=$2,changed_by=$3,shadow_updated_at=now()
+            WHERE id=$1`,[id,nowIso,by]
+        );
+        result={ok:true};
       }
     }else if(['saveManualOrderNote','setManualOrderStatus','deleteManualOrder'].includes(action)){
       const id=String(body.id||'').trim();if(!id)throw new Error('Auftrag-ID fehlt.');
