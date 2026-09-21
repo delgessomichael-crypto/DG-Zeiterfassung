@@ -8638,7 +8638,7 @@ function directMinimumWageRead(body){
 
 const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'createOwnReminder','saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder',
-  'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus',
+  'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus','saveOfferCreatedWithReminder',
   'mergeRegieObjects','saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed','setMonthClosureStatus','setPayrollMonthStatus',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
@@ -8867,6 +8867,58 @@ async function tryDirectPostgresWrite(action,body){
       legacyPayload=Object.assign({},body,{entry:Object.assign({},entry,{employee:by,clientId:id,start,end,hours})});
       result=await postgresDayData({date},by);
       if(dayWasClosed&&isSupplement){result.supplementSaved=true;result.supplementEntryId=id;}
+    }else if(action==='saveOfferCreatedWithReminder'){
+      const offerId=String(body.offerId||'').trim(),item=body.item||{};
+      const customer=String(item.customer||'').trim(),offerNumber=String(item.offerNumber||'').trim();
+      const phone=String(item.phone||'').trim(),email=String(item.email||'').trim(),description=String(item.description||'').trim();
+      const reminderDays=Number(item.reminderDays)||5;
+      if(!offerId)throw new Error('Angebots-ID fehlt.');
+      if(!customer)throw new Error('Kunde fehlt.');
+      if(!offerNumber)throw new Error('Angebotsnummer fehlt.');
+      if(!(reminderDays>=1&&reminderDays<=90))throw new Error('Bitte 1 bis 90 Tage für den Reminder eintragen.');
+      if(email&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email))throw new Error('E-Mail-Adresse ist ungültig.');
+      const iq=await client.query('SELECT status FROM inquiry_offers_shadow WHERE offer_id=$1 FOR UPDATE',[offerId]);
+      const tq=await client.query('SELECT id FROM time_entries_shadow WHERE offer_id=$1 FOR UPDATE',[offerId]);
+      if(!iq.rowCount&&!tq.rowCount)throw new Error('Angebot wurde nicht gefunden.');
+      const due=isoAddDays(berlinTodayIso(),reminderDays);
+      const existing=await client.query(
+        `SELECT id FROM offer_reminders_shadow WHERE offer_id=$1 AND status='Offen'
+          ORDER BY created_at_text DESC NULLS LAST,id DESC LIMIT 1 FOR UPDATE`,[offerId]
+      );
+      const reminderId=existing.rowCount?String(existing.rows[0].id||''):(String(body.reminderId||'').trim()||('ANGREM-'+crypto.randomUUID()));
+      if(existing.rowCount){
+        await client.query(
+          `UPDATE offer_reminders_shadow SET customer=$2,offer_number=$3,phone=$4,email=$5,description=$6,
+             due_date_text=$7,status='Offen',result='',changed_at_text=$8,changed_by=$9,shadow_updated_at=now()
+           WHERE id=$1`,
+          [reminderId,customer,offerNumber,phone,email,description,due,nowIso,by]
+        );
+      }else{
+        await client.query(
+          `INSERT INTO offer_reminders_shadow(
+             id,offer_id,customer,offer_number,phone,email,description,created_at_text,due_date_text,
+             status,result,changed_at_text,changed_by,shadow_updated_at
+           ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'Offen','',$8,$10,now())`,
+          [reminderId,offerId,customer,offerNumber,phone,email,description,nowIso,due,by]
+        );
+      }
+      if(iq.rowCount){
+        await client.query(
+          `UPDATE inquiry_offers_shadow SET status='Offen',customer=$2,phone=$3,email=$4,description=$5,
+             changed_at_text=$6,changed_by=$7,shadow_updated_at=now() WHERE offer_id=$1`,
+          [offerId,customer,phone,email,description,nowIso,by]
+        );
+      }
+      if(tq.rowCount){
+        await client.query(
+          `UPDATE time_entries_shadow SET job_status='Offenes Angebot',offer_changed_at_text=$2,
+             offer_changed_by=$3,shadow_updated_at=now()
+           WHERE offer_id=$1 AND COALESCE(billing_status,'Offen')='Offen'`,
+          [offerId,nowIso,by]
+        );
+      }
+      legacyPayload=Object.assign({},body,{reminderId,item:Object.assign({},item,{reminderDays})});
+      result={ok:true,offerId,reminderId,dueDate:due,status:'Offenes Angebot'};
     }else if(['moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus'].includes(action)){
       let offerId=String(body.offerId||'').trim(),reminderId=String(body.reminderId||'').trim();
       if(['declineOfferFromReminder','acceptOfferFromReminder'].includes(action)){
