@@ -8644,7 +8644,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
-  'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','updateEmployeeEntry','deleteEntry','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
+  'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
 function berlinTodayIso(){
@@ -8753,7 +8753,7 @@ async function tryDirectPostgresWrite(action,body){
     const item=body&&body.item||{};
     if(!String(item.id||'').trim()||String(item.inquiryId||'').trim())return null;
   }
-  const employeeSelfAction=['confirmEmployeeAssignment','reportEmployeeAssignmentIssue','updateEmployeeEntry','deleteEntry','refreshClosedDay'].includes(action);
+  const employeeSelfAction=['confirmEmployeeAssignment','reportEmployeeAssignmentIssue','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay'].includes(action);
   const session=await localSessionForBody(body,!employeeSelfAction);if(!session)return null;
   const by=String(session.employee||body.employee||'').trim(),nowIso=new Date().toISOString();
   const client=await pool.connect();
@@ -8873,6 +8873,35 @@ async function tryDirectPostgresWrite(action,body){
         [entryId,customer,activity,materialUsed,material,jobStatus]
       );
       result=await postgresDayData({date},by);
+    }else if(action==='closeDay'){
+      const date=String(body.date||'').trim();
+      if(!by)throw new Error('Mitarbeiter fehlt.');
+      if(!validIsoDateText(date))throw new Error('Datum fehlt.');
+      const existing=await client.query(
+        'SELECT 1 FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 FOR UPDATE',[by,date]
+      );
+      if(existing.rowCount){
+        result={ok:true,alreadyClosed:true};
+      }else{
+        const data=await postgresDayData({date},by);
+        if(data&&data.status&&data.status!=='Arbeiten'&&!session.chefAccess)
+          throw new Error('Dieser Tag ist als '+data.status+' markiert. Eingaben und Übermittlungen sind für diesen Tag deaktiviert.');
+        if(!data||!Array.isArray(data.entries)||!data.entries.length)throw new Error('Es sind keine Stunden für diesen Tag erfasst.');
+        const grossWork=Number(data.grossWorkTotal||0),pause=grossWork>=6?1:0;
+        const grossTotal=Math.round(Number(data.grossTotal||0)*100)/100;
+        const netTotal=Math.round(Number(data.total||0)*100)/100;
+        await client.query(
+          `INSERT INTO day_closures_shadow(
+             employee_name,closure_date,closed_at_text,gross_total,legacy_col5,legacy_col6,pause_minutes,
+             net_total,updated_at_text,update_reason,shadow_updated_at
+           ) VALUES($1,$2,$3,$4,'','',$5,$6,'','',now())`,
+          [by,date,nowIso,grossTotal,Math.round(pause*60),netTotal]
+        );
+        await client.query(
+          'UPDATE time_entries_shadow SET closed=true,shadow_updated_at=now() WHERE employee_name=$1 AND entry_date=$2',[by,date]
+        );
+        result={ok:true,total:netTotal,pauseMinutes:Math.round(pause*60),netTotal};
+      }
     }else if(action==='refreshClosedDay'){
       const date=String(body.date||'').trim();
       if(!validIsoDateText(date))throw new Error('Ungültiges Datum.');
@@ -9885,8 +9914,8 @@ async function tryDirectPostgresWrite(action,body){
     const n=Number(q.rows[0]?.n||0);
     await saveShadowVerifyStat('manual_orders',n,n,0);
   }
-  if(['updateEmployeeEntry','deleteEntry','refreshClosedDay'].includes(action)){
-    const employee=String(body.employee||''),date=action==='deleteEntry'||action==='refreshClosedDay'?String(body.date||''):
+  if(['updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay'].includes(action)){
+    const employee=String(body.employee||''),date=['deleteEntry','closeDay','refreshClosedDay'].includes(action)?String(body.date||''):
       berlinDateOnly((await pool.query('SELECT entry_date FROM time_entries_shadow WHERE id=$1 LIMIT 1',[String(body.entryId||'')])).rows[0]?.entry_date||'');
     if(employee&&date){
       const dayKey=dayDataVerifyKey({date},employee);if(dayKey)await saveShadowVerifyStat(dayKey,1,1,0);
