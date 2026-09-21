@@ -8640,7 +8640,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder',
   'saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
-  'saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
+  'updateCustomerInquiry','deleteCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
@@ -8953,13 +8953,39 @@ async function tryDirectPostgresWrite(action,body){
           WHERE id=$1`,[inquiryId,newStatus,nowIso,by]
       );
       result={ok:true,inquiryId};
-    }else if(['saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry'].includes(action)){
+    }else if(['updateCustomerInquiry','deleteCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry'].includes(action)){
       const id=String(body.id||'').trim();if(!id)throw new Error('Anfrage-ID fehlt.');
       const q=await client.query(
         'SELECT status FROM customer_inquiries_shadow WHERE id=$1 FOR UPDATE',[id]
       );
       if(!q.rowCount)throw new Error('Anfrage nicht gefunden.');
-      if(action==='saveCustomerInquiryNote'){
+      if(action==='updateCustomerInquiry'){
+        const status=String(body.status||'').trim();
+        const markRead=body.markRead!==false;
+        if(status){
+          await client.query(
+            `UPDATE customer_inquiries_shadow
+                SET status=$2,read_flag=CASE WHEN $3::boolean THEN true ELSE read_flag END,
+                    changed_at_text=$4,changed_by=$5,shadow_updated_at=now()
+              WHERE id=$1`,[id,status,markRead,nowIso,by]
+          );
+        }else{
+          await client.query(
+            `UPDATE customer_inquiries_shadow
+                SET read_flag=CASE WHEN $2::boolean THEN true ELSE read_flag END,
+                    changed_at_text=$3,changed_by=$4,shadow_updated_at=now()
+              WHERE id=$1`,[id,markRead,nowIso,by]
+          );
+        }
+        result={ok:true};
+      }else if(action==='deleteCustomerInquiry'){
+        await client.query(
+          `UPDATE customer_inquiries_shadow
+              SET status='Gelöscht',read_flag=true,changed_at_text=$2,changed_by=$3,shadow_updated_at=now()
+            WHERE id=$1`,[id,nowIso,by]
+        );
+        result={ok:true};
+      }else if(action==='saveCustomerInquiryNote'){
         await client.query(
           `UPDATE customer_inquiries_shadow
               SET internal_note=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now()
