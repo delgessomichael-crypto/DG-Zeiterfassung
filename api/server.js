@@ -766,6 +766,7 @@ async function initDb() {
   await bootstrapObjectReportsV16();
   await bootstrapDashboardNativeV17();
   await bootstrapBossMonthComparisonV18();
+  await bootstrapPayrollAuditComparisonV19();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -7901,7 +7902,7 @@ async function invalidateExactViews(){
   if(!pool)return;
   await Promise.all([
     pool.query('TRUNCATE exact_views_shadow'),
-    pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'payroll_audit_view:%' OR shadow_name LIKE 'payroll_cycle_view:%' OR shadow_name LIKE 'payroll_cycle_native:%' OR shadow_name LIKE 'offer_reports_view:%' OR shadow_name='offer_statistics_view' OR shadow_name='dashboard_summary_view' OR shadow_name='dashboard_summary_native'")
+    pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'payroll_audit_view:%' OR shadow_name LIKE 'payroll_audit_native:%' OR shadow_name LIKE 'payroll_cycle_view:%' OR shadow_name LIKE 'payroll_cycle_native:%' OR shadow_name LIKE 'offer_reports_view:%' OR shadow_name='offer_statistics_view' OR shadow_name='dashboard_summary_view' OR shadow_name='dashboard_summary_native'")
   ]);
 }
 
@@ -8206,6 +8207,164 @@ async function directOfferStatisticsViewRead(body){
   return readExactViewShadow(offerStatisticsViewKey());
 }
 
+function payrollAuditNativeKey(body){
+  const y=Number(body&&body.year)||0,m=Number(body&&body.month)||0;
+  return y&&m?'payroll_audit_native:'+y+'-'+String(m).padStart(2,'0'):'';
+}
+function pgPayrollIssueId(parts){
+  const value=(parts||[]).map(x=>String(x==null?'':x).trim()).join('|');
+  return 'PAY-'+crypto.createHash('sha256').update(value,'utf8').digest('base64url').slice(0,24);
+}
+function pgPayrollFingerprint(rows){
+  const compact=(rows||[]).map(r=>({
+    employee:r.employee,active:r.active,employmentType:r.employmentType,personnelNumber:r.personnelNumber,
+    entryDate:r.entryDate,exitDate:r.exitDate,hourlyWage:r.hourlyWage,payrollType:r.payrollType,
+    monthlySalary:r.monthlySalary,payrollRelevant:r.payrollRelevant,target:r.targetTotal,
+    actual:r.actualTotal,payable:r.payableHours,
+    entries:(r.entries||[]).map(e=>[e.id,e.date,e.start,e.end,e.hours,e.customer,e.billingStatus,e.closed]),
+    statuses:(r.statuses||[]).map(x=>[x.date,x.status,x.creditedHours]),
+    adjustments:r.adjustments||[]
+  }));
+  return crypto.createHash('sha256').update(JSON.stringify(compact),'utf8').digest('base64url');
+}
+function pgAuditHours(v){return pgRound2(v).toFixed(2).replace('.',',');}
+function pgAuditDate(v){
+  const d=berlinDateOnly(v);if(!/^\d{4}-\d{2}-\d{2}$/.test(d))return String(v||'');
+  return d.slice(8,10)+'.'+d.slice(5,7)+'.'+d.slice(0,4);
+}
+function pgAuditNet(gross){gross=Number(gross)||0;return pgRound2(Math.max(0,gross-(gross>=6?1:0)));}
+function pgAuditPause(net){net=Number(net)||0;return net>9?45:(net>6?30:0);}
+function pgAuditRest(prevEnd,nextStart){
+  const a=pgTimeToMinutes(prevEnd),b=pgTimeToMinutes(nextStart);if(a===null||b===null)return null;
+  return pgRound2(((1440-a)+b)/60);
+}
+function pgAuditMinijobLimit(date){
+  const mw=minimumWageForEmployeeEntryDate(date).amount||0;
+  return mw>0?Math.ceil((mw*130/3)-0.000001):0;
+}
+async function pgAuditReviewedMap(year,month){
+  const q=await pool.query(
+    `SELECT issue_id,reviewed_at_text,reviewed_by,note FROM payroll_reviews_shadow
+      WHERE review_year=$1 AND review_month=$2`,[year,month]
+  );
+  return new Map(q.rows.map(r=>[String(r.issue_id||''),{
+    reviewedAt:shadowGermanDateTime(r.reviewed_at_text||''),
+    reviewedBy:String(r.reviewed_by||''),note:String(r.note||'')
+  }]));
+}
+async function postgresPayrollAuditNative(body){
+  const year=Number(body&&body.year)||0,month=Number(body&&body.month)||0;
+  if(!year||month<1||month>12)return null;
+  const rows=await postgresBossMonthData({year,month});if(!Array.isArray(rows))return null;
+  const [reviewed,closuresQ]=await Promise.all([
+    pgAuditReviewedMap(year,month),
+    pool.query(
+      `SELECT employee_name,closure_date,gross_total,pause_minutes,net_total,closed_at_text
+         FROM day_closures_shadow WHERE closure_date LIKE $1`,
+      [String(year)+'-'+String(month).padStart(2,'0')+'-%']
+    )
+  ]);
+  const closures=new Map(closuresQ.rows.map(c=>[
+    String(c.employee_name||'')+'|'+berlinDateOnly(c.closure_date),
+    {grossHours:Number(c.gross_total||0),pauseMinutes:Number(c.pause_minutes||0),
+     netHours:Number(c.net_total||0),closedAt:shadowGermanDateTime(c.closed_at_text||'')}
+  ]));
+  const now=berlinNowParts(),today=String(now.year)+'-'+String(now.month).padStart(2,'0')+'-'+String(now.day).padStart(2,'0');
+  const lastDate=String(year)+'-'+String(month).padStart(2,'0')+'-'+String(pgDaysInMonth(year,month)).padStart(2,'0');
+  const checkThrough=today<lastDate?today:lastDate,issues=[],payrollRows=[];
+  function addIssue(severity,type,r,date,title,detail,extra){
+    const id=pgPayrollIssueId([year,month,r.employee,date,type,extra&&extra.key||'']),rev=reviewed.get(id)||null;
+    issues.push(Object.assign({id,severity,type,employee:r.employee,date:date||'',title,detail:detail||'',
+      reviewed:Boolean(rev),reviewedInfo:rev},extra||{}));
+  }
+  for(const r of rows){
+    const byDate={},statusByDate={};
+    for(const e of r.entries||[])(byDate[e.date]||(byDate[e.date]=[])).push(e);
+    for(const st of r.statuses||[])statusByDate[st.date]=st;
+    const profile=await employeeAutomationProfile(r.employee);
+    for(const d of Object.keys(byDate).sort()){
+      const es=byDate[d],gross=pgRound2(es.reduce((a,e)=>a+Number(e.hours||0),0)),net=pgAuditNet(gross),closure=closures.get(r.employee+'|'+d);
+      if(net>10.0001)addIssue('error','daily_over_10',r,d,'Mehr als 10 Stunden Arbeitszeit','Netto-Arbeitszeit '+pgAuditHours(net)+' Std. (Bruttozeit '+pgAuditHours(gross)+' Std.).');
+      else if(net>8.0001)addIssue('warn','daily_over_8',r,d,'Mehr als 8 Stunden Arbeitszeit','Netto-Arbeitszeit '+pgAuditHours(net)+' Std.');
+      if(!closure)addIssue('error','day_not_closed',r,d,'Tagesabschluss fehlt','Für diesen Arbeitstag wurde kein Tagesabschluss gefunden.');
+      else {const req=pgAuditPause(net);if(req>0&&Number(closure.pauseMinutes||0)<req)addIssue('error','pause_short',r,d,'Pause zu kurz','Erfasst '+Number(closure.pauseMinutes||0)+' Min.; erforderlich mindestens '+req+' Min.');}
+      const st=statusByDate[d];
+      if(st&&st.status&&st.status!=='Arbeiten')addIssue(st.status==='Feiertag'?'warn':'error','work_and_status',r,d,'Arbeitszeit und '+st.status+' am selben Tag','Es sind '+pgAuditHours(net)+' Arbeitsstunden erfasst und der Tag ist zugleich als '+st.status+' markiert.');
+      if(r.entryDate&&d<r.entryDate)addIssue('error','before_entry',r,d,'Arbeitszeit vor Eintrittsdatum','Eintrittsdatum: '+pgAuditDate(r.entryDate)+'.');
+      if(r.exitDate&&d>r.exitDate)addIssue('error','after_exit',r,d,'Arbeitszeit nach Austrittsdatum','Austrittsdatum: '+pgAuditDate(r.exitDate)+'.');
+      if(r.active===false)addIssue('warn','inactive_time',r,d,'Arbeitszeit bei inaktivem Mitarbeiter','Mitarbeiter ist aktuell als inaktiv gekennzeichnet.');
+      for(const e of es){
+        const sm=pgTimeToMinutes(e.start),em=pgTimeToMinutes(e.end);
+        if(!(Number(e.hours)>0)||sm===null||em===null)addIssue('error','invalid_entry',r,d,'Unplausibler Zeiteintrag',(e.customer||'Ohne Kunde')+' · '+(e.start||'?')+'–'+(e.end||'?')+' · '+pgAuditHours(e.hours)+' Std.',{entryId:e.id,start:e.start,end:e.end,customer:e.customer,key:e.id});
+      }
+      for(let i=0;i<es.length;i++)for(let j=i+1;j<es.length;j++){
+        if(shadowObjectKey(es[i].customer)===shadowObjectKey(es[j].customer)&&es[i].start===es[j].start&&es[i].end===es[j].end){
+          addIssue('warn','duplicate_entry',r,d,'Möglicher Doppeleintrag',(es[i].customer||'Ohne Kunde')+' · '+es[i].start+'–'+es[i].end,{entryId:es[j].id,start:es[j].start,end:es[j].end,customer:es[j].customer,key:es[i].id+'|'+es[j].id});
+        }
+      }
+      const target=profileHoursForDate(profile,d);
+      if(d<=checkThrough&&!st&&target>0&&Math.abs(net-target)>2.5)addIssue('warn','target_deviation',r,d,'Starke Abweichung von Tages-Soll','Soll '+pgAuditHours(target)+' Std. · Ist '+pgAuditHours(net)+' Std.');
+    }
+    for(let day=1;day<=pgDaysInMonth(year,month);day++){
+      const d=String(year)+'-'+String(month).padStart(2,'0')+'-'+String(day).padStart(2,'0');
+      if(d<'2026-09-07'||d>checkThrough)continue;
+      if(r.entryDate&&d<r.entryDate)continue;if(r.exitDate&&d>r.exitDate)continue;
+      const target=profileHoursForDate(profile,d);if(!(target>0))continue;
+      if(!byDate[d]&&!statusByDate[d])addIssue('error','missing_workday',r,d,'Arbeitstag ohne Stunden oder Abwesenheit','Für diesen Soll-Arbeitstag ('+pgAuditHours(target)+' Std.) fehlen Arbeitszeit und Tagesstatus.');
+    }
+    for(const c of r.overlapConflicts||[])if(!c.reviewed)addIssue('error','overlap',r,c.date,'Überschneidende Uhrzeiten',c.first+' '+c.start1+'–'+c.end1+' / '+c.second+' '+c.start2+'–'+c.end2,{key:c.id});
+    const dates=Object.keys(byDate).sort();
+    for(let i=1;i<dates.length;i++){
+      const prev=byDate[dates[i-1]].slice().sort((a,b)=>String(a.end||'').localeCompare(String(b.end||''))).pop();
+      const next=byDate[dates[i]].slice().sort((a,b)=>String(a.start||'').localeCompare(String(b.start||'')))[0];
+      const rest=pgAuditRest(prev&&prev.end,next&&next.start);
+      if(rest!==null&&rest<11)addIssue('warn','rest_under_11',r,dates[i],'Ruhezeit unter 11 Stunden','Zwischen '+pgAuditDate(dates[i-1])+' '+(prev.end||'?')+' und '+pgAuditDate(dates[i])+' '+(next.start||'?')+' liegen nur '+pgAuditHours(rest)+' Std.');
+    }
+    if(r.payrollRelevant!==false){
+      if(!r.employmentType)addIssue('error','master_employment',r,'','Beschäftigungsart fehlt','Bitte Mitarbeiter-Stammdaten ergänzen.');
+      if(r.payrollType==='Festgehalt'&&!(Number(r.monthlySalary)>0))addIssue('error','master_salary',r,'','Monatsgehalt fehlt','Für Festgehalt muss ein Brutto-Monatsgehalt hinterlegt sein.');
+      if((r.payrollType||'Stundenlohn')==='Stundenlohn'&&r.employmentType!=='Azubi'&&!(Number(r.hourlyWage)>0))addIssue('error','master_wage',r,'','Stundenlohn fehlt','Bitte Brutto-Stundenlohn hinterlegen.');
+    }
+    const grossEstimate=r.payrollRelevant===false?0:(r.payrollType==='Festgehalt'?Number(r.monthlySalary||0):pgRound2(Number(r.payableHours||0)*Number(r.hourlyWage||0)));
+    const minijobLimit=pgAuditMinijobLimit(String(year)+'-'+String(month).padStart(2,'0')+'-01');
+    if(r.employmentType==='Minijob'&&grossEstimate>minijobLimit+0.001)addIssue('error','minijob_limit',r,'','Minijob-Grenze überschritten','Rechnerisch '+grossEstimate.toFixed(2).replace('.',',')+' EUR bei Monatsgrenze '+minijobLimit.toFixed(2).replace('.',',')+' EUR.');
+    payrollRows.push({employee:r.employee,personnelNumber:r.personnelNumber||'',employmentType:r.employmentType||'',
+      payrollType:r.payrollType||'Stundenlohn',payrollRelevant:r.payrollRelevant!==false,hourlyWage:Number(r.hourlyWage)||0,
+      monthlySalary:Number(r.monthlySalary)||0,targetHours:Number(r.targetTotal)||0,actualHours:Number(r.actualTotal)||0,
+      workHours:Number(r.workTotal)||0,payrollHours:Number(r.payableHours)||0,grossEstimate:pgRound2(grossEstimate),
+      vacationDays:Number(r.vacationDays)||0,sickDays:Number(r.sickDays)||0,compensatoryHours:Number(r.compensatoryHours)||0,
+      timeBankBalance:Number(r.timeBankBalance)||0,monthClosure:r.closureStatus||'Offen',minijobLimit});
+  }
+  const rank={error:0,warn:1,info:2};
+  issues.sort((a,b)=>(rank[a.severity]-rank[b.severity])||(a.employee+a.date+a.type).localeCompare(b.employee+b.date+b.type,'de'));
+  const openErrors=issues.filter(x=>x.severity==='error').length;
+  const openWarnings=issues.filter(x=>x.severity==='warn'&&!x.reviewed).length;
+  const reviewedWarnings=issues.filter(x=>x.severity==='warn'&&x.reviewed).length;
+  const fingerprint=pgPayrollFingerprint(rows),state=await pgPayrollMonthState(year,month,fingerprint);
+  return {year,month,dueDate:String(year)+'-'+String(month).padStart(2,'0')+'-20',checkThrough,
+    summary:{errors:openErrors,warnings:openWarnings,reviewedWarnings,totalIssues:issues.length,employees:payrollRows.length},
+    issues,payrollRows,fingerprint,state,canRelease:openErrors===0&&openWarnings===0};
+}
+async function verifyPayrollAuditNative(data,body){
+  if(!pool||!data)return;
+  const pg=await postgresPayrollAuditNative(body);if(!pg)return;
+  const key=payrollAuditNativeKey(body),mismatches=stableJsonString(data)===stableJsonString(pg)?0:1;
+  console.log('SHADOW_VERIFY '+key+' mismatches='+mismatches+' googleIssues='+Number(data&&data.summary&&data.summary.totalIssues||0)+' postgresIssues='+Number(pg&&pg.summary&&pg.summary.totalIssues||0));
+  await saveShadowVerifyStat(key,1,1,mismatches);
+}
+async function directPayrollAuditNativeRead(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const key=payrollAuditNativeKey(body);if(!key||!(await shadowReadyForDirectRead(key)))return null;
+  return postgresPayrollAuditNative(body);
+}
+async function bootstrapPayrollAuditComparisonV19(){
+  if(!pool)return;
+  const now=berlinNowParts(),body={year:now.year,month:now.month};
+  const q=await pool.query('SELECT payload FROM exact_views_shadow WHERE view_key=$1 LIMIT 1',[payrollAuditViewKey(body)]);
+  if(!q.rowCount){console.log('PAYROLL_AUDIT_COMPARE_V19 no_google_snapshot year='+body.year+' month='+body.month);return;}
+  await verifyPayrollAuditNative(q.rows[0].payload,body);
+}
+
 function payrollAuditViewKey(body){
   const y=Number(body&&body.year)||0,m=Number(body&&body.month)||0;
   return y&&m?'payroll_audit_view:'+y+'-'+String(m).padStart(2,'0'):'';
@@ -8238,7 +8397,7 @@ async function tryDirectPostgresRead(action,body){
   if(action==='getInquiryReminders')return directInquiryRemindersRead(body);
   if(action==='getOfferReports')return directOfferReportsNativeRead(body);
   if(action==='getOfferStatistics')return directOfferStatisticsNativeRead(body);
-  if(action==='getMonthPayrollAudit')return directPayrollAuditViewRead(body);
+  if(action==='getMonthPayrollAudit')return directPayrollAuditNativeRead(body);
   if(action==='getPayrollCycleState')return directPayrollCycleViewRead(body);
   if(action==='getBossMonthData')return directBossMonthViewRead(body);
   if(action==='getManualOrders')return directManualOrdersRead(body);
@@ -8462,6 +8621,7 @@ async function proxyLegacy(req, res, body) {
           saveExactViewShadow('getMonthPayrollAudit',payrollAuditViewKey(body),verifyData)
             .catch(e=>console.error('payroll audit view shadow save failed',e.message));
           verifyPayrollProtocols(verifyData,body.year,body.month).catch(e=>console.error('payroll protocol shadow verify failed',e.message));
+          verifyPayrollAuditNative(verifyData,body).catch(e=>console.error('payroll audit native verify failed',e.message));
         }
         if (action==='getPayrollCycleState') {
           saveExactViewShadow('getPayrollCycleState',payrollCycleViewKey(body),verifyData)
@@ -8960,7 +9120,7 @@ async function health() {
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'boss_month_native:%' AND mismatches=0"
         )).rows[0]?.n||0,
         payrollAuditViewsVerified:(await pool.query(
-          "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'payroll_audit_view:%' AND mismatches=0"
+          "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'payroll_audit_native:%' AND mismatches=0"
         )).rows[0]?.n||0,
         payrollCycleViewsVerified:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'payroll_cycle_native:%' AND mismatches=0"
