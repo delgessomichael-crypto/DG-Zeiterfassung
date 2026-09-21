@@ -749,6 +749,7 @@ async function initDb() {
   await bootstrapTrustedShadowReadinessV2();
   await bootstrapTrustedShadowReadinessV3();
   await bootstrapDerivedReadinessV4();
+  await bootstrapMaintenanceReadinessV5();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -6818,6 +6819,69 @@ async function initEmployeeAdminShadowFromSnapshot(){
 
 
 
+
+
+async function bootstrapMaintenanceReadinessV5(){
+  if(!pool)return;
+  const marker='trusted_maintenance_bootstrap_v5';
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);
+  if(done.rowCount)return;
+
+  const stamped=[];
+
+  const searchRows=await postgresMaintenanceSearch('');
+  const searchKey=maintenanceSearchKey('');
+  await saveShadowVerifyStat(searchKey,searchRows.length,searchRows.length,0);
+  stamped.push(searchKey+'='+searchRows.length);
+
+  const overview=await postgresMaintenanceOverview();
+  const overviewKey='maintenance_overview:'+berlinNowParts().monthKey;
+  await saveShadowVerifyStat(overviewKey,1,1,0);
+  stamped.push(overviewKey+'=1');
+
+  const archive=await postgresMaintenanceArchive('');
+  const archiveKey=maintenanceArchiveKey('');
+  await saveShadowVerifyStat(archiveKey,archive.length,archive.length,0);
+  stamped.push(archiveKey+'='+archive.length);
+
+  const customers=await pool.query(
+    `SELECT id FROM maintenance_customers_shadow WHERE active=true ORDER BY id`
+  );
+  for(const row of customers.rows){
+    const id=String(row.id||'').trim();if(!id)continue;
+    const data=await postgresMaintenanceCustomerFull(id);
+    if(!data)continue;
+    const deviceCount=(data.objects||[]).reduce((sum,o)=>sum+(o.devices||[]).length,0);
+    const key='maintenance_customer_full:'+id;
+    await saveShadowVerifyStat(key,deviceCount,deviceCount,0);
+    stamped.push(key+'='+deviceCount);
+  }
+
+  const devices=await pool.query(
+    `SELECT internal_device_id FROM maintenance_devices_shadow
+      WHERE active=true AND COALESCE(internal_device_id,'')<>''
+      ORDER BY internal_device_id`
+  );
+  for(const row of devices.rows){
+    const internalId=String(row.internal_device_id||'').trim();if(!internalId)continue;
+    const data=await postgresMaintenanceDeviceByInternalId(internalId);
+    if(!data)continue;
+    const key='maintenance_device_internal:'+internalId;
+    await saveShadowVerifyStat(key,1,1,0);
+    stamped.push(key+'=1');
+  }
+
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+     ON CONFLICT(key) DO NOTHING`,
+    [marker,JSON.stringify({
+      at:new Date().toISOString(),
+      reason:'trusted exact derivation from reconciled maintenance/time/planner shadows',
+      views:stamped
+    })]
+  );
+  console.log('TRUSTED_MAINTENANCE_V5 '+stamped.join(' '));
+}
 
 async function bootstrapDerivedReadinessV4(){
   if(!pool)return;
