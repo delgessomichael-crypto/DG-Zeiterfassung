@@ -8643,7 +8643,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive',
-  'setRegieObjectJobStatus','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
+  'setRegieObjectJobStatus','markRegieObjectCompleted','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
 function berlinTodayIso(){
@@ -8761,8 +8761,9 @@ async function tryDirectPostgresWrite(action,body){
         );
         result={ok:true,id};
       }
-    }else if(action==='setRegieObjectJobStatus'){
-      const objectId=String(body.objectId||'').trim(),jobStatus=String(body.jobStatus||'').trim();
+    }else if(['setRegieObjectJobStatus','markRegieObjectCompleted'].includes(action)){
+      const objectId=String(body.objectId||'').trim();
+      const jobStatus=action==='markRegieObjectCompleted'?'Abgeschlossen':String(body.jobStatus||'').trim();
       if(!objectId)throw new Error('Objekt-ID fehlt.');
       if(!['Laufend','Abgeschlossen'].includes(jobStatus))throw new Error('Ungültiger Auftragsstatus.');
       const mq=await client.query('SELECT merge_id FROM regie_merges_shadow WHERE object_id=$1 LIMIT 1',[objectId]);
