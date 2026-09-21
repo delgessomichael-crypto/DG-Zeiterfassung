@@ -8643,7 +8643,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveEmployeeAdmin','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
+  'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','saveEmployeeAdmin','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
@@ -9503,6 +9503,33 @@ async function tryDirectPostgresWrite(action,body){
       const history=h.rows.map(r=>({id:String(r.id||''),action:String(r.action||''),at:shadowGermanDateTime(r.action_at_text||''),by:String(r.action_by||''),reason:String(r.reason||'')}));
       const last=history.length?history[history.length-1]:null;
       result={status:last&&last.action==='Abgeschlossen'?'Abgeschlossen':'Offen',last,history};
+    }else if(action==='saveTimeBankManual'){
+      const target=String(body.targetEmployee||'').trim(),reason=String(body.reason||'').trim();
+      let hours=Math.abs(Number(body.hours)||0),art=String(body.timeBankAction||'').trim(),signed=hours;
+      if(!(hours>0&&hours<=500))throw new Error('Bitte gültige Stunden eingeben.');
+      if(!reason)throw new Error('Bitte einen Grund angeben.');
+      if(art==='Auszahlung'||art==='Stunden abziehen'){signed=-hours;art='Stunden abziehen';}
+      else if(art==='Manuelle Gutschrift'||art==='Stunden Gutschreiben'){art='Stunden Gutschreiben';}
+      else throw new Error('Ungültige Buchungsart.');
+      const eq=await client.query('SELECT 1 FROM employee_admin_shadow WHERE employee_name=$1 LIMIT 1',[target]);
+      if(!eq.rowCount)throw new Error('Mitarbeiter nicht gefunden.');
+      const bq=await client.query('SELECT COALESCE(SUM(hours),0)::numeric AS balance FROM time_bank_shadow WHERE employee_name=$1',[target]);
+      const before=Math.round(Number(bq.rows[0]?.balance||0)*100)/100;
+      if(signed<0&&before+signed<-0.001)throw new Error('Nicht genügend Zeitguthaben. Verfügbar: '+before.toFixed(2).replace('.',',')+' Std.');
+      const now=berlinNowParts(),year=Number(now.year)||0,month=Number(now.month)||0;
+      const id=String(body.transactionId||'').trim()||crypto.randomUUID(),reference=String(body.manualReference||'').trim()||('manual:'+id);
+      const dup=await client.query('SELECT id FROM time_bank_shadow WHERE id=$1 OR reference=$2 LIMIT 1',[id,reference]);
+      if(!dup.rowCount){
+        await client.query(
+          `INSERT INTO time_bank_shadow(
+            id,employee_name,hours,booking_type,booking_year,booking_month,reference,reason,
+            created_at_text,created_iso,created_by,shadow_updated_at
+          ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())`,
+          [id,target,signed,art,year,month,reference,reason,nowIso,berlinTodayIso(),by]
+        );
+      }
+      legacyPayload=Object.assign({},body,{transactionId:id,manualReference:reference});
+      result={ok:true,id,hours:signed,balanceBefore:before,balanceAfter:Math.round((before+signed)*100)/100};
     }else if(action==='saveEmployeeAdmin'){
       const item=body.item||{},name=String(item.name||'').trim(),original=String(item.originalName||'').trim();
       if(!name||!original||name!==original)throw new Error('Namensänderungen werden weiterhin über Google verarbeitet.');
@@ -10103,6 +10130,15 @@ async function tryDirectPostgresWrite(action,body){
     throw e;
   }finally{client.release();}
 
+  if(action==='saveTimeBankManual'){
+    const employee=String(body.targetEmployee||'');
+    await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'time_bank:%' OR shadow_name LIKE 'my_time_bank:%' OR shadow_name LIKE 'month_data:%'");
+    await pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getMonthPayrollAudit','getPayrollCycleState','getDashboardSummary51')");
+    if(employee){
+      const q=await pool.query('SELECT COUNT(*)::int AS n FROM time_bank_shadow WHERE employee_name=$1',[employee]);
+      const n=Number(q.rows[0]?.n||0);await saveShadowVerifyStat('time_bank:'+employee,n,n,0);
+    }
+  }
   if(['addMaintenanceRepair','addManualMaintenanceCount'].includes(action)){
     await Promise.all([
       pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'maintenance_%'"),
