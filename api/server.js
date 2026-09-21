@@ -8642,7 +8642,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','deleteMaintenanceDevice','deleteMaintenanceCustomer',
+  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
@@ -8717,6 +8717,12 @@ async function recalcClosedDayAfterDirectCorrection(client,employee,date,reason,
 
 async function tryDirectPostgresWrite(action,body){
   if(!DIRECT_POSTGRES_WRITE_ACTIONS.has(action)||!pool||!GOOGLE_BACKEND_URL||!legacyOutboxCryptoKey())return null;
+  if(action==='deleteAbsence'){
+    const id=String(body&&body.id||'').trim();
+    if(!id)return null;
+    const q=await pool.query('SELECT absence_type FROM absences_shadow WHERE id=$1 AND active=true LIMIT 1',[id]);
+    if(q.rowCount&&String(q.rows[0].absence_type||'')==='Freizeitausgleich')return null;
+  }
   if(action==='saveManualOrder'){
     const item=body&&body.item||{};
     if(!String(item.id||'').trim()||String(item.inquiryId||'').trim())return null;
@@ -9244,6 +9250,35 @@ async function tryDirectPostgresWrite(action,body){
         );
         result={ok:true};
       }
+    }else if(action==='deleteAbsence'){
+      const id=String(body.id||'').trim();if(!id)throw new Error('Abwesenheit nicht gefunden.');
+      const q=await client.query(
+        `SELECT employee_name,absence_type,start_date,end_date,active
+           FROM absences_shadow WHERE id=$1 FOR UPDATE`,[id]
+      );
+      if(!q.rowCount||q.rows[0].active===false)throw new Error('Abwesenheit nicht gefunden.');
+      const row=q.rows[0],target=String(row.employee_name||''),type=String(row.absence_type||'');
+      if(type==='Freizeitausgleich')throw new Error('Freizeitausgleich wird weiterhin über Google verarbeitet.');
+      const statuses=await client.query(
+        `SELECT employee_name,status_date,status FROM day_status_shadow WHERE reference=$1 FOR UPDATE`,[id]
+      );
+      await client.query('UPDATE absences_shadow SET active=false,shadow_updated_at=now() WHERE id=$1',[id]);
+      await client.query('DELETE FROM day_status_shadow WHERE reference=$1',[id]);
+      for(const s of statuses.rows){
+        if(['Urlaub','Feiertag'].includes(String(s.status||''))){
+          const noteQ=await client.query(
+            'SELECT legacy_col5 FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 FOR UPDATE',
+            [String(s.employee_name||''),berlinDateOnly(s.status_date)]
+          );
+          const note=String(noteQ.rows[0]?.legacy_col5||'');
+          if(/^Automatisch:\\s*(Urlaub|Feiertag)/i.test(note)){
+            await client.query('DELETE FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2',
+              [String(s.employee_name||''),berlinDateOnly(s.status_date)]);
+          }
+        }
+      }
+      const bal=await client.query('SELECT COALESCE(SUM(hours),0)::numeric AS h FROM time_bank_shadow WHERE employee_name=$1',[target]);
+      result={ok:true,timeBankBalance:Math.round(Math.max(0,Number(bal.rows[0]?.h||0))*100)/100};
     }else if(action==='deleteMaintenanceDevice'){
       const id=String(body.id||'').trim();if(!id)throw new Error('Wartungsgerät wurde nicht gefunden.');
       const q=await client.query(
@@ -9452,6 +9487,22 @@ async function tryDirectPostgresWrite(action,body){
       const rows=await postgresCustomerInquiryView(status),key=customerInquiryViewKey(status);
       await saveShadowVerifyStat(key,rows.length,rows.length,0);
     }
+  }
+  if(action==='deleteAbsence'){
+    await invalidateShadowVerify('absences');
+    await invalidateShadowVerify('sickness_alerts');
+    const id=String(body.id||'');
+    const abs=await pool.query('SELECT employee_name,start_date,end_date FROM absences_shadow WHERE id=$1 LIMIT 1',[id]);
+    const row=abs.rows[0]||{};
+    if(row.employee_name){
+      const sy=Number(String(row.start_date||'').slice(0,4))||0,ey=Number(String(row.end_date||'').slice(0,4))||sy;
+      for(let y=sy;y<=ey;y++){
+        const key='absence_overview:'+y+':'+String(row.employee_name);await invalidateShadowVerify(key);
+        await invalidateShadowVerify('vacation_full:'+y+':'+String(row.employee_name));
+        await invalidateShadowVerify('vacation_full:'+y+':all');
+      }
+    }
+    await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'planner_availability:%' OR shadow_name LIKE 'day_data:%' OR shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'month_data:%' OR shadow_name LIKE 'boss_day_closures:%'");
   }
   if(['deleteMaintenanceDevice','deleteMaintenanceCustomer'].includes(action)){
     await Promise.all([
