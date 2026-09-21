@@ -763,6 +763,7 @@ async function initDb() {
   await bootstrapPayrollCycleNativeV13();
   await bootstrapRegieReadinessV14();
   await bootstrapOfferNativeV15();
+  await bootstrapObjectReportsV16();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -7010,6 +7011,32 @@ async function initEmployeeAdminShadowFromSnapshot(){
 
 
 
+async function bootstrapObjectReportsV16(){
+  if(!pool)return;
+  const marker='trusted_object_reports_v16';
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);
+  if(done.rowCount)return;
+  const q=await pool.query(
+    `SELECT DISTINCT object_id FROM time_entries_shadow
+      WHERE COALESCE(object_id,'')<>'' ORDER BY object_id`
+  );
+  let keys=0;
+  for(const r of q.rows){
+    const objectId=String(r.object_id||'').trim();if(!objectId)continue;
+    const data=await postgresObjectReports({objectId});
+    const key=objectReportsVerifyKey({objectId});
+    const n=data?Number(data.reportCount||0):0;
+    await saveShadowVerifyStat(key,n,n,0);
+    keys++;
+  }
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb) ON CONFLICT(key) DO NOTHING`,
+    [marker,JSON.stringify({at:new Date().toISOString(),keys,
+      reason:'trusted object report derivation from imported/mirrored time entries and merge relations'})]
+  );
+  console.log('TRUSTED_OBJECT_REPORTS_V16 keys='+keys);
+}
+
 async function bootstrapRegieReadinessV14(){
   if(!pool)return;
   const marker='trusted_regie_bootstrap_v14';
@@ -8575,11 +8602,17 @@ async function proxyLegacy(req, res, body) {
           .catch(e=>console.error('day data time readiness invalidate failed',e.message));
         pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'regie_billing_risk:%'")
           .catch(e=>console.error('regie billing risk readiness invalidate failed',e.message));
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'object_reports_id:%' OR shadow_name LIKE 'object_reports_customer:%'")
+          .catch(e=>console.error('object reports time readiness invalidate failed',e.message));
         invalidateShadowVerify('maintenance_contracts').catch(e=>console.error('maintenance contracts time readiness invalidate failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false &&
           ['mergeRegieObjects','saveObjectInternalNote','updateRegieReport'].includes(action)) {
         mirrorRegieMetadataWrite(action,body,parsed).catch(e=>console.error('regie metadata shadow mirror failed',e.message));
+      }
+      if (upstream.status === 200 && parsed && parsed.ok !== false && action==='mergeRegieObjects') {
+        pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'object_reports_id:%' OR shadow_name LIKE 'object_reports_customer:%'")
+          .catch(e=>console.error('object reports merge readiness invalidate failed',e.message));
       }
       if (upstream.status === 200 && parsed && parsed.ok !== false && action==='addRegieAttachments') {
         mirrorRegieAttachmentsWrite(body,parsed).catch(e=>console.error('regie attachments shadow mirror failed',e.message));
