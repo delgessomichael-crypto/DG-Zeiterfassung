@@ -8643,7 +8643,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteAbsence','endSicknessAbsence',
-  'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
+  'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
 function berlinTodayIso(){
@@ -8722,6 +8722,13 @@ async function tryDirectPostgresWrite(action,body){
     if(!id)return null;
     const q=await pool.query('SELECT absence_type FROM absences_shadow WHERE id=$1 AND active=true LIMIT 1',[id]);
     if(q.rowCount&&String(q.rows[0].absence_type||'')==='Freizeitausgleich')return null;
+  }
+  if(action==='updateRegieReport'){
+    const entryId=String(body&&body.entryId||'').trim(),item=body&&body.item||{};
+    if(!entryId)return null;
+    const q=await pool.query('SELECT customer FROM time_entries_shadow WHERE id=$1 LIMIT 1',[entryId]);
+    if(!q.rowCount)return null;
+    if(shadowObjectKey(String(q.rows[0].customer||''))!==shadowObjectKey(String(item.customer||'')))return null;
   }
   if(action==='saveManualOrder'){
     const item=body&&body.item||{};
@@ -8803,6 +8810,40 @@ async function tryDirectPostgresWrite(action,body){
         );
         result={ok:true,id};
       }
+    }else if(action==='updateRegieReport'){
+      const entryId=String(body.entryId||'').trim(),item=body.item||{};
+      if(!entryId)throw new Error('Regiebericht-ID fehlt.');
+      const date=String(item.date||'').trim(),customer=String(item.customer||'').trim();
+      const start=String(item.start||'').trim(),end=String(item.end||'').trim(),activity=String(item.activity||'').trim();
+      const materialUsed=Boolean(item.materialUsed),material=String(item.material||'').trim();
+      const jobStatus=String(item.jobStatus||'Abgeschlossen').trim()||'Abgeschlossen';
+      if(!validIsoDateText(date)||!customer||!start||!end||!activity)throw new Error('Bitte alle Pflichtfelder prüfen.');
+      if(!['Laufend','Abgeschlossen'].includes(jobStatus))throw new Error('Ungültiger Auftragsstatus.');
+      let sm=pgTimeToMinutes(start),em=pgTimeToMinutes(end);
+      if(sm===null||em===null||sm===em)throw new Error('Von-/Bis-Zeit ist ungültig.');
+      if(em<sm)em+=1440;
+      const hours=Math.round(((em-sm)/60)*100)/100;
+      if(!(hours>0&&hours<24))throw new Error('Die Arbeitszeit muss größer 0 und kleiner als 24 Stunden sein.');
+      const q=await client.query(
+        `SELECT employee_name,entry_date,customer,object_id FROM time_entries_shadow WHERE id=$1 FOR UPDATE`,[entryId]
+      );
+      if(!q.rowCount)throw new Error('Regiebericht wurde nicht gefunden.');
+      const row=q.rows[0],sourceEmployee=String(row.employee_name||''),oldDate=berlinDateOnly(row.entry_date);
+      if(shadowObjectKey(String(row.customer||''))!==shadowObjectKey(customer))
+        throw new Error('Kundenwechsel wird weiterhin über Google verarbeitet.');
+      const objectId=String(row.object_id||'');
+      const closedQ=await client.query(
+        'SELECT 1 FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 LIMIT 1',[sourceEmployee,date]
+      );
+      await client.query(
+        `UPDATE time_entries_shadow SET entry_date=$2,customer=$3,start_time=$4,end_time=$5,hours=$6,
+           activity=$7,closed=$8,material_used=$9,material=$10,job_status=$11,shadow_updated_at=now()
+         WHERE id=$1`,
+        [entryId,date,customer,start,end,hours,activity,closedQ.rowCount>0,materialUsed,materialUsed?material:'',jobStatus]
+      );
+      await recalcClosedDayAfterDirectCorrection(client,sourceEmployee,oldDate,'Büro: Regiebericht korrigiert',nowIso);
+      if(date!==oldDate)await recalcClosedDayAfterDirectCorrection(client,sourceEmployee,date,'Büro: Regiebericht verschoben/korrigiert',nowIso);
+      result={ok:true,id:entryId,hours,objectId,jobStatus,changedBy:by,changedAt:shadowGermanDateTime(nowIso)};
     }else if(action==='markRegieReportBilled'){
       const entryId=String(body.entryId||'').trim();
       if(!entryId)throw new Error('Auftrags-ID fehlt.');
@@ -9569,6 +9610,22 @@ async function tryDirectPostgresWrite(action,body){
     const q=await pool.query('SELECT COUNT(*)::int AS n FROM manual_orders_shadow');
     const n=Number(q.rows[0]?.n||0);
     await saveShadowVerifyStat('manual_orders',n,n,0);
+  }
+  if(action==='updateRegieReport'){
+    const entryId=String(body.entryId||'');
+    const q=await pool.query('SELECT employee_name,entry_date,object_id FROM time_entries_shadow WHERE id=$1 LIMIT 1',[entryId]);
+    const r=q.rows[0]||{},employee=String(r.employee_name||''),date=berlinDateOnly(r.entry_date),objectId=String(r.object_id||'');
+    const p=date.split('-').map(Number),year=p[0]||0,month=p[1]||0;
+    if(employee&&year&&month){
+      const dayKey=dayDataVerifyKey({date},employee);if(dayKey)await saveShadowVerifyStat(dayKey,1,1,0);
+      const weekKey=weekVerifyKey({referenceDate:date},employee);if(weekKey)await saveShadowVerifyStat(weekKey,1,1,0);
+      const monthKey=monthDataVerifyKey({employee,year,month});if(monthKey)await saveShadowVerifyStat(monthKey,1,1,0);
+      const bossKey=bossDayClosuresVerifyKey({year,month});if(bossKey)await saveShadowVerifyStat(bossKey,1,1,0);
+    }
+    if(objectId){
+      await invalidateShadowVerify('object_reports_id:'+objectId);
+      await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'regie_reports:%' OR shadow_name LIKE 'regie_billing_risk:%'");
+    }
   }
   if(['updateBossDayEntry','deleteBossDayEntry'].includes(action)){
     const employee=String(body.targetEmployee||''),date=String(body.date||'');
