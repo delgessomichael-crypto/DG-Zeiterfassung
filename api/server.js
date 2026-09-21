@@ -6465,7 +6465,7 @@ async function verifyMaintenanceArchiveShadow(rows,q){
 async function directMaintenanceArchiveRead(body){
   const session=await localSessionForBody(body,true);
   if(!session)return null;
-  const q=String(body.q||''),key=maintenanceArchiveKey(q);
+  const q=String(body.query??body.q??''),key=maintenanceArchiveKey(q);
   if(!(await shadowReadyForDirectRead(key)))return null;
   return postgresMaintenanceArchive(q);
 }
@@ -6513,7 +6513,7 @@ async function verifyMaintenanceDeviceByInternalIdShadow(data,internalId){
 async function directMaintenanceDeviceByInternalIdRead(body){
   const session=await localSessionForBody(body,true);
   if(!session)return null;
-  const id=String(body.internalId||'').trim();if(!id)return null;
+  const id=String(body.internalDeviceId??body.internalId??'').trim();if(!id)return null;
   const key='maintenance_device_internal:'+id;
   if(!(await shadowReadyForDirectRead(key)))return null;
   return postgresMaintenanceDeviceByInternalId(id);
@@ -6597,7 +6597,7 @@ async function verifyMaintenanceSearchShadow(rows,q){
 async function directMaintenanceSearchRead(body){
   const session=await localSessionForBody(body,true);
   if(!session)return null;
-  const q=String(body.q||'');
+  const q=String(body.query??body.q??'');
   const key=maintenanceSearchKey(q);
   if(!(await shadowReadyForDirectRead(key)))return null;
   return postgresMaintenanceSearch(q);
@@ -7303,11 +7303,11 @@ async function proxyLegacy(req, res, body) {
           verifyMaintenanceCustomerShadow(verifyData).catch(e=>console.error('maintenance customer shadow verify failed',e.message));
           verifyMaintenanceCustomerFullShadow(verifyData).catch(e=>console.error('maintenance customer full shadow verify failed',e.message));
         }
-        if (action==='searchMaintenanceCustomers') verifyMaintenanceSearchShadow(verifyData,body.q).catch(e=>console.error('maintenance search shadow verify failed',e.message));
+        if (action==='searchMaintenanceCustomers') verifyMaintenanceSearchShadow(verifyData,body.query??body.q??'').catch(e=>console.error('maintenance search shadow verify failed',e.message));
         if (action==='getMaintenanceContracts') verifyMaintenanceContractsShadow(verifyData).catch(e=>console.error('maintenance contracts shadow verify failed',e.message));
         if (action==='getMaintenanceOverview') verifyMaintenanceOverviewShadow(verifyData).catch(e=>console.error('maintenance overview shadow verify failed',e.message));
-        if (action==='getMaintenanceArchive') verifyMaintenanceArchiveShadow(verifyData,body.q).catch(e=>console.error('maintenance archive shadow verify failed',e.message));
-        if (action==='findMaintenanceDeviceByInternalId') verifyMaintenanceDeviceByInternalIdShadow(verifyData,body.internalId).catch(e=>console.error('maintenance device-id shadow verify failed',e.message));
+        if (action==='getMaintenanceArchive') verifyMaintenanceArchiveShadow(verifyData,body.query??body.q??'').catch(e=>console.error('maintenance archive shadow verify failed',e.message));
+        if (action==='findMaintenanceDeviceByInternalId') verifyMaintenanceDeviceByInternalIdShadow(verifyData,body.internalDeviceId??body.internalId??'').catch(e=>console.error('maintenance device-id shadow verify failed',e.message));
         if (action==='getAbsences') verifyAbsencesShadow(verifyData).catch(e=>console.error('absence shadow verify failed',e.message));
         if (action==='getAbsenceOverview') verifyAbsenceOverviewShadow(verifyData,body).catch(e=>console.error('absence overview shadow verify failed',e.message));
         if (action==='getSicknessAlerts') verifySicknessAlertsShadow(verifyData).catch(e=>console.error('sickness alerts shadow verify failed',e.message));
