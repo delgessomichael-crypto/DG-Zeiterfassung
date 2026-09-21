@@ -8643,7 +8643,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
+  'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
@@ -9419,6 +9419,28 @@ async function tryDirectPostgresWrite(action,body){
         [employee,year,entitlement,nowIso,by]
       );
       result={ok:true,_vacationEmployee:employee,_vacationYear:year};
+    }else if(action==='saveMonthlyAdjustment'){
+      const employee=String(body.targetEmployee||'').trim(),year=Number(body.year)||0,month=Number(body.month)||0;
+      const hours=Math.round(Number(body.hours||0)*100)/100,reason=String(body.reason||'').trim();
+      if(!employee)throw new Error('Mitarbeiter wurde nicht gefunden.');
+      const eq=await client.query('SELECT 1 FROM employee_admin_shadow WHERE employee_name=$1 LIMIT 1',[employee]);
+      if(!eq.rowCount)throw new Error('Mitarbeiter wurde nicht gefunden.');
+      if(!(year>0&&month>=1&&month<=12))throw new Error('Ungültiger Monat.');
+      if(!Number.isFinite(hours)||hours===0||Math.abs(hours)>250)throw new Error('Die Korrektur muss zwischen -250 und +250 Stunden liegen und darf nicht 0 sein.');
+      if(!reason)throw new Error('Bitte einen Grund für die Stundenkorrektur eintragen.');
+      const id=String(body.adjustmentId||'').trim()||('ADJ-'+crypto.randomUUID());
+      await client.query(
+        `INSERT INTO monthly_adjustments_shadow(
+          id,employee_name,adjustment_year,adjustment_month,hours,reason,created_at_text,created_by,shadow_updated_at
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,now())
+        ON CONFLICT(id) DO UPDATE SET employee_name=EXCLUDED.employee_name,
+          adjustment_year=EXCLUDED.adjustment_year,adjustment_month=EXCLUDED.adjustment_month,
+          hours=EXCLUDED.hours,reason=EXCLUDED.reason,created_at_text=EXCLUDED.created_at_text,
+          created_by=EXCLUDED.created_by,shadow_updated_at=now()`,
+        [id,employee,year,month,hours,reason,nowIso,by]
+      );
+      legacyPayload=Object.assign({},body,{adjustmentId:id});
+      result={ok:true,id,hours,_employee:employee,_year:year,_month:month};
     }else if(action==='deleteMonthlyAdjustment'){
       const id=String(body.adjustmentId||'').trim();if(!id)throw new Error('Korrektur-ID fehlt.');
       const q=await client.query(
