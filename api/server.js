@@ -717,6 +717,7 @@ function legacyOutboxTerminalSuccess(action,parsed){
   const msg=String(parsed&&parsed.error||'').toLowerCase();
   if(['completeOwnReminder','deleteOwnReminder'].includes(action)&&msg.includes('bereits erledigt'))return true;
   if(action==='deleteManualOrder'&&msg.includes('auftrag nicht gefunden'))return true;
+  if(['reopenInquiryReminder','archiveInquiryReminder'].includes(action)&&msg.includes('reminder ist bereits erledigt'))return true;
   return false;
 }
 let legacyOutboxFlushRunning=false;
@@ -1817,6 +1818,18 @@ async function mirrorRegieMetadataWrite(action,body,parsed){
     return;
   }
 
+  if(['reopenInquiryReminder','archiveInquiryReminder'].includes(action)){
+    for(const includeDone of [false,true]){
+      const rows=await postgresInquiryReminderView(includeDone),key=inquiryReminderViewKey(includeDone);
+      await saveShadowVerifyStat(key,rows.length,rows.length,0);
+      await markInquiryViewFresh(key);
+    }
+    for(const status of ['Offen','Alle','Neu','Archiviert']){
+      const rows=await postgresCustomerInquiryView(status),key=customerInquiryViewKey(status);
+      await saveShadowVerifyStat(key,rows.length,rows.length,0);
+      await markInquiryViewFresh(key);
+    }
+  }
   if(['saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry'].includes(action)){
     const statuses=['Offen','Alle','Kontaktiert','Erledigt','Archiviert'];
     for(const status of statuses){
@@ -8650,7 +8663,8 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder',
   'saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
-  'saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry'
+  'saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
+  'reopenInquiryReminder','archiveInquiryReminder'
 ]);
 
 function berlinTodayIso(){
@@ -8712,6 +8726,34 @@ async function tryDirectPostgresWrite(action,body){
         );
         result={ok:true,id};
       }
+    }else if(['reopenInquiryReminder','archiveInquiryReminder'].includes(action)){
+      const rid=String(body.reminderId||'').trim();if(!rid)throw new Error('Reminder-ID fehlt.');
+      const rq=await client.query(
+        'SELECT inquiry_id,status FROM inquiry_reminders_shadow WHERE id=$1 FOR UPDATE',[rid]
+      );
+      if(!rq.rowCount)throw new Error('Anfrage-Reminder wurde nicht gefunden.');
+      if(String(rq.rows[0].status||'Offen')!=='Offen')throw new Error('Reminder ist bereits erledigt.');
+      const inquiryId=String(rq.rows[0].inquiry_id||'').trim();
+      if(!inquiryId)throw new Error('Zugehörige Anfrage wurde nicht gefunden.');
+      const iq=await client.query(
+        'SELECT 1 FROM customer_inquiries_shadow WHERE id=$1 FOR UPDATE',[inquiryId]
+      );
+      if(!iq.rowCount)throw new Error('Zugehörige Anfrage wurde nicht gefunden.');
+      const resultText=action==='reopenInquiryReminder'?'Zurück zu offenen Anfragen':'Termin vereinbart';
+      const newStatus=action==='reopenInquiryReminder'?'Neu':'Archiviert';
+      await client.query(
+        `UPDATE inquiry_reminders_shadow
+            SET status='Erledigt',result=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now()
+          WHERE id=$1`,[rid,resultText,nowIso,by]
+      );
+      await client.query(
+        `UPDATE customer_inquiries_shadow
+            SET status=$2,read_flag=true,
+                done_reason=CASE WHEN $2='Archiviert' THEN 'Termin vereinbart' ELSE done_reason END,
+                changed_at_text=$3,changed_by=$4,shadow_updated_at=now()
+          WHERE id=$1`,[inquiryId,newStatus,nowIso,by]
+      );
+      result={ok:true,inquiryId};
     }else if(['saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry'].includes(action)){
       const id=String(body.id||'').trim();if(!id)throw new Error('Anfrage-ID fehlt.');
       const q=await client.query(
