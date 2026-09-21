@@ -8678,7 +8678,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'deleteMonthlyAdjustment'
+  'deleteMonthlyAdjustment','saveVacationEntitlement'
 ]);
 
 function berlinTodayIso(){
@@ -8768,6 +8768,25 @@ async function tryDirectPostgresWrite(action,body){
         );
         result={ok:true,id};
       }
+    }else if(action==='saveVacationEntitlement'){
+      const employee=String(body.targetEmployee||'').trim(),year=Number(body.year)||0;
+      const entitlement=Math.max(0,Number(body.entitlement)||0);
+      if(!employee)throw new Error('Mitarbeiter nicht gefunden.');
+      if(!(year>=2000&&year<=2100))throw new Error('Ungültiges Jahr.');
+      const eq=await client.query(
+        'SELECT 1 FROM employee_admin_shadow WHERE employee_name=$1 LIMIT 1',[employee]
+      );
+      if(!eq.rowCount)throw new Error('Mitarbeiter nicht gefunden.');
+      await client.query(
+        `INSERT INTO vacation_entitlements_shadow(
+          employee_name,vacation_year,entitlement,changed_at_text,changed_by,shadow_updated_at
+        ) VALUES($1,$2,$3,$4,$5,now())
+        ON CONFLICT(employee_name,vacation_year) DO UPDATE SET
+          entitlement=EXCLUDED.entitlement,changed_at_text=EXCLUDED.changed_at_text,
+          changed_by=EXCLUDED.changed_by,shadow_updated_at=now()`,
+        [employee,year,entitlement,nowIso,by]
+      );
+      result={ok:true,_vacationEmployee:employee,_vacationYear:year};
     }else if(action==='deleteMonthlyAdjustment'){
       const id=String(body.adjustmentId||'').trim();if(!id)throw new Error('Korrektur-ID fehlt.');
       const q=await client.query(
@@ -8989,6 +9008,14 @@ async function tryDirectPostgresWrite(action,body){
     throw e;
   }finally{client.release();}
 
+  if(action==='saveVacationEntitlement'){
+    result=await postgresVacationSummary(result._vacationEmployee,result._vacationYear);
+    const employee=result.employee,year=result.year;
+    await saveShadowVerifyStat('vacation_full:'+year+':'+employee,1,1,0);
+    const activeMap=await employeeActiveMapFromSnapshot();
+    await saveShadowVerifyStat('vacation_full:'+year+':all,activeMap.size,activeMap.size,0);
+    await saveShadowVerifyStat('vacation_entitlement',1,1,0);
+  }
   if(action==='saveObjectInternalNote'){
     const q=await pool.query('SELECT COUNT(*)::int AS n FROM object_notes_shadow');
     const n=Number(q.rows[0]?.n||0);await saveShadowVerifyStat('object_notes:base',n,n,0);
