@@ -871,7 +871,7 @@ function createTaxAdvisorPdf(employee, employeePin, year, month) {
   return {fileName:name,base64:Utilities.base64Encode(pdf.getBytes())};
 }
 
-function saveMonthlyAdjustment(chefEmployee, chefPin, targetEmployee, year, month, hours, reason) {
+function saveMonthlyAdjustment(chefEmployee, chefPin, targetEmployee, year, month, hours, reason, adjustmentId) {
   requireChef_(chefEmployee, chefPin);
   targetEmployee = clean_(targetEmployee);
   year = Number(year);
@@ -888,7 +888,7 @@ function saveMonthlyAdjustment(chefEmployee, chefPin, targetEmployee, year, mont
 
   const ss = getSpreadsheet_();
   const sheet = ensureAdjustmentSheet_(ss);
-  const id = Utilities.getUuid();
+  const id = clean_(adjustmentId) || Utilities.getUuid();
   sheet.appendRow([id, targetEmployee, year, month, round2_(hours), reason, new Date(), clean_(chefEmployee)]);
   return {ok:true,id:id,hours:round2_(hours)};
 }
@@ -5413,7 +5413,8 @@ function doPost(e) {
           Number(data.year),
           Number(data.month),
           Number(data.hours),
-          clean_(data.reason)
+          clean_(data.reason),
+          clean_(data.adjustmentId)
         )
       });
     }
