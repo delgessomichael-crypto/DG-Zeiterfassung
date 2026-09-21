@@ -8643,7 +8643,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive',
-  'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
+  'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
 function berlinTodayIso(){
@@ -8774,6 +8774,54 @@ async function tryDirectPostgresWrite(action,body){
           WHERE id=$1`,[entryId,nowIso,by]
       );
       result={ok:true,id:entryId,billedBy:by,billedAt:shadowGermanDateTime(nowIso)};
+    }else if(['markRegieObjectBilled','markRegieObjectsBilled'].includes(action)){
+      const requested=action==='markRegieObjectBilled'?[String(body.objectId||'').trim()]:
+        (Array.isArray(body.objectIds)?body.objectIds.map(x=>String(x||'').trim()).filter(Boolean):[]);
+      let objectIds=[...new Set(requested.filter(Boolean))];
+      if(!objectIds.length)throw new Error('Objekt-ID fehlt.');
+      const mergeRows=await client.query(
+        'SELECT object_id,merge_id FROM regie_merges_shadow WHERE object_id=ANY($1::text[])',[objectIds]
+      );
+      const mergeIds=[...new Set(mergeRows.rows.map(r=>String(r.merge_id||'')).filter(Boolean))];
+      if(mergeIds.length){
+        const siblings=await client.query(
+          'SELECT object_id FROM regie_merges_shadow WHERE merge_id=ANY($1::text[])',[mergeIds]
+        );
+        objectIds=[...new Set(objectIds.concat(siblings.rows.map(r=>String(r.object_id||'')).filter(Boolean)))];
+      }
+      if(!Boolean(body.force)){
+        const rq=await client.query(
+          `SELECT object_id,customer,billing_status,job_status,entry_date
+             FROM time_entries_shadow`
+        );
+        const selectedSet=new Set(objectIds),selectedCustomers=[];
+        for(const r of rq.rows){
+          if(selectedSet.has(String(r.object_id||''))&&String(r.customer||''))selectedCustomers.push(String(r.customer));
+        }
+        const customerKeys=[...new Set(selectedCustomers.map(shadowObjectKey).filter(Boolean))];
+        const risky=new Set();
+        for(const r of rq.rows){
+          const oid=String(r.object_id||'');
+          if(!oid||selectedSet.has(oid)||String(r.billing_status||'Offen')!=='Offen')continue;
+          const key=shadowObjectKey(String(r.customer||''));if(!key)continue;
+          if(customerKeys.some(selectedKey=>key===selectedKey||key.includes(selectedKey)||selectedKey.includes(key)))risky.add(oid);
+        }
+        if(risky.size)throw new Error('Weitere offene oder laufende Aufträge dieses Kunden gefunden. Bitte vor der Abrechnung prüfen.');
+      }
+      const matched=await client.query(
+        `SELECT id FROM time_entries_shadow
+          WHERE object_id=ANY($1::text[]) AND COALESCE(billing_status,'Offen')='Offen'
+          FOR UPDATE`,[objectIds]
+      );
+      if(!matched.rowCount)throw new Error('Für diese Auswahl wurden keine offenen Regieberichte gefunden.');
+      await client.query(
+        `UPDATE time_entries_shadow
+            SET billing_status='Abgerechnet',billed_at_text=$2,billed_by=$3,shadow_updated_at=now()
+          WHERE object_id=ANY($1::text[]) AND COALESCE(billing_status,'Offen')='Offen'`,
+        [objectIds,nowIso,by]
+      );
+      result={ok:true,objectIds,count:matched.rowCount,billedBy:by,billedAt:shadowGermanDateTime(nowIso)};
+      if(action==='markRegieObjectBilled')result.objectId=String(body.objectId||'').trim();
     }else if(['setRegieObjectJobStatus','markRegieObjectCompleted'].includes(action)){
       const objectId=String(body.objectId||'').trim();
       const jobStatus=action==='markRegieObjectCompleted'?'Abgeschlossen':String(body.jobStatus||'').trim();
