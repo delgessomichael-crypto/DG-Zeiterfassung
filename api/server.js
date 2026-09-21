@@ -8642,7 +8642,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive',
+  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive','setPlannerWorkerActive',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','setDayStatus','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
 ]);
 
