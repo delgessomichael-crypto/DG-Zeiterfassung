@@ -8661,7 +8661,7 @@ function directMinimumWageRead(body){
 const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'createOwnReminder','saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder',
   'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus','saveOfferCreatedWithReminder',
-  'mergeRegieObjects','saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed','setMonthClosureStatus','setPayrollMonthStatus','completePayrollCycle',
+  'mergeRegieObjects','saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed','setMonthClosureStatus','setPayrollMonthStatus','completePayrollCycle','forceCompletePayrollCycle',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
@@ -9654,6 +9654,26 @@ async function tryDirectPostgresWrite(action,body){
       const history=h.rows.map(r=>({id:String(r.id||''),action:String(r.action||''),at:shadowGermanDateTime(r.action_at_text||''),by:String(r.action_by||''),reason:String(r.reason||'')}));
       const last=history.length?history[history.length-1]:null;
       result={status:last&&last.action==='Abgeschlossen'?'Abgeschlossen':'Offen',last,history};
+    }else if(action==='forceCompletePayrollCycle'){
+      const year=Number(body.year)||0,month=Number(body.month)||0,reason=String(body.reason||'').trim();
+      if(!(year>0&&month>=1&&month<=12))throw new Error('Ungültiger Monat.');
+      if(!reason)throw new Error('Bitte einen Prüfvermerk / Grund für die Zwangsübergabe eintragen.');
+      const audit=await postgresPayrollAuditNative({year,month});
+      if(!audit)throw new Error('Lohnprüfung konnte nicht aus PostgreSQL geladen werden.');
+      if(audit.state?.status==='Uebergeben'&&!audit.state?.changedSinceApproval){
+        result={ok:true,audit};
+      }else{
+        const id=String(body.closureId||'').trim()||('PC-'+crypto.randomUUID());
+        await client.query(
+          `INSERT INTO payroll_closures_shadow(
+             id,closure_year,closure_month,action,action_at_text,action_by,reason,fingerprint,shadow_updated_at
+           ) VALUES($1,$2,$3,'Uebergeben',$4,$5,$6,$7,now())
+           ON CONFLICT(id) DO NOTHING`,
+          [id,year,month,nowIso,by,reason,String(audit.fingerprint||'')]
+        );
+        legacyPayload=Object.assign({},body,{closureId:id,reason});
+        result={ok:true,audit:await postgresPayrollAuditNative({year,month})};
+      }
     }else if(action==='completePayrollCycle'){
       const year=Number(body.year)||0,month=Number(body.month)||0;
       if(!(year>0&&month>=1&&month<=12))throw new Error('Ungültiger Monat.');
@@ -10466,6 +10486,12 @@ async function tryDirectPostgresWrite(action,body){
       pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getMonthPayrollAudit','getPayrollCycleState','getDashboardSummary51')")
     ]);
     if(year)await mirrorHolidayYear(year);
+  }
+  if(action==='forceCompletePayrollCycle'){
+    await Promise.all([
+      pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'payroll_audit_%' OR shadow_name LIKE 'payroll_cycle_%' OR shadow_name='payroll_protocols'"),
+      pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getMonthPayrollAudit','getPayrollCycleState','getDashboardSummary51')")
+    ]);
   }
   if(action==='completePayrollCycle'){
     await Promise.all([
