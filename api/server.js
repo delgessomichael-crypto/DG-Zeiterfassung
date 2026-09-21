@@ -8638,6 +8638,7 @@ function directMinimumWageRead(body){
 
 const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder',
+  'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus',
   'saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
@@ -8723,6 +8724,9 @@ async function tryDirectPostgresWrite(action,body){
     const q=await pool.query('SELECT absence_type FROM absences_shadow WHERE id=$1 AND active=true LIMIT 1',[id]);
     if(q.rowCount&&String(q.rows[0].absence_type||'')==='Freizeitausgleich')return null;
   }
+  if(action==='setRegieReportsOfferStatus'){
+    if(!String(body&&body.offerId||'').trim())return null;
+  }
   if(action==='updateEmployeeEntry'){
     const entryId=String(body&&body.entryId||'').trim(),item=body&&body.item||{};
     if(!entryId)return null;
@@ -8748,7 +8752,92 @@ async function tryDirectPostgresWrite(action,body){
   let result=null,outboxId=0,legacyAction=action,legacyPayload=body;
   try{
     await client.query('BEGIN');
-    if(action==='updateEmployeeEntry'){
+    if(['moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus'].includes(action)){
+      let offerId=String(body.offerId||'').trim(),reminderId=String(body.reminderId||'').trim();
+      if(['declineOfferFromReminder','acceptOfferFromReminder'].includes(action)){
+        if(!reminderId)throw new Error('Reminder wurde nicht gefunden.');
+        const rq=await client.query('SELECT offer_id,status FROM offer_reminders_shadow WHERE id=$1 FOR UPDATE',[reminderId]);
+        if(!rq.rowCount)throw new Error('Reminder wurde nicht gefunden.');
+        offerId=String(rq.rows[0].offer_id||'');
+      }
+      if(!offerId)throw new Error('Angebots-ID fehlt.');
+      let targetStatus='',resultText='',asRunning=false;
+      if(action==='moveOfferBackToCreate'){targetStatus='Angebot zu erstellen';resultText='Zurück zu Angebote zu erstellen';}
+      else if(action==='declineOfferFromReminder'){targetStatus='Angebot Abgelehnt';resultText='Kein Auftrag';}
+      else if(action==='acceptOfferFromReminder'){
+        asRunning=Boolean(body.asRunning);
+        targetStatus=asRunning?'Laufend':'Angebot Angenommen';
+        resultText=asRunning?'Angenommen - Laufender Auftrag':'Angenommen - Archiv';
+      }else if(action==='acceptOfferAsRunning'){targetStatus='Laufend';resultText='Angenommen - Laufender Auftrag';asRunning=true;}
+      else if(action==='discardOfferPermanently'){targetStatus='Verworfen';}
+      else if(action==='setRegieReportsOfferStatus'){
+        targetStatus=String(body.offerStatus||'').trim();
+        if(!['Angebot zu erstellen','Offenes Angebot','Angebot Angenommen','Angebot Abgelehnt'].includes(targetStatus))
+          throw new Error('Ungültiger Angebotsstatus.');
+      }
+      const iq=await client.query('SELECT status FROM inquiry_offers_shadow WHERE offer_id=$1 FOR UPDATE',[offerId]);
+      const tq=await client.query(
+        `SELECT id,hours,job_status,billing_status FROM time_entries_shadow WHERE offer_id=$1 FOR UPDATE`,[offerId]
+      );
+      if(action==='discardOfferPermanently'){
+        if(iq.rowCount){
+          if(String(iq.rows[0].status||'')!=='Zu erstellen')throw new Error('Nur noch nicht erstellte Angebote können über „Auftrag löschen“ entfernt werden.');
+          await client.query(
+            `UPDATE inquiry_offers_shadow SET status='Verworfen',changed_at_text=$2,changed_by=$3,shadow_updated_at=now() WHERE offer_id=$1`,
+            [offerId,nowIso,by]
+          );
+          result={ok:true,count:1};
+        }else{
+          const bad=tq.rows.find(r=>String(r.job_status||'')!=='Angebot zu erstellen');
+          if(bad)throw new Error('Nur noch nicht erstellte Angebote können über „Auftrag löschen“ entfernt werden.');
+          if(!tq.rowCount)throw new Error('Auftrag wurde nicht gefunden.');
+          await client.query(
+            `UPDATE time_entries_shadow SET job_status='Verworfen',offer_id='',offer_changed_at_text='',offer_changed_by='',shadow_updated_at=now() WHERE offer_id=$1`,[offerId]
+          );
+          result={ok:true,count:tq.rowCount};
+        }
+      }else{
+        const totalHours=Math.round(tq.rows.reduce((s,r)=>s+Number(r.hours||0),0)*100)/100;
+        if(asRunning&&!(totalHours>0))throw new Error('Zu diesem Angebot ist noch keine Arbeitszeit erfasst. Es kann daher nicht als laufender Auftrag übernommen werden.');
+        if(!iq.rowCount&&!tq.rowCount)throw new Error('Angebot wurde nicht gefunden.');
+        if(iq.rowCount){
+          const inquiryStatus=targetStatus==='Angebot zu erstellen'?'Zu erstellen':targetStatus==='Offenes Angebot'?'Offen':targetStatus==='Angebot Angenommen'?'Angenommen':targetStatus==='Angebot Abgelehnt'?'Abgelehnt':targetStatus;
+          await client.query(
+            `UPDATE inquiry_offers_shadow SET status=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now() WHERE offer_id=$1`,
+            [offerId,inquiryStatus,nowIso,by]
+          );
+        }
+        if(tq.rowCount){
+          await client.query(
+            `UPDATE time_entries_shadow SET job_status=$2,
+                offer_changed_at_text=CASE WHEN $2='Laufend' THEN '' ELSE $3 END,
+                offer_changed_by=CASE WHEN $2='Laufend' THEN '' ELSE $4 END,
+                offer_id=CASE WHEN $2='Laufend' THEN '' ELSE offer_id END,
+                shadow_updated_at=now()
+              WHERE offer_id=$1 AND COALESCE(billing_status,'Offen')='Offen'`,
+            [offerId,targetStatus,nowIso,by]
+          );
+        }
+        if(resultText){
+          if(reminderId){
+            await client.query(
+              `UPDATE offer_reminders_shadow SET status='Erledigt',result=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now() WHERE id=$1`,
+              [reminderId,resultText,nowIso,by]
+            );
+          }else{
+            await client.query(
+              `UPDATE offer_reminders_shadow SET status='Erledigt',result=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now() WHERE offer_id=$1 AND status='Offen'`,
+              [offerId,resultText,nowIso,by]
+            );
+          }
+        }
+        if(action==='moveOfferBackToCreate')result={ok:true,offerId,count:tq.rowCount||(iq.rowCount?1:0),status:'Angebot zu erstellen'};
+        else if(action==='declineOfferFromReminder')result={ok:true,offerId};
+        else if(action==='acceptOfferFromReminder')result={ok:true,offerId,totalHours,asRunning};
+        else if(action==='acceptOfferAsRunning')result={ok:true,offerId,count:tq.rowCount,totalHours};
+        else result={ok:true,offerId,status:targetStatus,count:tq.rowCount||(iq.rowCount?1:0),changedAt:shadowGermanDateTime(nowIso),changedBy:by};
+      }
+    }else if(action==='updateEmployeeEntry'){
       const entryId=String(body.entryId||'').trim(),item=body.item||{};
       if(!entryId)throw new Error('Eintrag-ID fehlt.');
       const q=await client.query(
@@ -9626,6 +9715,11 @@ async function tryDirectPostgresWrite(action,body){
     }
 
     delete result._employee;delete result._year;delete result._month;
+  }
+  if(['moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus'].includes(action)){
+    await invalidateOfferNativeReadiness();
+    await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name='offer_reminders' OR shadow_name LIKE 'offer_reports_native:%' OR shadow_name='offer_statistics_native'");
+    await pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getOfferReports','getOfferStatistics','getOfferReminders','getDashboardSummary51')");
   }
   if(action==='rescheduleOfferReminder'){
     const q=await pool.query('SELECT COUNT(*)::int AS n FROM offer_reminders_shadow');
