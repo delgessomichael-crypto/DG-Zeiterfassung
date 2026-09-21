@@ -8678,7 +8678,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
   'reopenInquiryReminder','archiveInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'deleteMonthlyAdjustment','saveVacationEntitlement'
+  'deleteMonthlyAdjustment','saveVacationEntitlement','setEmployeeActive'
 ]);
 
 function berlinTodayIso(){
@@ -8768,6 +8768,21 @@ async function tryDirectPostgresWrite(action,body){
         );
         result={ok:true,id};
       }
+    }else if(action==='setEmployeeActive'){
+      const target=String(body.targetName||'').trim();
+      const active=Boolean(body.active);
+      if(!target)throw new Error('Mitarbeiter nicht gefunden.');
+      if(target===by&&!active)throw new Error('Der aktuell angemeldete Chef kann sich nicht selbst deaktivieren.');
+      const q=await client.query(
+        'SELECT payload FROM employee_admin_shadow WHERE employee_name=$1 FOR UPDATE',[target]
+      );
+      if(!q.rowCount)throw new Error('Mitarbeiter nicht gefunden.');
+      const payload=Object.assign({},q.rows[0].payload||{},{active});
+      await client.query(
+        'UPDATE employee_admin_shadow SET payload=$2::jsonb,shadow_updated_at=now() WHERE employee_name=$1',
+        [target,JSON.stringify(payload)]
+      );
+      result={ok:true,_employeeActiveTarget:target};
     }else if(action==='saveVacationEntitlement'){
       const employee=String(body.targetEmployee||'').trim(),year=Number(body.year)||0;
       const entitlement=Math.max(0,Number(body.entitlement)||0);
@@ -9008,6 +9023,12 @@ async function tryDirectPostgresWrite(action,body){
     throw e;
   }finally{client.release();}
 
+  if(action==='setEmployeeActive'){
+    employeeNamesCache=null;
+    employeeSnapshotDirtyCache=false;
+    const rows=await postgresEmployeeAdminData();
+    await saveShadowVerifyStat('employee_admin',rows.length,rows.length,0);
+  }
   if(action==='saveVacationEntitlement'){
     result=await postgresVacationSummary(result._vacationEmployee,result._vacationYear);
     const employee=result.employee,year=result.year;
