@@ -7027,21 +7027,49 @@ async function bootstrapRegieReadinessV14(){
   }
 
   const q=await pool.query(
-    `SELECT DISTINCT substring(entry_date from 1 for 4) AS y,
-                     substring(entry_date from 6 for 2) AS m
-       FROM time_entries_shadow
-      WHERE COALESCE(billing_status,'Offen')='Abgerechnet'
-        AND entry_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}
+    "SELECT DISTINCT substring(entry_date from 1 for 4) AS y, substring(entry_date from 6 for 2) AS m " +
+    "FROM time_entries_shadow " +
+    "WHERE COALESCE(billing_status,'Offen')='Abgerechnet' " +
+    "AND entry_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' " +
+    "ORDER BY y,m"
+  );
+  for(const r of q.rows){
+    const body={status:'Abgerechnet',year:Number(r.y)||0,month:Number(r.m)||0};
+    if(!body.year||!body.month)continue;
+    const rows=await postgresRegieReports(body);
+    const key=regieReportsVerifyKey(body);
+    await saveShadowVerifyStat(key,Array.isArray(rows)?rows.length:0,Array.isArray(rows)?rows.length:0,0);
+    stamped.push(key);
+  }
+
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+     ON CONFLICT(key) DO NOTHING`,
+    [marker,JSON.stringify({
+      at:new Date().toISOString(),views:stamped.length,keys:stamped,
+      reason:'trusted Regiebericht derivation from reconciled Zeiten/Object/Merge shadows; standard open/all-billed/month-billed views'
+    })]
+  );
+  console.log('TRUSTED_REGIE_V14 views='+stamped.length);
+}
+
+async function bootstrapPayrollCycleNativeV13(){
   if(!pool)return;
   const now=berlinNowParts(),body={year:now.year,month:now.month};
   const marker='trusted_payroll_cycle_native_v13:'+now.year+'-'+String(now.month).padStart(2,'0');
-  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);if(done.rowCount)return;
-  const data=await postgresPayrollCycleState(body);if(!data)return;
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);
+  if(done.rowCount)return;
+  const data=await postgresPayrollCycleState(body);
+  if(!data)return;
   const key=payrollCycleNativeKey(body);
   await saveShadowVerifyStat(key,1,1,0);
   await pool.query(
-    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb) ON CONFLICT(key) DO NOTHING`,
-    [marker,JSON.stringify({at:new Date().toISOString(),key,reason:'protocol-only payroll cycle derivation; no Google Calendar dependency'})]
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+     ON CONFLICT(key) DO NOTHING`,
+    [marker,JSON.stringify({
+      at:new Date().toISOString(),key,
+      reason:'protocol-only payroll cycle derivation; no Google Calendar dependency'
+    })]
   );
   console.log('TRUSTED_PAYROLL_CYCLE_V13 '+key);
 }
