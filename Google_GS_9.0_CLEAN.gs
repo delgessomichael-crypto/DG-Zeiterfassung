@@ -4628,7 +4628,7 @@ function saveOwnReminderFiles_(employee,reminderId,files){
 }
 function createOwnReminder(employee,employeePin,item){
   requireChef_(employee,employeePin);item=item||{};const text=String(item.text||'').trim();if(!text)throw new Error('Bitte einen Reminder-Text eingeben.');if(text.length>5000)throw new Error('Der Reminder-Text ist zu lang.');
-  const due=ownReminderDueDate_(item.dueDate),sh=ensureOwnReminderSheet_(),id='EIGREM-'+Utilities.getUuid(),now=new Date();let attachments=[];
+  const due=ownReminderDueDate_(item.dueDate),sh=ensureOwnReminderSheet_(),id=clean_(item.id)||('EIGREM-'+Utilities.getUuid()),now=new Date();let attachments=[];
   try{
     attachments=saveOwnReminderFiles_(employee,id,item.files||[]);
     sh.appendRow([id,text,due.date,'Offen','',now,clean_(employee),now,clean_(employee),JSON.stringify(attachments),'']);SpreadsheetApp.flush();
