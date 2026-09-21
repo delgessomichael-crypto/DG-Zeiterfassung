@@ -8664,7 +8664,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus','saveOfferCreatedWithReminder',
   'mergeRegieObjects','saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed','setMonthClosureStatus','setPayrollMonthStatus','completePayrollCycle','forceCompletePayrollCycle',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
-  'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry',
+  'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry','inquiryToOffer',
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','syncHolidays','saveEmployeeAdmin','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','saveMaintenanceCustomer','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','saveAbsence','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
@@ -9901,6 +9901,65 @@ async function tryDirectPostgresWrite(action,body){
       const row=q.rows[0];
       await client.query('DELETE FROM monthly_adjustments_shadow WHERE id=$1',[id]);
       result={ok:true,_employee:String(row.employee_name||''),_year:Number(row.adjustment_year)||0,_month:Number(row.adjustment_month)||0};
+    }else if(action==='inquiryToOffer'){
+      const inquiryId=String(body.id||'').trim(),customer=String(body.customer||'').trim(),phone=String(body.phone||'').trim();
+      if(!inquiryId)throw new Error('Anfrage nicht gefunden.');
+      if(!customer)throw new Error('Kunde fehlt.');
+      if(phone.replace(/\D/g,'').length<6)throw new Error('Gültige Telefonnummer erforderlich.');
+      const iq=await client.query(
+        `SELECT id,customer,email,phone,description,subject,source,status,offer_id
+           FROM customer_inquiries_shadow WHERE id=$1 FOR UPDATE`,[inquiryId]
+      );
+      if(!iq.rowCount)throw new Error('Anfrage nicht gefunden.');
+      const x=iq.rows[0],existingOffer=String(x.offer_id||'').trim();
+      if(existingOffer){
+        const oq=await client.query('SELECT offer_id FROM inquiry_offers_shadow WHERE offer_id=$1 LIMIT 1',[existingOffer]);
+        if(oq.rowCount){
+          const rq=await client.query(
+            `SELECT id,due_date_text FROM offer_reminders_shadow
+              WHERE offer_id=$1 AND status='Offen' ORDER BY created_at_text DESC NULLS LAST LIMIT 1`,[existingOffer]
+          );
+          result={ok:true,existing:true,offerId:existingOffer,
+            reminderId:String(rq.rows[0]?.id||''),dueDate:String(rq.rows[0]?.due_date_text||'')};
+        }
+      }
+      if(!result){
+        const status=String(x.status||'Neu');
+        if(['Gelöscht','Archiviert','Übernommen','Erledigt'].includes(status))
+          throw new Error('Diese Anfrage ist nicht mehr offen.');
+        const offerId=String(body.offerId||'').trim()||('ANG-'+crypto.randomUUID());
+        const reminderId=String(body.reminderId||'').trim()||('ANGREM-'+crypto.randomUUID());
+        const due=isoAddDays(berlinTodayIso(),5);
+        const description=String(x.description||x.subject||''),email=String(x.email||''),source=String(x.source||'');
+        await client.query(
+          `INSERT INTO inquiry_offers_shadow(
+             offer_id,inquiry_id,customer,phone,email,description,source,created_at_text,status,
+             changed_at_text,changed_by,calendar_event_id,shadow_updated_at
+           ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'Offen',$8,$9,'',now())
+           ON CONFLICT(offer_id) DO UPDATE SET inquiry_id=EXCLUDED.inquiry_id,customer=EXCLUDED.customer,
+             phone=EXCLUDED.phone,email=EXCLUDED.email,description=EXCLUDED.description,source=EXCLUDED.source,
+             status='Offen',changed_at_text=EXCLUDED.changed_at_text,changed_by=EXCLUDED.changed_by,shadow_updated_at=now()`,
+          [offerId,inquiryId,customer,phone,email,description,source,nowIso,by]
+        );
+        await client.query(
+          `INSERT INTO offer_reminders_shadow(
+             id,offer_id,customer,offer_number,phone,email,description,created_at_text,due_date_text,
+             status,result,changed_at_text,changed_by,shadow_updated_at
+           ) VALUES($1,$2,$3,'Anfrage',$4,$5,$6,$7,$8,'Offen','',$7,$9,now())
+           ON CONFLICT(id) DO UPDATE SET offer_id=EXCLUDED.offer_id,customer=EXCLUDED.customer,
+             offer_number='Anfrage',phone=EXCLUDED.phone,email=EXCLUDED.email,description=EXCLUDED.description,
+             due_date_text=EXCLUDED.due_date_text,status='Offen',result='',changed_at_text=EXCLUDED.changed_at_text,
+             changed_by=EXCLUDED.changed_by,shadow_updated_at=now()`,
+          [reminderId,offerId,customer,phone,email,description,nowIso,due,by]
+        );
+        await client.query(
+          `UPDATE customer_inquiries_shadow SET customer=$2,phone=$3,status='Angebot erstellt',
+             read_flag=true,offer_id=$4,changed_at_text=$5,changed_by=$6,shadow_updated_at=now() WHERE id=$1`,
+          [inquiryId,customer,phone,offerId,nowIso,by]
+        );
+        legacyPayload=Object.assign({},body,{offerId,reminderId});
+        result={ok:true,existing:false,offerId,reminderId,dueDate:due};
+      }
     }else if(action==='createInquiryReminder'){
       const inquiryId=String(body.id||'').trim(),days=Number(body.days)||0;
       if(!inquiryId)throw new Error('Anfrage nicht gefunden.');
@@ -10533,6 +10592,12 @@ async function tryDirectPostgresWrite(action,body){
       pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getMonthPayrollAudit','getPayrollCycleState','getDashboardSummary51')")
     ]);
     if(year)await mirrorHolidayYear(year);
+  }
+  if(action==='inquiryToOffer'){
+    await Promise.all([
+      pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'customer_inquiries_view:%' OR shadow_name LIKE 'offer_%' OR shadow_name LIKE 'inquiry_%'"),
+      pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getOfferReports','getOfferStatistics','getDashboardSummary51')")
+    ]);
   }
   if(action==='saveAbsence' && String(body.type||'')==='Urlaub'){
     const sy=Number(String(body.startDate||'').slice(0,4))||0,ey=Number(String(body.endDate||'').slice(0,4))||sy;
