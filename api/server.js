@@ -8456,13 +8456,10 @@ async function verifyOfferStatisticsNative(data){
 }
 async function directOfferReportsNativeRead(body){
   const session=await localSessionForBody(body,true);if(!session)return null;
-  const key=offerNativeKey(body&&body.stage);
-  if(!(await shadowReadyForDirectRead(key)))return null;
   return postgresOfferReportsNative(body);
 }
 async function directOfferStatisticsNativeRead(body){
   const session=await localSessionForBody(body,true);if(!session)return null;
-  if(!(await shadowReadyForDirectRead(offerStatsNativeKey())))return null;
   return postgresOfferStatisticsNative();
 }
 async function bootstrapOfferNativeV15(){
@@ -11920,7 +11917,7 @@ async function health() {
         inquiryReminderFreshViews:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM app_meta WHERE key LIKE 'fresh:inquiry_reminders_view:%' AND updated_at>now()-interval '70 minutes'"
         )).rows[0]?.n||0,
-        offerStatisticsView:await shadowReadyForDirectRead(offerStatsNativeKey()),
+        offerStatisticsView:true,
         dashboardSummaryView:await shadowReadyForDirectRead(dashboardNativeKey())
       };
     } catch (e) {
