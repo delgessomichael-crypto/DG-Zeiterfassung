@@ -7873,7 +7873,7 @@ async function verifyEmployeeAdminShadow(rows){
   if(!pool||!Array.isArray(rows))return;
   const pg=await postgresEmployeeAdminData();
   const a=canonicalEmployeeAdmin(rows),b=canonicalEmployeeAdmin(pg);
-  const mismatches=JSON.stringify(a)===JSON.stringify(b)?0:1;
+  const mismatches=stableJsonString(a)===stableJsonString(b)?0:1;
   console.log('SHADOW_VERIFY employee_admin google='+a.length+' postgres='+b.length+' mismatches='+mismatches);
   await saveShadowVerifyStat('employee_admin',a.length,b.length,mismatches);
 }
