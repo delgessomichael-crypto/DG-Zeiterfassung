@@ -6202,7 +6202,6 @@ async function shadowReadyForDirectRead(name,maxAgeHours=24){
 async function directManualOrdersRead(body){
   const session=await localSessionForBody(body,true);
   if(!session)return null;
-  if(!(await shadowReadyForDirectRead('manual_orders')))return null;
   const status=String(body.status||'').trim();
   const params=[];let where='';
   if(status&&status!=='Alle'){
@@ -6228,7 +6227,6 @@ async function directManualOrdersRead(body){
 async function directOwnRemindersRead(body){
   const session=await localSessionForBody(body,true);
   if(!session)return null;
-  if(!(await shadowReadyForDirectRead('own_reminders')))return null;
   const includeDone=Boolean(body.includeDone);
   const q=await pool.query(
     `SELECT id,reminder_text,due_date_text,status,result,created_at_text,created_by,
@@ -6997,7 +6995,6 @@ async function directVacationAccountsRead(body){
 async function directOfferRemindersRead(body){
   const session=await localSessionForBody(body,true);
   if(!session)return null;
-  if(!(await shadowReadyForDirectRead('offer_reminders')))return null;
   const includeDone=Boolean(body.includeDone);
   const q=await pool.query(
     `SELECT r.id,r.offer_id,r.customer,r.offer_number,r.phone,r.email,r.description,
@@ -7089,7 +7086,6 @@ async function directPlannerAvailabilityRead(body){
 async function directPlannerWorkersRead(body){
   const session=await localSessionForBody(body,true);
   if(!session)return null;
-  if(!(await shadowReadyForDirectRead('planner_workers')))return null;
   const q=await pool.query(
     `SELECT id,employee_name,display_name,provider,calendar_id,active,sort_order
        FROM planner_workers_shadow
@@ -11687,11 +11683,11 @@ async function health() {
       );
       activeRailwaySessions=sessionQ.rows[0]?.n||0;
       directReadReady={
-        employeeAdmin:await shadowReadyForDirectRead('employee_admin'),
-        manualOrders:await shadowReadyForDirectRead('manual_orders'),
-        ownReminders:await shadowReadyForDirectRead('own_reminders'),
-        offerReminders:await shadowReadyForDirectRead('offer_reminders'),
-        plannerWorkers:await shadowReadyForDirectRead('planner_workers'),
+        employeeAdmin:Boolean(postgresEmployeeSnapshotCount&&!employeeSnapshotDirty),
+        manualOrders:true,
+        ownReminders:true,
+        offerReminders:true,
+        plannerWorkers:true,
         plannerAvailabilityVerified:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'planner_availability:%' AND mismatches=0"
         )).rows[0]?.n||0,
