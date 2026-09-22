@@ -5619,6 +5619,11 @@ async function invalidateInquiryFreshness(){
 async function directCustomerInquiriesRead(body){
   const session=await localSessionForBody(body,true);if(!session)return null;
   const status=String(body.status||'Offen'),key=customerInquiryViewKey(status);
+  // WhatsApp inquiries are native Postgres records and do not exist in the legacy Google source.
+  // As soon as at least one WhatsApp inquiry exists, the combined Postgres view must stay authoritative,
+  // otherwise a Google fallback would temporarily hide the transferred WhatsApp customer.
+  const wa=await pool.query("SELECT 1 FROM customer_inquiries_shadow WHERE source='WhatsApp' LIMIT 1");
+  if(wa.rowCount)return postgresCustomerInquiryView(status);
   if(!(await inquiryViewFresh(key,70)))return null;
   if(!(await shadowReadyForDirectRead(key,2)))return null;
   return postgresCustomerInquiryView(status);
