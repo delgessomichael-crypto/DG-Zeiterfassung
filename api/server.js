@@ -876,6 +876,7 @@ async function initDb() {
   await bootstrapTimeBankReadinessV6();
   await bootstrapVacationReadinessV7();
   await bootstrapCurrentPeriodReadinessV8();
+  await bootstrapMonthDataFromLegacyV20();
   await bootstrapDayAndBossClosureReadinessV10();
   await bootstrapAbsenceAndPlannerReadinessV11();
   await bootstrapPayrollCycleNativeV13();
@@ -7227,6 +7228,57 @@ async function bootstrapRegieReadinessV14(){
     })]
   );
   console.log('TRUSTED_REGIE_V14 views='+stamped.length);
+}
+
+async function bootstrapMonthDataFromLegacyV20(){
+  if(!pool)return;
+  const now=berlinNowParts();
+  const today=String(now.year)+'-'+String(now.month).padStart(2,'0')+'-'+String(now.day).padStart(2,'0');
+  const q=await pool.query(
+    `SELECT DISTINCT ON (
+        request_payload->>'employee',
+        request_payload->>'year',
+        request_payload->>'month'
+      )
+      request_payload,response_payload,created_at
+      FROM legacy_action_log
+      WHERE action='getMonthData'
+        AND http_status=200
+        AND response_ok=true
+        AND request_payload IS NOT NULL
+        AND response_payload IS NOT NULL
+      ORDER BY
+        request_payload->>'employee',
+        request_payload->>'year',
+        request_payload->>'month',
+        created_at DESC
+      LIMIT 50`
+  );
+  let checked=0,ready=0,mismatch=0,skipped=0;
+  for(const row of q.rows){
+    const body=row.request_payload||{};
+    const employee=String(body.employee||'').trim();
+    const year=Number(body.year)||0,month=Number(body.month)||0;
+    if(!employee||!year||month<1||month>12){skipped++;continue;}
+    const cycle=pgPayrollCycleRange(year,month);
+    if(cycle.start>today){skipped++;continue;}
+    const raw=row.response_payload||{};
+    const google=raw&&raw.data!==undefined?raw.data:raw;
+    if(!google||typeof google!=='object'){skipped++;continue;}
+    const pg=await postgresMonthData(body);
+    if(!pg){skipped++;continue;}
+    checked++;
+    const same=stableJsonString(google)===stableJsonString(pg);
+    const key=monthDataVerifyKey(body);
+    if(same){
+      await saveShadowVerifyStat(key,1,1,0);
+      ready++;
+    }else{
+      mismatch++;
+      console.log('MONTH_DATA_LEGACY_COMPARE mismatch key='+key+' source='+String(row.created_at||''));
+    }
+  }
+  console.log('MONTH_DATA_LEGACY_COMPARE checked='+checked+' ready='+ready+' mismatch='+mismatch+' skipped='+skipped);
 }
 
 async function bootstrapPayrollCycleNativeV13(){
