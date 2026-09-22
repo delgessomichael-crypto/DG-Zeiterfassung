@@ -4714,7 +4714,7 @@ window.d3OfferDecision=async function(offerId,yes){
 /* Auch Entscheidungen aus der Reminder-Ansicht folgen derselben eindeutigen Regel. */
 window.d3ReminderDecision=async function(id,yes){
   const rid=String(id||'').trim();
-  const rows=(window.DG3&&Array.isArray(DG3.reminders))?DG3.reminders:[];
+  const rows=(window.DG3&&Array.isArray(DG3.offerReminders)&&DG3.offerReminders.length)?DG3.offerReminders:((window.DG3&&Array.isArray(DG3.reminders))?DG3.reminders:[]);
   const r=rows.find(x=>String(x.id||'')===rid);
   if(!r){notice('Reminder bitte neu laden.','error');return false;}
   if(!confirm(yes
@@ -5657,7 +5657,7 @@ function renderPartnerMenu10(){
   const out=q('dg10PartnerBody');if(!out)return;
   const total=partner10.reduce((n,c)=>n+(c.partners||[]).length,0),counter=q('dg80c-partnerNetwork');if(counter)counter.textContent=String(total);
   out.innerHTML='<div class="dg10-trade-grid">'+partner10.map(c=>'<button type="button" class="dg10-trade-btn" data-dg10-cat="'+esc10(c.id)+'">'+esc10(c.name)+'</button>').join('')
-    +'<button type="button" class="dg10-trade-btn dg10-trade-add" id="dg10PartnerCat" title="Weiteres Gewerk anlegen" aria-label="Weiteres Gewerk anlegen">+</button></div><div id="dg10TradeDetail" class="dg10-trade-detail"></div>';
+    +'<button type="button" class="dg10-trade-btn dg10-trade-add" id="dg10PartnerCat" title="Weiteres Gewerk anlegen" aria-label="Weiteres Gewerk anlegen">+</button></div><div id="dg10TradeDetail" class="dg10-trade-detail dg10-hide"></div>';
   out.querySelectorAll('[data-dg10-cat]').forEach(b=>b.addEventListener('click',()=>dg10OpenTrade(b.dataset.dg10Cat)));
   q('dg10PartnerCat').addEventListener('click',addCat10);
   if(activePartnerCat10&&partner10.some(x=>String(x.id)===String(activePartnerCat10)))dg10OpenTrade(activePartnerCat10);
@@ -5665,11 +5665,13 @@ function renderPartnerMenu10(){
 function dg10OpenTrade(id){
   activePartnerCat10=String(id||'');
   const cat=partner10.find(x=>String(x.id)===activePartnerCat10),detail=q('dg10TradeDetail');if(!cat||!detail)return false;
+  const grid=q('dg10PartnerBody')?.querySelector('.dg10-trade-grid');if(grid)grid.classList.add('dg10-hide');detail.classList.remove('dg10-hide');
   q('dg10PartnerBody')?.querySelectorAll('[data-dg10-cat]').forEach(b=>b.classList.toggle('active',String(b.dataset.dg10Cat)===activePartnerCat10));
   const partners=cat.partners||[];
   detail.innerHTML='<div class="dg10-trade-head"><div><h3 style="margin:0">'+esc10(cat.name)+'</h3><div class="muted small">'+partners.length+' Partnerbetrieb(e)</div></div><button type="button" class="btn success" id="dg10AddPartnerBtn">+ Partner hinzufügen</button></div>'
     +'<div style="margin-top:10px">'+(partners.map(partnerCard10).join('')||'<div class="dg10-partner-empty">Noch kein Partnerbetrieb in diesem Gewerk hinterlegt.</div>')+'</div>';
   q('dg10AddPartnerBtn').addEventListener('click',()=>window.dg10AddPartner(activePartnerCat10));
+  if(typeof window.dg80OfficeSetPath==='function')window.dg80OfficeSetPath('Partnernetzwerk',cat.name,true);
   return false;
 }
 async function loadPartner10(){
@@ -5711,6 +5713,13 @@ window.dg10AddPartner=function(cat){
 };
 window.loadPartner10=loadPartner10;
 window.dg10OpenTrade=dg10OpenTrade;
+window.dg10PartnerBack=function(){
+  if(!activePartnerCat10)return false;
+  activePartnerCat10='';
+  renderPartnerMenu10();
+  if(typeof window.dg80OfficeSetPath==='function')window.dg80OfficeSetPath('Partnernetzwerk','',false);
+  return true;
+};
 
 /* 6. Anfragen zusammenführen */
 let mergeIds10=new Set();

@@ -460,7 +460,7 @@ let dg80Ui2Retry=0;(function retryShell(){if(S.installed)return;if(ensureShell()
 const V='8.0-ui7-final';
 const q=id=>document.getElementById(id);
 const S=window.DG80_FINAL=window.DG80_FINAL||{
-  mounted:false,active:'',group:'',drag:'',saveBusy:false,
+  mounted:false,active:'',group:'',parentGroup:'',drag:'',saveBusy:false,
   extraPromise:null,extraAt:0,calendarCountPromise:null,
   reviewRows:[],reviewIssues:[],reviewBusy:false,
   wrapped:false
@@ -772,20 +772,72 @@ function mainForLeaf(key){
   if(['employeeAdmin','employeeStats','absence','sickness'].includes(key))return 'admin';
   return key;
 }
+function ensureBackUi(){
+  const bar=q('dg80OfficeToolbar'),title=q('dg80OfficeTitle');if(!bar||!title)return null;
+  if(!q('dg80FinalNavCss')){
+    const st=document.createElement('style');st.id='dg80FinalNavCss';
+    st.textContent='.dg80-office-nav-left{display:flex;align-items:center;gap:10px;min-width:0;flex:1}.dg80-office-nav-left h2{margin:0;min-width:0}.dg80-office-back{flex:0 0 auto;white-space:nowrap}.dg80-office-back.hidden{display:none!important}@media(max-width:650px){.dg80-office-nav-left{align-items:flex-start;flex-direction:column;gap:6px}.dg80-office-back{padding:7px 10px!important}}';
+    document.head.appendChild(st);
+  }
+  let left=bar.querySelector('.dg80-office-nav-left');
+  if(!left){
+    const head=bar.querySelector('.dg80-office-toolbar-head');if(!head)return null;
+    left=document.createElement('div');left.className='dg80-office-nav-left';
+    head.insertBefore(left,title);left.appendChild(title);
+  }
+  let back=q('dg80OfficeBack');
+  if(!back){
+    back=document.createElement('button');back.id='dg80OfficeBack';back.type='button';back.className='btn secondary dg80-office-back hidden';back.textContent='← Zurück';
+    left.insertBefore(back,title);back.addEventListener('click',e=>{e.preventDefault();goBack();});
+  }
+  const close=q('dg80OfficeClose');
+  if(close&&!close.dataset.dg80FinalNav){
+    close.dataset.dg80FinalNav='1';
+    close.addEventListener('click',()=>{
+      if(S.active==='partnerNetwork'){const p=fn('dg10PartnerBack');if(p)try{p();}catch(_e){}}
+      S.active='';S.group='';S.parentGroup='';markActive('');back.classList.add('hidden');
+    },true);
+  }
+  return back;
+}
+function setOfficePath(parent,child,canBack){
+  const back=ensureBackUi(),title=q('dg80OfficeTitle'),parts=[parent,child].map(x=>String(x||'').trim()).filter(Boolean);
+  if(title)title.textContent=parts.join(' > ')||'Büro';
+  if(back)back.classList.toggle('hidden',!canBack);
+}
+function groupContains(g,key){return !!(GROUPS[g]&&GROUPS[g].items.some(x=>x.key===key));}
+function goBack(){
+  if(S.active==='partnerNetwork'){
+    const p=fn('dg10PartnerBack');
+    if(p&&p()){S.parentGroup='';setOfficePath('Partnernetzwerk','',false);return true;}
+  }
+  if(S.parentGroup){
+    const g=S.parentGroup;S.parentGroup='';openGroup(g);return true;
+  }
+  return false;
+}
+window.dg80FinalBack=goBack;
+window.dg80OfficeSetPath=function(parent,child,canBack){setOfficePath(parent,child,canBack!==false&&!!String(child||'').trim());};
+
 function openLeaf(key,force){
+  const parent=(!force&&S.group&&groupContains(S.group,key))?S.group:'';
   q('dg80GroupChooser')?.classList.remove('dg80-shell-active');S.group='';
   if(key==='employeeStats')ensureEmployeeStatsPanel();if(key==='websiteInquiries'||key==='whatsappInquiries')ensureExternalInquiryPanels();
   const open=fn('dg80OfficeOpen');if(!open)return false;
   const same=S.active===key;
   open(key,{force:!!force});
-  if(same&&!force){S.active='';markActive('');return true;}
-  S.active=key;const title=q('dg80OfficeTitle');if(title&&LEAF[key])title.textContent=LEAF[key].title;
-  markActive(mainForLeaf(key));
+  if(same&&!force){S.active='';S.parentGroup='';markActive('');setOfficePath('Büro','',false);return true;}
+  S.active=key;S.parentGroup=parent;
+  const leafTitle=LEAF[key]?LEAF[key].title:key;
+  setOfficePath(parent?GROUPS[parent].title:'',leafTitle,!!parent);
+  markActive(parent||mainForLeaf(key));
   if(key==='days')setTimeout(()=>{installDayReviewWrap();const f=fn('loadBossDayClosuresV48');if(f)Promise.resolve(f()).catch(()=>{});},20);
   setTimeout(syncLabels,0);return true;
 }
 function closeMenus(){
-  const c=fn('dg80OfficeClose');if(c)c();q('dg80GroupChooser')?.classList.remove('dg80-shell-active');S.active='';S.group='';markActive('');
+  if(S.active==='partnerNetwork'){const p=fn('dg10PartnerBack');if(p)try{p();}catch(_e){}}
+  const c=fn('dg80OfficeClose');if(c)c();q('dg80GroupChooser')?.classList.remove('dg80-shell-active');
+  S.active='';S.group='';S.parentGroup='';markActive('');setOfficePath('Büro','',false);
 }
 function orderedGroupItems(g){
   const def=GROUPS[g].items,saved=readJson(subKey(g),[]),by={},out=[],used=new Set();def.forEach(x=>by[x.key]=x);

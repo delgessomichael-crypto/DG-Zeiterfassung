@@ -1624,7 +1624,7 @@ function cacheActionsForWrite(action) {
   if (/Maintenance/i.test(a)) groups.add('maintenance');
   if (/Planner/i.test(a)) groups.add('planner');
   if (/ExternalGoogleEvent/i.test(a)) groups.add('calendar');
-  if (/ManualOrder/i.test(a)) groups.add('manualOrders');
+  if (/ManualOrder|acceptOfferAsRunning|acceptOfferFromReminder/i.test(a)) groups.add('manualOrders');
   if (/Object|Regie/i.test(a)) groups.add('objects');
   if (!groups.size) return null;
   const actions = new Set();
@@ -9473,9 +9473,9 @@ async function tryDirectPostgresWrite(action,body){
       if(action==='moveOfferBackToCreate'){targetStatus='Angebot zu erstellen';resultText='Zurück zu Angebote zu erstellen';}
       else if(action==='declineOfferFromReminder'){targetStatus='Angebot Abgelehnt';resultText='Kein Auftrag';}
       else if(action==='acceptOfferFromReminder'){
-        asRunning=Boolean(body.asRunning);
-        targetStatus=asRunning?'Laufend':'Angebot Angenommen';
-        resultText=asRunning?'Angenommen - Laufender Auftrag':'Angenommen - Archiv';
+        asRunning=true;
+        targetStatus='Laufend';
+        resultText='Angenommen - Laufender Auftrag';
       }else if(action==='acceptOfferAsRunning'){targetStatus='Laufend';resultText='Angenommen - Laufender Auftrag';asRunning=true;}
       else if(action==='discardOfferPermanently'){targetStatus='Verworfen';}
       else if(action==='setRegieReportsOfferStatus'){
@@ -9483,7 +9483,7 @@ async function tryDirectPostgresWrite(action,body){
         if(!['Angebot zu erstellen','Offenes Angebot','Angebot Angenommen','Angebot Abgelehnt'].includes(targetStatus))
           throw new Error('Ungültiger Angebotsstatus.');
       }
-      const iq=await client.query('SELECT status FROM inquiry_offers_shadow WHERE offer_id=$1 FOR UPDATE',[offerId]);
+      const iq=await client.query('SELECT status,inquiry_id,customer,phone,email,description,source FROM inquiry_offers_shadow WHERE offer_id=$1 FOR UPDATE',[offerId]);
       const tq=await client.query(
         `SELECT id,hours,job_status,billing_status FROM time_entries_shadow WHERE offer_id=$1 FOR UPDATE`,[offerId]
       );
@@ -9506,8 +9506,45 @@ async function tryDirectPostgresWrite(action,body){
         }
       }else{
         const totalHours=Math.round(tq.rows.reduce((s,r)=>s+Number(r.hours||0),0)*100)/100;
-        if(asRunning&&!(totalHours>0))throw new Error('Zu diesem Angebot ist noch keine Arbeitszeit erfasst. Es kann daher nicht als laufender Auftrag übernommen werden.');
         if(!iq.rowCount&&!tq.rowCount)throw new Error('Angebot wurde nicht gefunden.');
+        let mode=asRunning&&tq.rowCount?'Regieberichte':'',manualOrderId='';
+        if(asRunning&&!tq.rowCount&&iq.rowCount){
+          const o=iq.rows[0]||{},inquiryId=String(o.inquiry_id||'').trim();
+          let meta={};
+          if(inquiryId){
+            const mq=await client.query(
+              'SELECT postal_code,city,internal_note FROM customer_inquiries_shadow WHERE id=$1 FOR UPDATE',
+              [inquiryId]
+            );
+            meta=mq.rows[0]||{};
+          }
+          manualOrderId='AUF-ANG-'+offerId;
+          const address=[String(meta.postal_code||''),String(meta.city||'')].filter(Boolean).join(' ').trim();
+          await client.query(
+            `INSERT INTO manual_orders_shadow(
+               id,customer,address,phone,email,description,source,inquiry_id,status,
+               created_at_text,started_at_text,completed_at_text,changed_at_text,changed_by,internal_note,shadow_updated_at
+             ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'Laufend',$9,$9,'',$9,$10,$11,now())
+             ON CONFLICT(id) DO UPDATE SET
+               customer=EXCLUDED.customer,address=EXCLUDED.address,phone=EXCLUDED.phone,email=EXCLUDED.email,
+               description=EXCLUDED.description,source=EXCLUDED.source,inquiry_id=EXCLUDED.inquiry_id,
+               status='Laufend',
+               started_at_text=CASE WHEN COALESCE(manual_orders_shadow.started_at_text,'')='' THEN EXCLUDED.started_at_text ELSE manual_orders_shadow.started_at_text END,
+               changed_at_text=EXCLUDED.changed_at_text,changed_by=EXCLUDED.changed_by,
+               internal_note=CASE WHEN COALESCE(EXCLUDED.internal_note,'')<>'' THEN EXCLUDED.internal_note ELSE manual_orders_shadow.internal_note END,
+               shadow_updated_at=now()`,
+            [manualOrderId,String(o.customer||''),address,String(o.phone||''),String(o.email||''),
+             String(o.description||''),String(o.source||'Angebot'),inquiryId,nowIso,by,String(meta.internal_note||'')]
+          );
+          if(inquiryId){
+            await client.query(
+              `UPDATE customer_inquiries_shadow SET status='Übernommen',read_flag=true,
+                 changed_at_text=$2,changed_by=$3,shadow_updated_at=now() WHERE id=$1`,
+              [inquiryId,nowIso,by]
+            );
+          }
+          mode='Manueller Auftrag';
+        }
         if(iq.rowCount){
           const inquiryStatus=targetStatus==='Angebot zu erstellen'?'Zu erstellen':targetStatus==='Offenes Angebot'?'Offen':targetStatus==='Angebot Angenommen'?'Angenommen':targetStatus==='Angebot Abgelehnt'?'Abgelehnt':targetStatus;
           await client.query(
@@ -9541,8 +9578,8 @@ async function tryDirectPostgresWrite(action,body){
         }
         if(action==='moveOfferBackToCreate')result={ok:true,offerId,count:tq.rowCount||(iq.rowCount?1:0),status:'Angebot zu erstellen'};
         else if(action==='declineOfferFromReminder')result={ok:true,offerId};
-        else if(action==='acceptOfferFromReminder')result={ok:true,offerId,totalHours,asRunning};
-        else if(action==='acceptOfferAsRunning')result={ok:true,offerId,count:tq.rowCount,totalHours};
+        else if(action==='acceptOfferFromReminder')result={ok:true,offerId,totalHours,asRunning:true,mode:mode||'Regieberichte',manualOrderId};
+        else if(action==='acceptOfferAsRunning')result={ok:true,offerId,count:tq.rowCount||(manualOrderId?1:0),totalHours,mode:mode||'Regieberichte',manualOrderId};
         else result={ok:true,offerId,status:targetStatus,count:tq.rowCount||(iq.rowCount?1:0),changedAt:shadowGermanDateTime(nowIso),changedBy:by};
       }
     }else if(action==='updateEmployeeEntry'){
