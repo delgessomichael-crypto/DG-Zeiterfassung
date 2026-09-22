@@ -7293,7 +7293,31 @@ async function bootstrapMonthDataFromLegacyV20(){
         if(stableJsonString(a)!==stableJsonString(b))diffPaths.push(path||'<root>');
       };
       walk(google,pg,'');
-      console.log('MONTH_DATA_LEGACY_COMPARE mismatch key='+key+' fields='+JSON.stringify(diffPaths));
+      const rowSig=x=>(Array.isArray(x&&x.rows)?x.rows:[]).map(r=>({
+        date:String(r&&r.date||''),hours:Number(r&&r.hours||0),closed:Boolean(r&&r.closed),
+        transmitted:Boolean(r&&r.transmittedDate),additional:Boolean(r&&r.isAdditionalAssignment),
+        supplement:Boolean(r&&r.isSupplement),
+        content:crypto.createHash('sha256').update(
+          String(r&&r.customer||'')+'|'+String(r&&r.activity||'')
+        ).digest('hex').slice(0,10)
+      })).sort((a,b)=>stableJsonString(a).localeCompare(stableJsonString(b)));
+      console.log('MONTH_DATA_LEGACY_COMPARE mismatch key='+key+
+        ' fields='+JSON.stringify(diffPaths)+
+        ' googleSummary='+JSON.stringify({
+          total:Number(google.total||0),gross:Number(google.workTotalGross||0),
+          pause:Number(google.automaticPauseTotal||0),holidayDays:Number(google.yearSummary&&google.yearSummary.holidayDays||0),
+          adjustmentTotal:Number(google.monthSummary&&google.monthSummary.adjustmentTotal||0),
+          timeBankMonthCredit:Number(google.monthSummary&&google.monthSummary.timeBankMonthCredit||0)
+        })+
+        ' postgresSummary='+JSON.stringify({
+          total:Number(pg.total||0),gross:Number(pg.workTotalGross||0),
+          pause:Number(pg.automaticPauseTotal||0),holidayDays:Number(pg.yearSummary&&pg.yearSummary.holidayDays||0),
+          adjustmentTotal:Number(pg.monthSummary&&pg.monthSummary.adjustmentTotal||0),
+          timeBankMonthCredit:Number(pg.monthSummary&&pg.monthSummary.timeBankMonthCredit||0)
+        })+
+        ' googleRows='+JSON.stringify(rowSig(google))+
+        ' postgresRows='+JSON.stringify(rowSig(pg))
+      );
     }
   }
   console.log('MONTH_DATA_LEGACY_COMPARE checked='+checked+' ready='+ready+' mismatch='+mismatch+' skipped='+skipped);
