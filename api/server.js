@@ -19,7 +19,7 @@ const WHATSAPP_WABA_ID = process.env.WHATSAPP_WABA_ID || '';
 const WHATSAPP_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || '';
 const WHATSAPP_APP_SECRET = process.env.WHATSAPP_APP_SECRET || '';
 const WHATSAPP_GRAPH_VERSION = process.env.WHATSAPP_GRAPH_VERSION || 'v25.0';
-const WHATSAPP_MARK_READ_ON_IMPORT = /^(1|true|yes|ja)$/i.test(String(process.env.WHATSAPP_MARK_READ_ON_IMPORT||''));
+const WHATSAPP_MARK_READ_ON_IMPORT = !/^(0|false|no|nein)$/i.test(String(process.env.WHATSAPP_MARK_READ_ON_IMPORT||'true'));
 
 
 const pool = DATABASE_URL ? new Pool({
@@ -164,6 +164,7 @@ CREATE TABLE IF NOT EXISTS manual_orders_shadow (
   internal_note TEXT,
   shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE manual_orders_shadow ADD COLUMN IF NOT EXISTS attachments_json TEXT;
 
 CREATE TABLE IF NOT EXISTS own_reminders_shadow (
   id TEXT PRIMARY KEY,
@@ -211,6 +212,8 @@ CREATE TABLE IF NOT EXISTS customer_inquiries_shadow (
   aqon_replied_at_text TEXT,
   shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE customer_inquiries_shadow ADD COLUMN IF NOT EXISTS attachments_json TEXT;
 
 CREATE INDEX IF NOT EXISTS customer_inquiries_shadow_status_idx
   ON customer_inquiries_shadow(status,received_at_text);
@@ -5673,7 +5676,7 @@ async function postgresCustomerInquiryView(status){
   const q=await pool.query(
     `SELECT id,source,customer,email,phone,postal_code,city,subject,description,received_at_text,
             status,read_flag,internal_note,done_reason,contact_at_text,contact_person,contact_note,
-            offer_id,external_url,phone_url,dropbox_url,aqon_appointment_url,aqon_details,aqon_replied_at_text
+            offer_id,external_url,phone_url,dropbox_url,aqon_appointment_url,aqon_details,aqon_replied_at_text,attachments_json
        FROM customer_inquiries_shadow`
   );
   const base=q.rows.map(r=>({
@@ -5687,6 +5690,7 @@ async function postgresCustomerInquiryView(status){
     externalUrl:String(r.external_url||''),phoneUrl:String(r.phone_url||''),
     dropboxUrl:String(r.dropbox_url||''),aqonAppointmentUrl:String(r.aqon_appointment_url||''),
     aqonDetails:String(r.aqon_details||''),aqonRepliedAt:berlinDateTime(r.aqon_replied_at_text),
+    attachments:(()=>{try{const a=JSON.parse(String(r.attachments_json||'[]'));return Array.isArray(a)?a:[];}catch(_e){return [];}})(),
     _receivedSort:String(r.received_at_text||'')
   }));
   const grouped=await mergeInquiryRowsV10(base),excluded=new Set(['Erledigt','Gelöscht','Übernommen','Archiviert','Reminder']);
@@ -5708,7 +5712,8 @@ function canonicalCustomerInquiries(rows){
     contactNote:String(x.contactNote||''),offerId:String(x.offerId||''),
     externalUrl:String(x.externalUrl||''),phoneUrl:String(x.phoneUrl||''),
     dropboxUrl:String(x.dropboxUrl||''),aqonAppointmentUrl:String(x.aqonAppointmentUrl||''),
-    aqonDetails:String(x.aqonDetails||''),aqonRepliedAt:String(x.aqonRepliedAt||'')
+    aqonDetails:String(x.aqonDetails||''),aqonRepliedAt:String(x.aqonRepliedAt||''),
+    attachments:Array.isArray(x.attachments)?x.attachments:[]
   }));
 }
 async function verifyCustomerInquiryView(rows,status){
@@ -6466,7 +6471,7 @@ async function directManualOrdersRead(body){
   }
   const q=await pool.query(
     `SELECT id,customer,address,phone,email,description,source,inquiry_id,status,
-            created_at_text,started_at_text,completed_at_text,internal_note
+            created_at_text,started_at_text,completed_at_text,internal_note,attachments_json
        FROM manual_orders_shadow`+where+` ORDER BY created_at_text ASC,id ASC`,
     params
   );
@@ -6476,7 +6481,7 @@ async function directManualOrdersRead(body){
     source:String(r.source||''),inquiryId:String(r.inquiry_id||''),
     status:String(r.status||'Offen'),createdAt:berlinDateTime(r.created_at_text),
     startedAt:berlinDateTime(r.started_at_text),completedAt:berlinDateTime(r.completed_at_text),
-    internalNote:String(r.internal_note||'')
+    internalNote:String(r.internal_note||''),attachments:(()=>{try{const a=JSON.parse(String(r.attachments_json||'[]'));return Array.isArray(a)?a:[];}catch(_e){return [];}})()
   }));
 }
 
@@ -9070,10 +9075,16 @@ async function directWhatsappInboxV10(body){
     transferredAt:t.transferred_at?new Date(t.transferred_at).toISOString():'',
     messages:byThread.get(String(t.id||''))||[]
   }));
+  const publicDomain=String(process.env.RAILWAY_PUBLIC_DOMAIN||process.env.RAILWAY_STATIC_URL||'').replace(/^https?:\/\//,'').replace(/\/$/,'');
   return {
     configured:whatsappConfiguredV10(),webhookConfigured:Boolean(WHATSAPP_VERIFY_TOKEN),
     archiveSupported:false,markReadSupported:true,historyImportSupported:false,
     phoneNumberId:WHATSAPP_PHONE_NUMBER_ID?('…'+WHATSAPP_PHONE_NUMBER_ID.slice(-6)):'',
+    webhookUrl:publicDomain?('https://'+publicDomain+'/v1/whatsapp/webhook'):'',
+    needs:{
+      accessToken:!WHATSAPP_ACCESS_TOKEN,phoneNumberId:!WHATSAPP_PHONE_NUMBER_ID,
+      wabaId:!WHATSAPP_WABA_ID,verifyToken:!WHATSAPP_VERIFY_TOKEN,appSecret:!WHATSAPP_APP_SECRET
+    },
     threads
   };
 }
@@ -9594,6 +9605,16 @@ async function tryDirectPostgresWrite(action,body){
       const t=tq.rows[0];
       const mq=await client.query("SELECT message_text,message_at FROM whatsapp_messages_v10 WHERE thread_id=$1 AND direction='inbound' ORDER BY message_at,created_at",[id]);
       const description=mq.rows.map(x=>String(x.message_text||'').trim()).filter(Boolean).join('\n\n')||String(t.last_text||'WhatsApp-Nachricht');
+      const mediaQ=await client.query(
+        `SELECT wm.media_id,wm.media_type,wm.mime_type,wm.filename,wm.caption,wm.file_size,wm.download_status
+           FROM whatsapp_media_v10 wm
+           JOIN whatsapp_messages_v10 m ON m.id=wm.message_id
+          WHERE m.thread_id=$1 ORDER BY m.message_at,wm.created_at`,[id]
+      );
+      const attachments=mediaQ.rows.map(x=>({
+        source:'WhatsApp',mediaId:String(x.media_id||''),type:String(x.media_type||''),mime:String(x.mime_type||''),
+        name:String(x.filename||''),caption:String(x.caption||''),fileSize:Number(x.file_size||0),status:String(x.download_status||'')
+      }));
       const customer=String(t.contact_name||'WhatsApp-Kontakt'),phone=String(t.wa_id||''),created=String(t.first_message_at||nowIso);
       let targetId='';
       if(kind==='Anfrage'){
@@ -9601,17 +9622,17 @@ async function tryDirectPostgresWrite(action,body){
         await client.query(
           `INSERT INTO customer_inquiries_shadow(
              id,source,customer,email,phone,postal_code,city,subject,description,received_at_text,status,read_flag,
-             created_at_text,changed_at_text,changed_by,internal_note,shadow_updated_at
-           ) VALUES($1,'WhatsApp',$2,'',$3,'','','WhatsApp Anfrage',$4,$5,'Neu',false,$6,$6,$7,$8,now())`,
-          [targetId,customer,phone,description,created,nowIso,by,'Übernommen aus WhatsApp · '+id]
+             created_at_text,changed_at_text,changed_by,internal_note,attachments_json,shadow_updated_at
+           ) VALUES($1,'WhatsApp',$2,'',$3,'','','WhatsApp Anfrage',$4,$5,'Neu',false,$6,$6,$7,$8,$9,now())`,
+          [targetId,customer,phone,description,created,nowIso,by,'Übernommen aus WhatsApp · '+id,JSON.stringify(attachments)]
         );
       }else{
         targetId='WA-ORD-'+crypto.randomUUID();
         await client.query(
           `INSERT INTO manual_orders_shadow(
-             id,customer,address,phone,email,description,source,inquiry_id,status,created_at_text,changed_at_text,changed_by,internal_note,shadow_updated_at
-           ) VALUES($1,$2,'',$3,'',$4,'WhatsApp','',$5,$6,$7,$8,$9,now())`,
-          [targetId,customer,phone,description,'Laufend',created,nowIso,by,'Übernommen aus WhatsApp · '+id]
+             id,customer,address,phone,email,description,source,inquiry_id,status,created_at_text,changed_at_text,changed_by,internal_note,attachments_json,shadow_updated_at
+           ) VALUES($1,$2,'',$3,'',$4,'WhatsApp','',$5,$6,$7,$8,$9,$10,now())`,
+          [targetId,customer,phone,description,'Laufend',created,nowIso,by,'Übernommen aus WhatsApp · '+id,JSON.stringify(attachments)]
         );
       }
       await client.query(
