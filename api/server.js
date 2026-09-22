@@ -4470,13 +4470,17 @@ async function verifyAbsencesShadow(rows){
        FROM absences_shadow WHERE active=true`
   );
   const pg=new Map(q.rows.map(r=>[String(r.id),r]));
+  const absenceTypeForCompare=v=>{
+    const s=normalizeShadowText(v);
+    return s==='Unentschuldigte Abwesenheit'?'Unerlaubte Abwesenheit':s;
+  };
   let mismatches=0;const seen=new Set();
   for(const r of rows){
     const id=normalizeShadowText(r&&r.id);if(!id){mismatches++;continue;}
     seen.add(id);const p=pg.get(id);if(!p){mismatches++;continue;}
     const same=
       normalizeShadowText(r.employee)===normalizeShadowText(p.employee_name) &&
-      normalizeShadowText(r.type)===normalizeShadowText(p.absence_type) &&
+      absenceTypeForCompare(r.type)===absenceTypeForCompare(p.absence_type) &&
       normalizeShadowText(r.start)===normalizeShadowText(p.start_date) &&
       normalizeShadowText(r.end)===normalizeShadowText(p.end_date) &&
       Math.abs(Number(r.creditedHours||0)-Number(p.credited_hours||0))<0.01;
