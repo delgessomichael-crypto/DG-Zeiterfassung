@@ -2887,6 +2887,29 @@ async function syncDayStatusFromDayRead(body,data){
   );
 }
 
+async function syncMonthClosuresFromMonthRead(body,data){
+  if(!pool||!data||!Array.isArray(data.rows))return;
+  const employee=String(body.employee||data.employee||'').trim();
+  if(!employee)return;
+  const byDate=new Map();
+  for(const r of data.rows){
+    const date=berlinDateOnly(r&&r.date||'');if(!date)continue;
+    const x=byDate.get(date)||{closed:false,gross:0};
+    x.closed=x.closed||Boolean(r&&r.closed);
+    x.gross+=Number(r&&r.hours||0);
+    byDate.set(date,x);
+  }
+  for(const [date,x] of byDate){
+    if(x.closed){
+      const gross=Math.round(Number(x.gross||0)*100)/100,pause=gross>=6?1:0;
+      await upsertDayClosureShadow(employee,date,{
+        closed:true,grossTotal:gross,pauseMinutes:Math.round(pause*60),
+        netTotal:Math.round(Math.max(0,gross-pause)*100)/100
+      },'Monatsansicht synchronisiert');
+    }
+  }
+}
+
 async function syncAndVerifyMonthStatuses(body,data){
   if(!pool||!data||!Array.isArray(data.statuses))return;
   const employee=String(body.employee||data.employee||'');
@@ -6282,7 +6305,7 @@ async function postgresVacationSummary(employee,year){
       [String(employee),year]
     ),
     pool.query(
-      `SELECT status,COUNT(DISTINCT status_date)::int AS n
+      `SELECT status,COUNT(DISTINCT LEFT(status_date,10))::int AS n
          FROM day_status_shadow
         WHERE employee_name=$1 AND status_date LIKE $2
           AND status IN ('Urlaub','Krank','Feiertag')
@@ -7265,6 +7288,7 @@ async function bootstrapMonthDataFromLegacyV20(){
     const raw=row.response_payload||{};
     const google=raw&&raw.data!==undefined?raw.data:raw;
     if(!google||typeof google!=='object'){skipped++;continue;}
+    await syncMonthClosuresFromMonthRead(body,google);
     const pg=await postgresMonthData(body);
     if(!pg){skipped++;continue;}
     checked++;
@@ -11374,7 +11398,10 @@ async function proxyLegacy(req, res, body) {
             .catch(e=>console.error('boss day closures shadow refresh/verify failed',e.message));
         }
         if (action==='getMonthData') {
-          syncAndVerifyMonthStatuses(body,verifyData)
+          Promise.all([
+            syncAndVerifyMonthStatuses(body,verifyData),
+            syncMonthClosuresFromMonthRead(body,verifyData)
+          ])
             .then(()=>verifyMonthDataShadow(verifyData,body))
             .catch(e=>console.error('month data shadow refresh/verify failed',e.message));
         }
