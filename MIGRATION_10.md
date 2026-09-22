@@ -103,3 +103,19 @@ Current health remains:
 - 884 source rows / 884 imported rows
 - 0 migration mismatches
 - legacy outbox currently empty
+
+
+## Progress update — 2026-09-22 06:18 CEST
+
+Additional migration fixes:
+- customer inquiries and inquiry reminders are now routed through the PostgreSQL direct-read router when their freshness/readiness guard passes
+- manual orders reconciled against the latest confirmed Google response: 12 Google / 12 PostgreSQL / 0 mismatches
+- two missing manual-order records were restored into PostgreSQL and one stale status was reconciled
+- future-month employee month views are no longer allowed to create readiness mismatches before the month starts; they remain on guarded fallback until current
+- current verified mismatch inventory after reconciliation: no current-month mismatch; only the pre-existing future October test mismatch was identified and is being removed by the future-month guard
+
+Intentional Google dependencies remain:
+- employee login/PIN authority
+- Gmail-driven inquiry acquisition
+- live Google Calendar operations and calendar-sensitive payroll checks
+- Google Drive/Gmail side-effect file/export actions
