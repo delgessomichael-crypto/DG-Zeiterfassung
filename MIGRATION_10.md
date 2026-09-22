@@ -164,3 +164,28 @@ Final checks:
 - Railway API deployment: SUCCESS
 
 Google remains only where intentionally required by product behavior: login/PIN authority, Gmail inquiry acquisition, live/external Google Calendar operations, Drive/file side effects, and future-month data that exists in Google but is not yet represented in PostgreSQL. Boss-month and payroll-audit native views retain first-use comparison guards until a current Google snapshot exists; this is a validation guard, not unfinished data migration.
+
+
+## Final migration status — 2026-09-22
+
+Production API state:
+- Railway API commit `cd24016` and later branch head use PostgreSQL as the authoritative source for migrated payroll cycles.
+- Migration snapshot remains 35 sheets / 884 source rows / 884 imported rows / 0 import mismatches.
+- Manual orders reconciled at 12 Google / 12 PostgreSQL / 0 mismatches.
+- Employee month data now uses the payroll cycle boundaries from `pgPayrollCycleRange` instead of calendar-month filtering.
+- October 2026 employee month view for Michael was verified against a real Google snapshot: 6 rows, 3 work days, 12.00 gross hours, 1.00 automatic pause, 11.00 net/total hours, and the view is `ready(0)`.
+- Month-view transmitted dates are normalized to date-only output and semantic verification ignores harmless row ordering and absent-vs-zero optional summary fields.
+- Holiday annual counts normalize status dates to YYYY-MM-DD before distinct counting.
+- Confirmed month reads reconcile missing day-closure flags into PostgreSQL.
+- Migrated payroll-cycle reads stay on PostgreSQL after verification and do not fall back merely because a 24-hour readiness timestamp expires.
+- Legacy performance check after localization showed no slow month/planner reads in the last hour; only one older ping entry remained in the legacy log.
+- Legacy write outbox remains 0 pending / 0 failed.
+
+Intentional lazy verification:
+- `getBossMonthData` and `getMonthPayrollAudit` have no historical September Google snapshot yet.
+- On their first real use, the Google fallback response is automatically stored and compared against the PostgreSQL-native result.
+- A successful comparison stamps native readiness, so following calls switch automatically to PostgreSQL.
+
+Historical source note:
+- The imported Google Tagesabschluesse source contains 58 rows representing 53 unique employee/date keys (5 historical duplicate source rows).
+- PostgreSQL itself is keyed uniquely by employee/date; the existing V9 reconciliation logic preserves the last legacy source row where safe. The raw migration snapshot remains unchanged for auditability.
