@@ -1566,7 +1566,7 @@ function d32IsAqonOrder(r){return /\baqon\b/i.test([r.source,r.description,r.int
 async function d3Orders(){
   DG3.orders=await api(chefPayload({action:'getManualOrders',status:'Alle'}));
   const rows=DG3.orders.filter(x=>!d32IsAqonOrder(x)&&['Ohne Termin','Termin zu vereinbaren','Offen','Laufend'].includes(x.status));
-  $('d3OrderPlan').innerHTML='<div class="d3-head"><strong>Auftragsplanung</strong>'+d3Button('+ Auftrag anlegen','d3NewOrder',[],'success')+'</div>'+rows.map((r,i)=>'<div class="report-card'+(i%2?' d3-alt':'')+'"><strong>'+esc(r.customer)+'</strong> <span class="badge">'+esc(r.status)+'</span><div>'+esc(r.address)+'</div><div>'+esc(r.description)+'</div>'+(r.internalNote?'<div class="status info">'+esc(r.internalNote)+'</div>':'')+'<div class="report-actions">'+d3Button('Termin vereinbaren','d3Appointment',['order',r.id,false])+d3Button('Interne Notiz','d3OrderNote',[r.id])+d3Button(r.status==='Laufend'?'Abschließen':'Arbeit begonnen','d3OrderStatus',[r.id,r.status==='Laufend'?'Abgeschlossen':'Laufend'],'success')+(r.status!=='Laufend'?d3Button('Entfernen','d3OrderDelete',[r.id],'danger'):'')+'</div></div>').join('');
+  $('d3OrderPlan').innerHTML='<div class="d3-head"><strong>Auftragsplanung</strong>'+d3Button('+ Auftrag anlegen','d3NewOrder',[],'success')+'</div>'+rows.map((r,i)=>'<div class="report-card'+(i%2?' d3-alt':'')+'"><strong>'+esc(r.customer)+'</strong> <span class="badge">'+esc(r.status)+'</span><div>'+esc(r.address)+'</div><div>'+esc(r.description)+'</div>'+d80WhatsappAttachmentHtml(r)+(r.internalNote?'<div class="status info">'+esc(r.internalNote)+'</div>':'')+'<div class="report-actions">'+d3Button('Termin vereinbaren','d3Appointment',['order',r.id,false])+d3Button('Interne Notiz','d3OrderNote',[r.id])+d3Button(r.status==='Laufend'?'Abschließen':'Arbeit begonnen','d3OrderStatus',[r.id,r.status==='Laufend'?'Abgeschlossen':'Laufend'],'success')+(r.status!=='Laufend'?d3Button('Entfernen','d3OrderDelete',[r.id],'danger'):'')+'</div></div>').join('');
 }
 
 function d32Thumb(id,size='w240'){return 'https://drive.google.com/thumbnail?id='+encodeURIComponent(id)+'&sz='+size;}
@@ -1667,6 +1667,9 @@ function d33InstallBilledUi(){
 d3InstallOffice=function(){d33BaseInstallOffice();d33InstallBilledUi();};
 
 
+
+(function(){try{const s=document.createElement('style');s.textContent='.d80-wa-att{margin:10px 0;padding:10px;border:1px solid #dbe3ec;border-radius:12px;background:#f8fafc}.d80-wa-att strong{display:block;margin-bottom:6px}';document.head.appendChild(s);}catch(_e){}})();
+
 /* DG 3.4: AQON PURE as separate inquiry queue with Gmail acknowledgement/links. */
 const d34BaseInstallOffice=d3InstallOffice;
 
@@ -1692,13 +1695,20 @@ function d34AqonLinks(r){
   if(r.aqonAppointmentUrl)h+='<a class="btn success" target="_blank" rel="noopener noreferrer" href="'+esc(r.aqonAppointmentUrl)+'">Termin bei AQON melden</a>';
   return h;
 }
+function d80WhatsappAttachmentHtml(r){
+  const a=Array.isArray(r&&r.attachments)?r.attachments:[];if(!a.length)return '';
+  return '<div class="d80-wa-att"><strong>WhatsApp-Anhänge</strong><div class="report-actions">'+a.map(x=>{
+    const label=/^image\//i.test(String(x.mime||''))?'🖼 Bild öffnen':(/pdf/i.test(String(x.mime||''))?'📄 PDF öffnen':'📎 '+esc(x.name||x.type||'Anhang'));
+    return '<button type="button" class="btn secondary" onclick="return dg80WhatsappOpenMedia(\''+esc(x.mediaId||'')+'\',\''+esc(x.name||'')+'\')">'+label+'</button>';
+  }).join('')+'</div></div>';
+}
 function d32InquiryCard(r,i,archive=false){
   const note=r.internalNote?'<div class="status info">Interne Notiz: '+esc(r.internalNote)+'</div>':'';
   const isAqon=r.source==='AQON PURE';
   const external=isAqon?d34AqonLinks(r):d33ExternalInquiryLinks(r);
   const details=isAqon&&r.aqonDetails?'<div class="d34-aqon-details"><strong>Auftragsinformationen aus der AQON-Mail</strong><pre>'+esc(r.aqonDetails)+'</pre></div>':'';
   const actions=archive?'':d3Button('Termin wurde vereinbart','d3InquiryArchive',[r.id],'success')+d3Button('Reminder','d3InquiryReminder',[r.id],'primary')+d3Button('Interne Notiz','d3InquiryNote',[r.id])+d3Button('Ablehnen','d3RejectInquiry',[r.id],'danger');
-  return '<div class="report-card'+(i%2?' d3-alt':'')+'"><div class="d3-head"><strong>'+esc(r.customer)+'</strong><span class="badge">'+esc(r.source)+'</span></div><div class="report-meta">'+esc(r.receivedAt)+' - '+esc(r.status)+'</div><div>'+esc(d3Address(r))+'</div>'+(d33ContactLinks(r)?'<div>'+d33ContactLinks(r)+'</div>':'')+(isAqon?'':'<div>'+esc(r.description||r.subject)+'</div>')+details+note+(archive&&r.doneReason?'<div class="muted small">Archiviert: '+esc(r.doneReason)+'</div>':'')+((external||actions)?'<div class="report-actions">'+external+actions+'</div>':'')+'</div>';
+  return '<div class="report-card'+(i%2?' d3-alt':'')+'"><div class="d3-head"><strong>'+esc(r.customer)+'</strong><span class="badge">'+esc(r.source)+'</span></div><div class="report-meta">'+esc(r.receivedAt)+' - '+esc(r.status)+'</div><div>'+esc(d3Address(r))+'</div>'+(d33ContactLinks(r)?'<div>'+d33ContactLinks(r)+'</div>':'')+(isAqon?'':'<div>'+esc(r.description||r.subject)+'</div>')+details+d80WhatsappAttachmentHtml(r)+note+(archive&&r.doneReason?'<div class="muted small">Archiviert: '+esc(r.doneReason)+'</div>':'')+((external||actions)?'<div class="report-actions">'+external+actions+'</div>':'')+'</div>';
 }
 async function d3Inquiries(){
   setMessage('d3InquiryStatus','Anfragen werden geladen ...','info');
