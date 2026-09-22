@@ -3564,7 +3564,7 @@ async function postgresMonthData(body){
     sickDays:statuses.filter(x=>x.status==='Krank').length,
     holidayDays:statuses.filter(x=>x.status==='Feiertag').length,
     trainingDays:statuses.filter(x=>x.status==='Schulung').length,
-    unexcusedDays:statuses.filter(x=>x.status==='Unentschuldigte Abwesenheit').length,
+    unexcusedDays:statuses.filter(x=>['Unerlaubte Abwesenheit','Unentschuldigte Abwesenheit'].includes(x.status)).length,
     compensatoryDays:0,
     compensatoryHours:0,
     timeBankMonthCredit:0,adjustmentTotal
@@ -4305,7 +4305,7 @@ function profileHoursForDate(p,date){
 async function pgAutoClosureForStatus(employee,date,status,credit,source){
   employee=String(employee||'');date=String(date||'');status=String(status||'');
   credit=Math.round(Math.max(0,Number(credit)||0)*100)/100;
-  if(!employee||date<'2026-09-07'||!['Urlaub','Feiertag'].includes(status))return;
+  if(!employee||date<'2026-09-07'||!['Urlaub','Krank','Schulung','Unerlaubte Abwesenheit','Unentschuldigte Abwesenheit','Feiertag'].includes(status))return;
   const work=await pool.query(
     'SELECT 1 FROM time_entries_shadow WHERE employee_name=$1 AND entry_date=$2 LIMIT 1',
     [employee,date]
@@ -4317,7 +4317,7 @@ async function pgAutoClosureForStatus(employee,date,status,credit,source){
   );
   const note='Automatisch: '+status+(source?' · '+String(source):'');
   if(existing.rowCount){
-    if(!/^Automatisch:\s*(Urlaub|Feiertag)/i.test(String(existing.rows[0].legacy_col5||'')))return;
+    if(!/^Automatisch:\s*(Urlaub|Krank|Schulung|Unerlaubte Abwesenheit|Unentschuldigte Abwesenheit|Feiertag)/i.test(String(existing.rows[0].legacy_col5||'')))return;
     await pool.query(
       `UPDATE day_closures_shadow SET closed_at_text=$3,gross_total=$4,legacy_col5=$5,legacy_col6='',
         pause_minutes=0,net_total=$4,updated_at_text=$3,update_reason='DG 7.2 Statusautomatik',
@@ -4341,7 +4341,7 @@ async function pgRemoveAutoClosure(employee,date,status){
   );
   if(!q.rowCount)return;
   const note=String(q.rows[0].legacy_col5||'');
-  if(!/^Automatisch:\s*(Urlaub|Feiertag)/i.test(note))return;
+  if(!/^Automatisch:\s*(Urlaub|Krank|Schulung|Unerlaubte Abwesenheit|Unentschuldigte Abwesenheit|Feiertag)/i.test(note))return;
   if(status&&!note.toLowerCase().includes(String(status).toLowerCase()))return;
   await pool.query('DELETE FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2',
     [String(employee),String(date)]);
@@ -4350,7 +4350,7 @@ async function pgSyncAutoClosures(year){
   year=Number(year)||0;
   const q=await pool.query(
     `SELECT employee_name,status_date,status,source,credited_hours FROM day_status_shadow
-      WHERE status IN ('Urlaub','Krank','Schulung','Unentschuldigte Abwesenheit','Feiertag') AND status_date>='2026-09-07'
+      WHERE status IN ('Urlaub','Krank','Schulung','Unerlaubte Abwesenheit','Unentschuldigte Abwesenheit','Feiertag') AND status_date>='2026-09-07'
         AND ($1::int=0 OR status_date LIKE ($1::text||'-%'))`,
     [year]
   );
@@ -4381,7 +4381,7 @@ async function mirrorAbsenceStatuses(action,body,parsed){
   const data=parsed&&parsed.data!==undefined?parsed.data:parsed;if(!data||data.ok===false)return;
   if(action==='saveAbsence'){
     const id=String(data.id||'');if(!id)return;
-    const employee=String(body.targetEmployee||''),type=String(body.type||'');
+    const employee=String(body.targetEmployee||''),rawType=String(body.type||''),type=rawType==='Unentschuldigte Abwesenheit'?'Unerlaubte Abwesenheit':rawType;
     const start=String(body.startDate||''),end=String(body.endDate||'');
     const sy=Number(start.slice(0,4))||0,ey=Number(end.slice(0,4))||sy;
     for(let y=sy;y<=ey;y++)await mirrorHolidayYear(y);
@@ -4393,9 +4393,9 @@ async function mirrorAbsenceStatuses(action,body,parsed){
         [employee,date]
       );
       if(old.rowCount&&String(old.rows[0].status||'')==='Feiertag')continue;
-      const credit=type==='Unentschuldigte Abwesenheit'?0:profileHoursForDate(profile,date);
+      const credit=['Unerlaubte Abwesenheit','Unentschuldigte Abwesenheit'].includes(type)?0:profileHoursForDate(profile,date);
       await upsertDayStatusShadow(employee,date,type,'Chef Abwesenheit',credit,id);
-      if(['Urlaub','Krank','Schulung','Unentschuldigte Abwesenheit'].includes(type))await pgAutoClosureForStatus(employee,date,type,credit,'Chef Abwesenheit');
+      if(['Urlaub','Krank','Schulung','Unerlaubte Abwesenheit','Unentschuldigte Abwesenheit'].includes(type))await pgAutoClosureForStatus(employee,date,type,credit,'Chef Abwesenheit');
     }
   }else if(action==='deleteAbsence'){
     const id=String(body.id||'');if(!id)return;
@@ -4404,7 +4404,7 @@ async function mirrorAbsenceStatuses(action,body,parsed){
       [id]
     );
     await pool.query('DELETE FROM day_status_shadow WHERE reference=$1',[id]);
-    for(const r of q.rows)if(['Urlaub','Krank','Schulung','Unentschuldigte Abwesenheit','Feiertag'].includes(String(r.status||'')))
+    for(const r of q.rows)if(['Urlaub','Krank','Schulung','Unerlaubte Abwesenheit','Unentschuldigte Abwesenheit','Feiertag'].includes(String(r.status||'')))
       await pgRemoveAutoClosure(r.employee_name,berlinDateOnly(r.status_date),r.status);
   }
 }
@@ -7108,7 +7108,7 @@ async function directAbsencesRead(body){
       ORDER BY start_date DESC,id DESC`
   );
   return q.rows.map(r=>({
-    id:String(r.id||''),employee:String(r.employee_name||''),type:String(r.absence_type||''),
+    id:String(r.id||''),employee:String(r.employee_name||''),type:String(r.absence_type||'')==='Unentschuldigte Abwesenheit'?'Unerlaubte Abwesenheit':String(r.absence_type||''),
     start:berlinDateOnly(r.start_date),end:berlinDateOnly(r.end_date),
     creditedHours:Number(r.credited_hours||0),sickCaseId:String(r.sickness_case_id||''),
     sicknessMode:String(r.sickness_mode||''),employerPayThrough:berlinDateOnly(r.employer_pay_through),
@@ -8832,7 +8832,7 @@ async function directEmployeeWorkOverviewV10(body){
   return {employee,year,weekStart,weekEnd,weekHours:values[0],weeklyTarget:pgRound2(p.weeklyHours||0),month,monthHours:values[1],yearHours:values[2],
     vacationEntitlement:pgRound2(annual.vacationEntitlement||0),vacationUsed:pgRound2(annual.vacationUsed||0),
     vacationRemaining:pgRound2(annual.vacationRemaining||0),sickDays:Number(sc.Krank||0),trainingDays:Number(sc.Schulung||0),
-    unexcusedDays:Number(sc['Unentschuldigte Abwesenheit']||0)};
+    unexcusedDays:Number(sc['Unerlaubte Abwesenheit']||0)+Number(sc['Unentschuldigte Abwesenheit']||0)};
 }
 
 async function directPartnerNetworkV10(body){
@@ -9849,7 +9849,7 @@ async function tryDirectPostgresWrite(action,body){
       const closureQ=await client.query(
         'SELECT legacy_col5 FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 FOR UPDATE',[target,date]
       );
-      if(closureQ.rowCount&&!/^Automatisch:\\s*(Urlaub|Krank|Schulung|Unentschuldigte Abwesenheit|Feiertag)/i.test(String(closureQ.rows[0].legacy_col5||'')))
+      if(closureQ.rowCount&&!/^Automatisch:\\s*(Urlaub|Krank|Schulung|Unerlaubte Abwesenheit|Unentschuldigte Abwesenheit|Feiertag)/i.test(String(closureQ.rows[0].legacy_col5||'')))
         throw new Error('Der Tag wurde bereits abgeschlossen.');
       if(status!=='Arbeiten'){
         const work=await client.query(
@@ -9872,10 +9872,10 @@ async function tryDirectPostgresWrite(action,body){
           [target,date,status,nowIso,credit]
         );
       }
-      if(['Urlaub','Feiertag'].includes(status)&&date>='2026-09-07'){
+      if(['Urlaub','Krank','Schulung','Unerlaubte Abwesenheit','Unentschuldigte Abwesenheit','Feiertag'].includes(status)&&date>='2026-09-07'){
         const note='Automatisch: '+status+' · Mitarbeiter';
         if(closureQ.rowCount){
-          if(/^Automatisch:\\s*(Urlaub|Krank|Schulung|Unentschuldigte Abwesenheit|Feiertag)/i.test(String(closureQ.rows[0].legacy_col5||''))){
+          if(/^Automatisch:\\s*(Urlaub|Krank|Schulung|Unerlaubte Abwesenheit|Unentschuldigte Abwesenheit|Feiertag)/i.test(String(closureQ.rows[0].legacy_col5||''))){
             await client.query(
               `UPDATE day_closures_shadow SET closed_at_text=$3,gross_total=$4,legacy_col5=$5,legacy_col6='',
                  pause_minutes=0,net_total=$4,updated_at_text=$3,update_reason='DG 7.2 Statusautomatik',shadow_updated_at=now()
@@ -9891,9 +9891,9 @@ async function tryDirectPostgresWrite(action,body){
             [target,date,nowIso,credit,note]
           );
         }
-      }else if(status==='Arbeiten'&&['Urlaub','Feiertag'].includes(oldStatus)&&closureQ.rowCount){
+      }else if(status==='Arbeiten'&&['Urlaub','Krank','Schulung','Unerlaubte Abwesenheit','Unentschuldigte Abwesenheit','Feiertag'].includes(oldStatus)&&closureQ.rowCount){
         const note=String(closureQ.rows[0].legacy_col5||'');
-        if(/^Automatisch:\\s*(Urlaub|Krank|Schulung|Unentschuldigte Abwesenheit|Feiertag)/i.test(note)&&note.toLowerCase().includes(oldStatus.toLowerCase())){
+        if(/^Automatisch:\\s*(Urlaub|Krank|Schulung|Unerlaubte Abwesenheit|Unentschuldigte Abwesenheit|Feiertag)/i.test(note)&&note.toLowerCase().includes(oldStatus.toLowerCase())){
           await client.query('DELETE FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2',[target,date]);
         }
       }
@@ -10730,11 +10730,11 @@ async function tryDirectPostgresWrite(action,body){
         result={ok:true,employee:target,returnDate,oldEnd,newEnd,changed:true,removedEntire,hoursCountFrom:returnDate};
       }
     }else if(action==='saveAbsence'){
-      const target=String(body.targetEmployee||'').trim(),type=String(body.type||'').trim();
+      const target=String(body.targetEmployee||'').trim(),rawType=String(body.type||'').trim(),type=rawType==='Unentschuldigte Abwesenheit'?'Unerlaubte Abwesenheit':rawType;
       const startDate=berlinDateOnly(body.startDate||''),endDate=berlinDateOnly(body.endDate||'');
       const sicknessMode=String(body.sicknessMode||'').trim(),continuationCaseId=String(body.continuationCaseId||'').trim();
-      if(!['Urlaub','Krank','Schulung','Unentschuldigte Abwesenheit'].includes(type))
-        throw new Error('Als Abwesenheit sind Urlaub, Krankheit, Schulung oder unentschuldigte Abwesenheit möglich.');
+      if(!['Urlaub','Krank','Schulung','Unerlaubte Abwesenheit','Unentschuldigte Abwesenheit'].includes(type))
+        throw new Error('Als Abwesenheit sind Urlaub, Krankheit, Schulung oder unerlaubte Abwesenheit möglich.');
       if(!target)throw new Error('Mitarbeiter wurde nicht gefunden.');
       if(!validIsoDateText(startDate)||!validIsoDateText(endDate)||endDate<startDate)
         throw new Error('Ungültiger Abwesenheitszeitraum.');
@@ -10830,7 +10830,7 @@ async function tryDirectPostgresWrite(action,body){
       const creditRows=[];
       let creditedHours=0;
       for(const date of workDates){
-        let credit=type==='Unentschuldigte Abwesenheit'?0:Math.round(profileHoursForDate(profile,date)*100)/100;
+        let credit=['Unerlaubte Abwesenheit','Unentschuldigte Abwesenheit'].includes(type)?0:Math.round(profileHoursForDate(profile,date)*100)/100;
         if(type==='Krank'&&!paidSet.has(date))credit=0;
         creditRows.push({date,credit});
         creditedHours=Math.round((creditedHours+credit)*100)/100;
@@ -10918,13 +10918,13 @@ async function tryDirectPostgresWrite(action,body){
       await client.query('UPDATE absences_shadow SET active=false,shadow_updated_at=now() WHERE id=$1',[id]);
       await client.query('DELETE FROM day_status_shadow WHERE reference=$1',[id]);
       for(const s of statuses.rows){
-        if(['Urlaub','Feiertag'].includes(String(s.status||''))){
+        if(['Urlaub','Krank','Schulung','Unerlaubte Abwesenheit','Unentschuldigte Abwesenheit','Feiertag'].includes(String(s.status||''))){
           const noteQ=await client.query(
             'SELECT legacy_col5 FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 FOR UPDATE',
             [String(s.employee_name||''),berlinDateOnly(s.status_date)]
           );
           const note=String(noteQ.rows[0]?.legacy_col5||'');
-          if(/^Automatisch:\\s*(Urlaub|Krank|Schulung|Unentschuldigte Abwesenheit|Feiertag)/i.test(note)){
+          if(/^Automatisch:\\s*(Urlaub|Krank|Schulung|Unerlaubte Abwesenheit|Unentschuldigte Abwesenheit|Feiertag)/i.test(note)){
             await client.query('DELETE FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2',
               [String(s.employee_name||''),berlinDateOnly(s.status_date)]);
           }
@@ -11299,7 +11299,7 @@ async function tryDirectPostgresWrite(action,body){
   }
   if(action==='saveAbsence'){
     const type=String(body.type||''),sy=Number(String(body.startDate||'').slice(0,4))||0,ey=Number(String(body.endDate||'').slice(0,4))||sy;
-    if(['Urlaub','Krank','Schulung','Unentschuldigte Abwesenheit'].includes(type))for(let y=sy;y<=ey;y++)if(y)await pgSyncAutoClosures(y);
+    if(['Urlaub','Krank','Schulung','Unerlaubte Abwesenheit','Unentschuldigte Abwesenheit'].includes(type))for(let y=sy;y<=ey;y++)if(y)await pgSyncAutoClosures(y);
     await Promise.all([
       pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'absences%' OR shadow_name LIKE 'vacation_full:%' OR shadow_name LIKE 'absence_overview:%' OR shadow_name LIKE 'planner_availability:%' OR shadow_name LIKE 'day_data:%' OR shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'month_data:%' OR shadow_name LIKE 'boss_day_closures:%'"),
       pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getMonthPayrollAudit','getPayrollCycleState','getDashboardSummary51')")
