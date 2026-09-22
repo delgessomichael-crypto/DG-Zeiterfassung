@@ -8864,6 +8864,18 @@ async function directEmployeeWorkOverviewV10(body){
 
 async function directPartnerNetworkV10(body){
   const session=await localSessionForBody(body,true);if(!session)return null;
+  const defaults=[
+    ['PC-DEFAULT-ELEKTRIKER','Elektriker',10],
+    ['PC-DEFAULT-FLIESENLEGER','Fliesenleger',20],
+    ['PC-DEFAULT-TROCKENBAUER','Trockenbauer',30],
+    ['PC-DEFAULT-ESTRICHLEGER','Estrichleger',40]
+  ];
+  for(const d of defaults){
+    await pool.query(
+      'INSERT INTO partner_categories_v10(id,name,sort_order,active,created_by,updated_at) SELECT $1,$2,$3,true,$4,now() WHERE NOT EXISTS (SELECT 1 FROM partner_categories_v10 WHERE lower(name)=lower($2) AND active=true)',
+      [d[0],d[1],d[2],session.employee]
+    );
+  }
   const cq=await pool.query('SELECT id,name,sort_order FROM partner_categories_v10 WHERE active=true ORDER BY sort_order,name');
   const pq=await pool.query('SELECT id,category_id,company,contact_name,phone,mobile,email,address,website,notes FROM partners_v10 WHERE active=true ORDER BY company,contact_name');
   const partners=pq.rows.map(r=>({id:String(r.id),categoryId:String(r.category_id),company:String(r.company||''),contactName:String(r.contact_name||''),phone:String(r.phone||''),mobile:String(r.mobile||''),email:String(r.email||''),address:String(r.address||''),website:String(r.website||''),notes:String(r.notes||'')}));
