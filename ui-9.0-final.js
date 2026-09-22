@@ -180,8 +180,19 @@ function renameEmployeeClosures(){
   if(c){c.querySelectorAll('h2,h3').forEach(h=>{if(/^Mitarbeiterberichte$/i.test(String(h.textContent||'').trim()))h.textContent='Mitarbeiter-Abschlüsse';});}
 }
 
+function ensureDynamicPanel(c){
+  if(!c)return;
+  if(c.key==='partnerNetwork'&&!q('dg10Partner')){
+    const r=root();if(!r)return;
+    const card=document.createElement('div');
+    card.id='dg10Partner';card.className='card d3-main';
+    card.innerHTML='<div class="muted small" style="margin-bottom:10px">Partnerbetriebe nach Gewerk verwalten.</div><div id="dg10PartnerStatus"></div><div id="dg10PartnerBody"></div>';
+    r.appendChild(card);
+  }
+}
 function wrapperFor(c){
   if(!c)return null;
+  ensureDynamicPanel(c);
   if(c.special)return null;
   if(c.parent){const p=q(c.parent);if(p)return p;}
   if(c.panel&&q(c.panel))return q(c.panel);
