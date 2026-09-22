@@ -1424,21 +1424,37 @@ async function localSessionForBody(body,requireChef){
   const employee=String(body.employee||'').trim();
   const token=String(body.employeePin||body.pin||body.deviceSessionToken||'').trim();
   if(!employee||!looksLikeDeviceSessionToken(token))return null;
+  const h=tokenHash(token);
   const q=await pool.query(
     `SELECT employee_name,chef_access,expires_at,revoked_at
        FROM railway_sessions
       WHERE token_hash=$1 AND employee_name=$2
         AND revoked_at IS NULL AND expires_at>now()`,
-    [tokenHash(token),employee]
+    [h,employee]
   );
   if(!q.rowCount)return null;
   const row=q.rows[0];
-  if(requireChef&&!row.chef_access)return null;
+  let chefAccess=Boolean(row.chef_access);
+  if(requireChef&&!chefAccess){
+    const aq=await pool.query(
+      'SELECT payload FROM employee_admin_shadow WHERE employee_name=$1 LIMIT 1',
+      [employee]
+    );
+    chefAccess=Boolean(aq.rows[0]?.payload?.chefAccess);
+    if(chefAccess){
+      await pool.query(
+        'UPDATE railway_sessions SET chef_access=true,last_seen_at=now() WHERE token_hash=$1 AND employee_name=$2',
+        [h,employee]
+      );
+      console.log('RAILWAY_SESSION chef access repaired from employee_admin employee='+employee);
+    }
+  }
+  if(requireChef&&!chefAccess)return null;
   pool.query(
     'UPDATE railway_sessions SET last_seen_at=now() WHERE token_hash=$1',
-    [tokenHash(token)]
+    [h]
   ).catch(()=>{});
-  return {employee:String(row.employee_name),chefAccess:Boolean(row.chef_access)};
+  return {employee:String(row.employee_name),chefAccess};
 }
 
 async function refreshSessionFromSuccessfulRequest(action,body,parsed){
@@ -1458,13 +1474,20 @@ async function refreshSessionFromSuccessfulRequest(action,body,parsed){
   const employee=String(body.employee||'').trim();
   if(!employee)return;
   // A successful Google-authenticated request proves the token is still valid.
-  // Preserve an existing chef flag; never promote privileges from a normal request.
+  // Restore the chef flag from the authoritative employee profile if an older
+  // device session was registered before the local role bridge existed.
   const h=tokenHash(token);
-  const existing=await pool.query(
-    'SELECT chef_access FROM railway_sessions WHERE token_hash=$1 AND employee_name=$2',
-    [h,employee]
-  );
-  const chef=existing.rowCount?Boolean(existing.rows[0].chef_access):false;
+  const [existing,profileQ]=await Promise.all([
+    pool.query(
+      'SELECT chef_access FROM railway_sessions WHERE token_hash=$1 AND employee_name=$2',
+      [h,employee]
+    ),
+    pool.query(
+      'SELECT payload FROM employee_admin_shadow WHERE employee_name=$1 LIMIT 1',
+      [employee]
+    )
+  ]);
+  const chef=Boolean(existing.rows[0]?.chef_access)||Boolean(profileQ.rows[0]?.payload?.chefAccess);
   await registerRailwaySession(employee,token,chef);
 }
 
