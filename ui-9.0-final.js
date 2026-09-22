@@ -842,6 +842,11 @@ function openLeaf(key,force){
   const leafTitle=LEAF[key]?LEAF[key].title:key;
   setOfficePath(parent?GROUPS[parent].title:'',leafTitle,!!parent);
   markActive(parent||mainForLeaf(key));
+  if(key==='partnerNetwork')setTimeout(()=>{
+    const f=fn('loadPartner10'),st=q('dg10PartnerStatus');
+    if(f)Promise.resolve(f()).catch(e=>{if(st){st.className='status error';st.textContent=e&&e.message?e.message:String(e);}});
+    else if(st){st.className='status error';st.textContent='Partnernetzwerk-Modul wird neu geladen. Bitte die App einmal aktualisieren.';}
+  },0);
   if(key==='days')setTimeout(()=>{installDayReviewWrap();const f=fn('loadBossDayClosuresV48');if(f)Promise.resolve(f()).catch(()=>{});},20);
   setTimeout(syncLabels,0);return true;
 }
