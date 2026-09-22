@@ -4977,8 +4977,8 @@ function ensureAbsenceUi734(){
   const h=card.querySelector('h2');if(h)h.textContent='Abwesenheit eintragen';
   const sel=byId734('absenceType');
   if(sel){
-    const old=sel.value||'Urlaub';sel.innerHTML='<option value="Urlaub">Urlaub</option><option value="Krank">Krankheit</option><option value="Schulung">Schulung</option>';
-    sel.value=['Urlaub','Krank','Schulung'].includes(old)?old:'Urlaub';
+    const old=sel.value||'Urlaub';sel.innerHTML='<option value="Urlaub">Urlaub</option><option value="Krank">Krankheit</option><option value="Schulung">Schulung</option><option value="Unerlaubte Abwesenheit">Unerlaubte Abwesenheit</option>';
+    sel.value=['Urlaub','Krank','Schulung','Unerlaubte Abwesenheit'].includes(old)?old:'Urlaub';
   }
   const grid=byId734('absenceEmployee')?.closest('.admin-grid');
   if(grid&&!byId734('dg734AbsenceSummary')){const box=document.createElement('div');box.id='dg734AbsenceSummary';box.className='status info';box.textContent='Übersicht wird geladen …';grid.insertAdjacentElement('afterend',box);}
@@ -4988,7 +4988,7 @@ function ensureAbsenceUi734(){
     box.innerHTML='<strong>Krankheitsfall / Entgeltfortzahlung</strong><div class="admin-grid" style="margin-top:8px"><div><label>Einordnung</label><select id="dg734SicknessMode"><option value="Neu">Neuer Krankheitsfall</option><option value="">Bitte prüfen / noch unklar</option><option value="Fortsetzung">Fortsetzung derselben Erkrankung</option></select></div><div id="dg734ContinueWrap" class="hidden"><label>Fortgesetzter Fall</label><select id="dg734ContinuationCase"></select></div></div><div id="dg734SickHint" class="dg734-legal">Es wird keine Diagnose gespeichert. Bei erneuter Arbeitsunfähigkeit entscheidet die Einordnung „neu“ oder „Fortsetzung“ darüber, ob die 6-Wochen-Frist weiterläuft. Im Zweifel Krankenkasse/Lohnbüro prüfen.</div>';
     dates?.insertAdjacentElement('afterend',box);
   }
-  const hint=card.querySelector('.field-hint');if(hint)hint.textContent='Urlaub und Schulung werden nach hinterlegten Sollstunden gutgeschrieben. Bei Krankheit überwacht die App zusätzlich die Entgeltfortzahlungsfrist und weist auf Krankengeld/Krankenkasse hin.';
+  const hint=card.querySelector('.field-hint');if(hint)hint.textContent='Urlaub und Schulung werden nach hinterlegten Sollstunden gutgeschrieben. Unerlaubte Abwesenheit wird mit 0,00 Std. gespeichert. Bei Krankheit überwacht die App zusätzlich die Entgeltfortzahlungsfrist und weist auf Krankengeld/Krankenkasse hin.';
   const emp=byId734('absenceEmployee'),typ=byId734('absenceType'),start=byId734('absenceStart'),mode=byId734('dg734SicknessMode');
   if(emp&&!emp.dataset.dg734){emp.dataset.dg734='1';emp.addEventListener('change',()=>refreshAbsence734(true));}
   if(typ&&!typ.dataset.dg734){typ.dataset.dg734='1';typ.addEventListener('change',()=>{toggleSick734();renderAbsenceSummary734();});}
@@ -5018,8 +5018,12 @@ function renderAbsenceSummary734(){
     html='<div class="dg734-summary"><div class="dg734-stat">Krankheitstage '+o.year+'<strong>'+Number(o.sickCalendarDays||0)+' Kalendertage</strong></div><div class="dg734-stat">davon Arbeitstage<strong>'+Number(o.sickWorkDays||0)+' Tage</strong></div><div class="dg734-stat">6-Wochen-Reserve letzter Fall<strong>'+remaining+' Tage</strong></div></div>'+alerts734(o.warnings);
     if(latest)html+='<div class="dg734-case"><strong>Letzter Krankheitsfall:</strong> '+esc734(de734(latest.start))+' bis '+esc734(de734(latest.end))+' · '+Number(latest.calendarDays||0)+' Kalendertage'+(latest.payer?' · '+esc734(latest.payer):'')+(latest.employerPayThrough?' · AG-Fortzahlung bis '+esc734(de734(latest.employerPayThrough)):'')+'</div>';
     html+='<div class="dg734-legal"><strong>Sicherheitslogik:</strong> Arbeitgeber-Entgeltfortzahlung wird grundsätzlich für höchstens 6 Wochen je Krankheitsfall berücksichtigt. Ab dem 43. Krankheitstag desselben Falles schreibt die App keine Arbeitgeberstunden mehr gut und markiert Krankengeld/Krankenkasse. Die vierwöchige Wartezeit bei Neueinstellung wird ebenfalls berücksichtigt. Bei erneuter Erkrankung wird nicht nach Diagnosen gefragt; die Zuordnung „neuer Fall / Fortsetzung“ muss bewusst erfolgen.</div>';
-  }else{
+  }else if(t==='Schulung'){
     html='<div class="dg734-alert info">Schulung: Der Zeitraum wird als Abwesenheit markiert und die hinterlegten Sollstunden werden gutgeschrieben.</div>';
+  }else if(t==='Unerlaubte Abwesenheit'){
+    html='<div class="dg734-alert warn"><strong>Unerlaubte Abwesenheit:</strong> Der Zeitraum wird deutlich als unerlaubte Abwesenheit gespeichert. Es werden 0,00 Std. gutgeschrieben; ein manueller Tagesabschluss ist für diese Tage nicht erforderlich.</div>';
+  }else{
+    html='<div class="dg734-alert info">Abwesenheit: Bitte Zeitraum prüfen.</div>';
   }
   host.innerHTML=html;fillCases734();
 }
