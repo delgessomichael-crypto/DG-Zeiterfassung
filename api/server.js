@@ -11230,7 +11230,7 @@ async function tryDirectPostgresWrite(action,body){
 
 async function proxyLegacy(req, res, body) {
   const action = String(body && body.action || '');
-  if (action === 'ping') return handlePing(req,res);
+  if (action === 'ping') return json(res,200,{ok:true,data:{message:'DG Railway Backend erreichbar',version:'9.0',railway:true},source:'postgres'},req);
   if (action === 'getMinimumWage') return json(res,200,{ok:true,data:directMinimumWageRead(body),source:'postgres-static'},req);
   if (action === 'getEmployees') {
     try {
