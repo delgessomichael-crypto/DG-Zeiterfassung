@@ -13,6 +13,14 @@ const MIGRATION_TOKEN = process.env.MIGRATION_TOKEN || '';
 const MIGRATION_UPLOAD_KEY = process.env.MIGRATION_UPLOAD_KEY || '';
 const WEB_ORIGIN = process.env.WEB_ORIGIN || 'https://dg-app-10-web-production.up.railway.app';
 const MIGRATION_XLSX_URL = process.env.MIGRATION_XLSX_URL || '';
+const WHATSAPP_ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN || '';
+const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
+const WHATSAPP_WABA_ID = process.env.WHATSAPP_WABA_ID || '';
+const WHATSAPP_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || '';
+const WHATSAPP_APP_SECRET = process.env.WHATSAPP_APP_SECRET || '';
+const WHATSAPP_GRAPH_VERSION = process.env.WHATSAPP_GRAPH_VERSION || 'v25.0';
+const WHATSAPP_MARK_READ_ON_IMPORT = /^(1|true|yes|ja)$/i.test(String(process.env.WHATSAPP_MARK_READ_ON_IMPORT||''));
+
 
 const pool = DATABASE_URL ? new Pool({
   connectionString: DATABASE_URL,
@@ -314,6 +322,75 @@ CREATE TABLE IF NOT EXISTS partners_v10 (
 
 CREATE INDEX IF NOT EXISTS partners_v10_category_idx
   ON partners_v10(category_id,active,company,contact_name);
+
+CREATE TABLE IF NOT EXISTS whatsapp_threads_v10 (
+  id TEXT PRIMARY KEY,
+  wa_id TEXT NOT NULL,
+  contact_name TEXT,
+  category TEXT NOT NULL DEFAULT 'Prüfen',
+  relevance_score INTEGER NOT NULL DEFAULT 0,
+  classification_reason TEXT,
+  manual_classification BOOLEAN NOT NULL DEFAULT false,
+  status TEXT NOT NULL DEFAULT 'Offen',
+  last_text TEXT,
+  first_message_at TIMESTAMPTZ,
+  last_message_at TIMESTAMPTZ,
+  transferred_to TEXT,
+  transferred_id TEXT,
+  transferred_at TIMESTAMPTZ,
+  transferred_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS whatsapp_threads_v10_open_idx
+  ON whatsapp_threads_v10(status,category,last_message_at DESC);
+CREATE INDEX IF NOT EXISTS whatsapp_threads_v10_wa_idx
+  ON whatsapp_threads_v10(wa_id,last_message_at DESC);
+
+CREATE TABLE IF NOT EXISTS whatsapp_messages_v10 (
+  id TEXT PRIMARY KEY,
+  thread_id TEXT NOT NULL REFERENCES whatsapp_threads_v10(id) ON DELETE CASCADE,
+  wa_id TEXT NOT NULL,
+  direction TEXT NOT NULL DEFAULT 'inbound',
+  message_type TEXT,
+  message_text TEXT,
+  message_at TIMESTAMPTZ,
+  phone_number_id TEXT,
+  read_marked BOOLEAN NOT NULL DEFAULT false,
+  raw_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS whatsapp_messages_v10_thread_idx
+  ON whatsapp_messages_v10(thread_id,message_at,id);
+
+CREATE TABLE IF NOT EXISTS whatsapp_media_v10 (
+  media_id TEXT PRIMARY KEY,
+  message_id TEXT NOT NULL REFERENCES whatsapp_messages_v10(id) ON DELETE CASCADE,
+  media_type TEXT,
+  mime_type TEXT,
+  filename TEXT,
+  caption TEXT,
+  sha256 TEXT,
+  file_size BIGINT NOT NULL DEFAULT 0,
+  media_data BYTEA,
+  download_status TEXT NOT NULL DEFAULT 'pending',
+  download_error TEXT,
+  downloaded_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS whatsapp_media_v10_message_idx
+  ON whatsapp_media_v10(message_id);
+
+CREATE TABLE IF NOT EXISTS whatsapp_webhook_events_v10 (
+  event_hash TEXT PRIMARY KEY,
+  payload JSONB NOT NULL,
+  received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  processed_at TIMESTAMPTZ,
+  process_error TEXT
+);
 
 CREATE TABLE IF NOT EXISTS employee_locations_v10 (
   employee_name TEXT PRIMARY KEY,
@@ -4054,6 +4131,10 @@ async function mirrorTimeBankWrite(action,body,parsed){
       const q=await pool.query('SELECT COUNT(*)::int AS n FROM time_bank_shadow WHERE employee_name=$1',[employee]);
       const n=Number(q.rows[0]?.n||0);await saveShadowVerifyStat('time_bank:'+employee,n,n,0);
     }
+  }
+  if(action==='transferWhatsappThreadV10'&&result&&result._markWhatsappReadThread){
+    await markWhatsappThreadReadV10(result._markWhatsappReadThread).catch(e=>console.error('WhatsApp mark thread read failed',e.message));
+    delete result._markWhatsappReadThread;
   }
   if(action==='saveTimeBankManual'){
     const raw=String(body.timeBankAction||'');
@@ -8882,6 +8963,245 @@ async function directPartnerNetworkV10(body){
   return cq.rows.map(c=>({id:String(c.id),name:String(c.name),sortOrder:Number(c.sort_order||999),partners:partners.filter(p=>p.categoryId===String(c.id))}));
 }
 
+function whatsappConfiguredV10(){
+  return Boolean(WHATSAPP_ACCESS_TOKEN&&WHATSAPP_PHONE_NUMBER_ID&&WHATSAPP_WABA_ID);
+}
+function whatsappSafeTextV10(v){return String(v==null?'':v).trim();}
+function whatsappExtractTextV10(msg){
+  msg=msg||{};
+  if(msg.type==='text')return whatsappSafeTextV10(msg.text&&msg.text.body);
+  if(msg.type==='image')return whatsappSafeTextV10(msg.image&&msg.image.caption);
+  if(msg.type==='video')return whatsappSafeTextV10(msg.video&&msg.video.caption);
+  if(msg.type==='document')return whatsappSafeTextV10(msg.document&&msg.document.caption);
+  if(msg.type==='button')return whatsappSafeTextV10(msg.button&&msg.button.text);
+  if(msg.type==='interactive'){
+    const i=msg.interactive||{};
+    return whatsappSafeTextV10((i.button_reply&&i.button_reply.title)||(i.list_reply&&i.list_reply.title));
+  }
+  if(msg.type==='location'){
+    const x=msg.location||{};return ['Standort',x.name,x.address].filter(Boolean).join(' · ');
+  }
+  return '';
+}
+function whatsappMediaObjectV10(msg){
+  msg=msg||{};const type=String(msg.type||'');
+  if(!['image','document','audio','video','sticker'].includes(type))return null;
+  const m=msg[type]||{};if(!m.id)return null;
+  return {id:String(m.id),type,mime:String(m.mime_type||''),filename:String(m.filename||''),caption:String(m.caption||''),sha256:String(m.sha256||'')};
+}
+function classifyWhatsappLocalV10(text,messageType){
+  const raw=String(text||'').trim(),t=raw.toLowerCase().replace(/ß/g,'ss');
+  const orderTerms=[
+    'hiermit beauftrage','ich beauftrage','auftrag erteilen','erteile den auftrag',
+    'bitte durchführen','bitte durchfuehren','bitte ausführen','bitte ausfuehren',
+    'machen sie das','bitte kommen','können sie kommen','koennen sie kommen'
+  ];
+  const inquiryTerms=[
+    'angebot','kostenvoranschlag','kosten','preis','termin','können sie','koennen sie','brauche','benötige','benoetige',
+    'defekt','kaputt','störung','stoerung','undicht','leck','verstopft','wasser','rohr','abfluss','wc','toilette',
+    'armatur','dusche','bad','heizung','heizkörper','heizkoerper','therme','brennwert','wärmepumpe','waermepumpe',
+    'fußbodenheizung','fussbodenheizung','klima','klimaanlage','legionellen','sanitär','sanitaer','gas','wartung'
+  ];
+  if(orderTerms.some(x=>t.includes(x)))return {category:'Auftrag',score:95,reason:'Explizite Beauftragung bzw. Ausführungswunsch erkannt.'};
+  let hits=0;for(const x of inquiryTerms)if(t.includes(x))hits++;
+  if(hits>=2)return {category:'Anfrage',score:90,reason:'Mehrere auftragsrelevante Begriffe erkannt.'};
+  if(hits===1)return {category:'Anfrage',score:75,reason:'Auftragsrelevanter Begriff erkannt.'};
+  if(['image','document','audio','video'].includes(String(messageType||''))&&!raw)return {category:'Prüfen',score:55,reason:'Anhang ohne eindeutigen Begleittext.'};
+  if(raw.length>=25)return {category:'Prüfen',score:50,reason:'Inhalt vorhanden, aber nicht eindeutig als Auftrag oder Anfrage erkennbar.'};
+  return {category:'Prüfen',score:25,reason:'Kurzer oder uneindeutiger Nachrichtentext.'};
+}
+async function whatsappThreadClassificationV10(threadId){
+  const q=await pool.query(
+    "SELECT message_text,message_type FROM whatsapp_messages_v10 WHERE thread_id=$1 AND direction='inbound' ORDER BY message_at DESC NULLS LAST,created_at DESC LIMIT 20",
+    [threadId]
+  );
+  const text=q.rows.slice().reverse().map(r=>String(r.message_text||'')).filter(Boolean).join('\n');
+  let best=classifyWhatsappLocalV10(text,q.rows[0]?.message_type||'');
+  for(const r of q.rows){
+    const x=classifyWhatsappLocalV10(r.message_text,r.message_type);
+    if(x.score>best.score)best=x;
+    if(x.category==='Auftrag'){best=x;break;}
+  }
+  return best;
+}
+async function directWhatsappInboxV10(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const tq=await pool.query(
+    `SELECT id,wa_id,contact_name,category,relevance_score,classification_reason,manual_classification,
+            status,last_text,first_message_at,last_message_at,transferred_to,transferred_id,transferred_at
+       FROM whatsapp_threads_v10
+      ORDER BY last_message_at DESC NULLS LAST,updated_at DESC
+      LIMIT 120`
+  );
+  const ids=tq.rows.map(r=>String(r.id||'')).filter(Boolean);
+  let messages=[];
+  if(ids.length){
+    const mq=await pool.query(
+      `SELECT m.id,m.thread_id,m.wa_id,m.direction,m.message_type,m.message_text,m.message_at,m.read_marked,
+              COALESCE(json_agg(json_build_object(
+                'mediaId',wm.media_id,'type',wm.media_type,'mime',wm.mime_type,'filename',wm.filename,
+                'caption',wm.caption,'fileSize',wm.file_size,'status',wm.download_status
+              )) FILTER (WHERE wm.media_id IS NOT NULL),'[]'::json) AS media
+         FROM whatsapp_messages_v10 m
+         LEFT JOIN whatsapp_media_v10 wm ON wm.message_id=m.id
+        WHERE m.thread_id=ANY($1::text[])
+        GROUP BY m.id
+        ORDER BY m.message_at ASC NULLS LAST,m.created_at ASC`,[ids]
+    );
+    messages=mq.rows;
+  }
+  const byThread=new Map();
+  for(const m of messages){
+    const k=String(m.thread_id||'');if(!byThread.has(k))byThread.set(k,[]);
+    byThread.get(k).push({
+      id:String(m.id||''),direction:String(m.direction||'inbound'),type:String(m.message_type||''),
+      text:String(m.message_text||''),messageAt:m.message_at?new Date(m.message_at).toISOString():'',
+      readMarked:Boolean(m.read_marked),media:Array.isArray(m.media)?m.media:[]
+    });
+  }
+  const threads=tq.rows.map(t=>({
+    id:String(t.id||''),waId:String(t.wa_id||''),contactName:String(t.contact_name||''),
+    category:String(t.category||'Prüfen'),relevanceScore:Number(t.relevance_score||0),
+    classificationReason:String(t.classification_reason||''),manualClassification:Boolean(t.manual_classification),
+    status:String(t.status||'Offen'),lastText:String(t.last_text||''),
+    firstMessageAt:t.first_message_at?new Date(t.first_message_at).toISOString():'',
+    lastMessageAt:t.last_message_at?new Date(t.last_message_at).toISOString():'',
+    transferredTo:String(t.transferred_to||''),transferredId:String(t.transferred_id||''),
+    transferredAt:t.transferred_at?new Date(t.transferred_at).toISOString():'',
+    messages:byThread.get(String(t.id||''))||[]
+  }));
+  return {
+    configured:whatsappConfiguredV10(),webhookConfigured:Boolean(WHATSAPP_VERIFY_TOKEN),
+    archiveSupported:false,markReadSupported:true,historyImportSupported:false,
+    phoneNumberId:WHATSAPP_PHONE_NUMBER_ID?('…'+WHATSAPP_PHONE_NUMBER_ID.slice(-6)):'',
+    threads
+  };
+}
+async function directWhatsappMediaV10(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const mediaId=String(body.mediaId||'').trim();if(!mediaId)throw new Error('Media-ID fehlt.');
+  const q=await pool.query('SELECT media_id,mime_type,filename,file_size,media_data,download_status,download_error FROM whatsapp_media_v10 WHERE media_id=$1 LIMIT 1',[mediaId]);
+  if(!q.rowCount)throw new Error('Anhang wurde nicht gefunden.');
+  const r=q.rows[0];if(!r.media_data)throw new Error(r.download_error||'Anhang wurde noch nicht heruntergeladen.');
+  return {mediaId:String(r.media_id),mime:String(r.mime_type||'application/octet-stream'),filename:String(r.filename||''),fileSize:Number(r.file_size||0),base64:Buffer.from(r.media_data).toString('base64')};
+}
+async function whatsappGraphV10(path,options){
+  if(!WHATSAPP_ACCESS_TOKEN)throw new Error('WhatsApp Access Token fehlt.');
+  const url='https://graph.facebook.com/'+encodeURIComponent(WHATSAPP_GRAPH_VERSION)+'/'+String(path||'').replace(/^\/+/, '');
+  const res=await fetch(url,Object.assign({},options||{},{
+    headers:Object.assign({'Authorization':'Bearer '+WHATSAPP_ACCESS_TOKEN},options&&options.headers||{})
+  }));
+  const text=await res.text();let data=null;try{data=JSON.parse(text);}catch(_e){}
+  if(!res.ok)throw new Error((data&&data.error&&data.error.message)||('WhatsApp API HTTP '+res.status));
+  return data;
+}
+async function downloadWhatsappMediaV10(media){
+  if(!media||!media.id||!whatsappConfiguredV10())return;
+  try{
+    const meta=await whatsappGraphV10(encodeURIComponent(media.id)+'?phone_number_id='+encodeURIComponent(WHATSAPP_PHONE_NUMBER_ID));
+    if(!meta||!meta.url)throw new Error('Keine Media-URL erhalten.');
+    const res=await fetch(meta.url,{headers:{'Authorization':'Bearer '+WHATSAPP_ACCESS_TOKEN}});
+    if(!res.ok)throw new Error('Media Download HTTP '+res.status);
+    const max=25*1024*1024,ab=await res.arrayBuffer(),buf=Buffer.from(ab);
+    if(buf.length>max)throw new Error('Anhang größer als 25 MB; nicht automatisch gespeichert.');
+    await pool.query(
+      `UPDATE whatsapp_media_v10
+          SET mime_type=COALESCE(NULLIF($2,''),mime_type),sha256=COALESCE(NULLIF($3,''),sha256),
+              file_size=$4,media_data=$5,download_status='ready',download_error=NULL,downloaded_at=now()
+        WHERE media_id=$1`,
+      [media.id,String(meta.mime_type||media.mime||''),String(meta.sha256||media.sha256||''),buf.length,buf]
+    );
+  }catch(e){
+    await pool.query("UPDATE whatsapp_media_v10 SET download_status='error',download_error=$2 WHERE media_id=$1",[String(media.id),String(e&&e.message?e.message:e).slice(0,1000)]).catch(()=>{});
+  }
+}
+async function markWhatsappMessageReadV10(messageId){
+  if(!whatsappConfiguredV10()||!messageId)return false;
+  try{
+    await whatsappGraphV10(encodeURIComponent(WHATSAPP_PHONE_NUMBER_ID)+'/messages',{
+      method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({messaging_product:'whatsapp',status:'read',message_id:String(messageId)})
+    });
+    await pool.query('UPDATE whatsapp_messages_v10 SET read_marked=true WHERE id=$1',[String(messageId)]);
+    return true;
+  }catch(e){console.error('WhatsApp mark read failed',e.message);return false;}
+}
+async function markWhatsappThreadReadV10(threadId){
+  if(!WHATSAPP_MARK_READ_ON_IMPORT)return {enabled:false,marked:0};
+  const q=await pool.query("SELECT id FROM whatsapp_messages_v10 WHERE thread_id=$1 AND direction='inbound' AND read_marked=false ORDER BY message_at",[threadId]);
+  let n=0;for(const r of q.rows)if(await markWhatsappMessageReadV10(r.id))n++;
+  return {enabled:true,marked:n};
+}
+function whatsappSignatureOkV10(raw,signature){
+  if(!WHATSAPP_APP_SECRET)return true;
+  const given=String(signature||'');if(!given.startsWith('sha256='))return false;
+  const expected='sha256='+crypto.createHmac('sha256',WHATSAPP_APP_SECRET).update(raw).digest('hex');
+  if(given.length!==expected.length)return false;
+  return crypto.timingSafeEqual(Buffer.from(given),Buffer.from(expected));
+}
+async function processWhatsappWebhookV10(payload,eventHash){
+  if(!pool)return;
+  try{
+    for(const entry of (payload&&payload.entry)||[]){
+      for(const change of (entry&&entry.changes)||[]){
+        if(String(change&&change.field||'')!=='messages')continue;
+        const value=change&&change.value||{},contacts=Array.isArray(value.contacts)?value.contacts:[],contactByWa=new Map();
+        for(const ct of contacts)contactByWa.set(String(ct.wa_id||''),String(ct.profile&&ct.profile.name||''));
+        for(const msg of (Array.isArray(value.messages)?value.messages:[])){
+          const messageId=String(msg.id||'').trim(),waId=String(msg.from||'').trim();if(!messageId||!waId)continue;
+          const messageAt=msg.timestamp?new Date(Number(msg.timestamp)*1000):new Date(),contactName=contactByWa.get(waId)||'';
+          let tq=await pool.query(
+            `SELECT id FROM whatsapp_threads_v10
+              WHERE wa_id=$1 AND status='Offen' AND last_message_at>now()-interval '72 hours'
+              ORDER BY last_message_at DESC LIMIT 1`,[waId]
+          );
+          let threadId=String(tq.rows[0]?.id||'');
+          if(!threadId){
+            threadId='WA-THREAD-'+crypto.randomUUID();
+            await pool.query(
+              `INSERT INTO whatsapp_threads_v10(id,wa_id,contact_name,category,relevance_score,classification_reason,status,first_message_at,last_message_at)
+               VALUES($1,$2,$3,'Prüfen',0,'Neue WhatsApp-Unterhaltung','Offen',$4,$4)`,
+              [threadId,waId,contactName,messageAt.toISOString()]
+            );
+          }
+          const text=whatsappExtractTextV10(msg),type=String(msg.type||'unknown');
+          await pool.query(
+            `INSERT INTO whatsapp_messages_v10(id,thread_id,wa_id,direction,message_type,message_text,message_at,phone_number_id,raw_payload)
+             VALUES($1,$2,$3,'inbound',$4,$5,$6,$7,$8::jsonb)
+             ON CONFLICT(id) DO NOTHING`,
+            [messageId,threadId,waId,type,text,messageAt.toISOString(),String(value.metadata&&value.metadata.phone_number_id||''),JSON.stringify(msg)]
+          );
+          const media=whatsappMediaObjectV10(msg);
+          if(media){
+            await pool.query(
+              `INSERT INTO whatsapp_media_v10(media_id,message_id,media_type,mime_type,filename,caption,sha256,download_status)
+               VALUES($1,$2,$3,$4,$5,$6,$7,'pending')
+               ON CONFLICT(media_id) DO NOTHING`,
+              [media.id,messageId,media.type,media.mime,media.filename,media.caption,media.sha256]
+            );
+            setImmediate(()=>downloadWhatsappMediaV10(media).catch(e=>console.error('WhatsApp media async error',e.message)));
+          }
+          const cls=await whatsappThreadClassificationV10(threadId);
+          await pool.query(
+            `UPDATE whatsapp_threads_v10
+                SET contact_name=CASE WHEN $2<>'' THEN $2 ELSE contact_name END,
+                    last_text=CASE WHEN $3<>'' THEN $3 ELSE last_text END,last_message_at=$4,updated_at=now(),
+                    category=CASE WHEN manual_classification THEN category ELSE $5 END,
+                    relevance_score=CASE WHEN manual_classification THEN relevance_score ELSE $6 END,
+                    classification_reason=CASE WHEN manual_classification THEN classification_reason ELSE $7 END
+              WHERE id=$1`,
+            [threadId,contactName,text,messageAt.toISOString(),cls.category,cls.score,cls.reason]
+          );
+        }
+      }
+    }
+    if(eventHash)await pool.query('UPDATE whatsapp_webhook_events_v10 SET processed_at=now(),process_error=NULL WHERE event_hash=$1',[eventHash]);
+  }catch(e){
+    if(eventHash)await pool.query('UPDATE whatsapp_webhook_events_v10 SET process_error=$2 WHERE event_hash=$1',[eventHash,String(e&&e.message?e.message:e).slice(0,2000)]).catch(()=>{});
+    throw e;
+  }
+}
+
 async function directEmployeeLocationsV10(body){
   const session=await localSessionForBody(body,true);if(!session)return null;
   const q=await pool.query("SELECT employee_name,latitude,longitude,accuracy_m,captured_at,context FROM employee_locations_v10 WHERE captured_at>now()-interval '14 hours' ORDER BY employee_name");
@@ -9013,6 +9333,8 @@ async function tryDirectPostgresRead(action,body){
   if(action==='getVacationAccounts')return directVacationAccountsRead(body);
   if(action==='getEmployeeWorkOverviewV10')return directEmployeeWorkOverviewV10(body);
   if(action==='getPartnerNetworkV10')return directPartnerNetworkV10(body);
+  if(action==='getWhatsappInboxV10')return directWhatsappInboxV10(body);
+  if(action==='getWhatsappMediaV10')return directWhatsappMediaV10(body);
   if(action==='getEmployeeLocationsV10')return directEmployeeLocationsV10(body);
   if(action==='getAiAssistantV10')return directAiAssistantV10(body);
   if(action==='createRegieReportZip')return directRegieReportDownloadV10(body);
@@ -9079,7 +9401,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','syncHolidays','saveEmployeeAdmin','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','reserveMaintenanceDeviceId','saveMaintenanceCustomer','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','saveAbsence','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue',
-  'savePartnerCategoryV10','savePartnerV10','deactivatePartnerV10','saveEmployeeLocationV10','mergeCustomerInquiriesV10','completeManualOrderV10'
+  'savePartnerCategoryV10','savePartnerV10','deactivatePartnerV10','setWhatsappThreadCategoryV10','transferWhatsappThreadV10','saveEmployeeLocationV10','mergeCustomerInquiriesV10','completeManualOrderV10'
 ]);
 
 function berlinTodayIso(){
@@ -9256,6 +9578,48 @@ async function tryDirectPostgresWrite(action,body){
       if(objectIds.length>1)await enqueueLegacyWriteWithClient(client,'mergeRegieObjects',Object.assign({},body,{action:'mergeRegieObjects',objectIds}));
       for(const oid of objectIds)await enqueueLegacyWriteWithClient(client,'setRegieObjectJobStatus',Object.assign({},body,{action:'setRegieObjectJobStatus',objectId:oid,jobStatus:'Abgeschlossen'}));
       result={ok:true,id,objectIds,merged:objectIds.length>1,mergeId};skipLegacySync=true;
+    }else if(action==='setWhatsappThreadCategoryV10'){
+      const id=String(body.id||'').trim(),category=String(body.category||'').trim();
+      if(!id)throw new Error('WhatsApp-Vorgang fehlt.');
+      if(!['Anfrage','Auftrag','Prüfen','Ignoriert'].includes(category))throw new Error('Ungültige WhatsApp-Kategorie.');
+      const q=await client.query('UPDATE whatsapp_threads_v10 SET category=$2,manual_classification=true,status=CASE WHEN $2=\'Ignoriert\' THEN \'Ignoriert\' ELSE \'Offen\' END,updated_at=now() WHERE id=$1 RETURNING id',[id,category]);
+      if(!q.rowCount)throw new Error('WhatsApp-Vorgang wurde nicht gefunden.');
+      result={ok:true,id,category};skipLegacySync=true;
+    }else if(action==='transferWhatsappThreadV10'){
+      const id=String(body.id||'').trim(),kind=String(body.kind||'').trim();
+      if(!id)throw new Error('WhatsApp-Vorgang fehlt.');
+      if(!['Anfrage','Auftrag'].includes(kind))throw new Error('Bitte Anfrage oder Auftrag wählen.');
+      const tq=await client.query('SELECT * FROM whatsapp_threads_v10 WHERE id=$1 FOR UPDATE',[id]);
+      if(!tq.rowCount)throw new Error('WhatsApp-Vorgang wurde nicht gefunden.');
+      const t=tq.rows[0];
+      const mq=await client.query("SELECT message_text,message_at FROM whatsapp_messages_v10 WHERE thread_id=$1 AND direction='inbound' ORDER BY message_at,created_at",[id]);
+      const description=mq.rows.map(x=>String(x.message_text||'').trim()).filter(Boolean).join('\n\n')||String(t.last_text||'WhatsApp-Nachricht');
+      const customer=String(t.contact_name||'WhatsApp-Kontakt'),phone=String(t.wa_id||''),created=String(t.first_message_at||nowIso);
+      let targetId='';
+      if(kind==='Anfrage'){
+        targetId='WA-INQ-'+crypto.randomUUID();
+        await client.query(
+          `INSERT INTO customer_inquiries_shadow(
+             id,source,customer,email,phone,postal_code,city,subject,description,received_at_text,status,read_flag,
+             created_at_text,changed_at_text,changed_by,internal_note,shadow_updated_at
+           ) VALUES($1,'WhatsApp',$2,'',$3,'','','WhatsApp Anfrage',$4,$5,'Neu',false,$6,$6,$7,$8,now())`,
+          [targetId,customer,phone,description,created,nowIso,by,'Übernommen aus WhatsApp · '+id]
+        );
+      }else{
+        targetId='WA-ORD-'+crypto.randomUUID();
+        await client.query(
+          `INSERT INTO manual_orders_shadow(
+             id,customer,address,phone,email,description,source,inquiry_id,status,created_at_text,changed_at_text,changed_by,internal_note,shadow_updated_at
+           ) VALUES($1,$2,'',$3,'',$4,'WhatsApp','',$5,$6,$7,$8,$9,now())`,
+          [targetId,customer,phone,description,'Laufend',created,nowIso,by,'Übernommen aus WhatsApp · '+id]
+        );
+      }
+      await client.query(
+        `UPDATE whatsapp_threads_v10 SET category=$2,status='Übernommen',manual_classification=true,
+            transferred_to=$2,transferred_id=$3,transferred_at=now(),transferred_by=$4,updated_at=now()
+          WHERE id=$1`,[id,kind,targetId,by]
+      );
+      result={ok:true,id,kind,targetId,_markWhatsappReadThread:id};skipLegacySync=true;
     }else if(action==='savePartnerCategoryV10'){
       const name=String(body.name||'').trim();if(!name)throw new Error('Kategoriebezeichnung fehlt.');if(name.length>80)throw new Error('Kategoriebezeichnung ist zu lang.');
       const existing=await client.query('SELECT id FROM partner_categories_v10 WHERE lower(name)=lower($1) AND active=true LIMIT 1',[name]);
@@ -11614,7 +11978,7 @@ async function proxyLegacy(req, res, body) {
       return json(res,400,{ok:false,error:e.message},req);
     }
   }
-  if (['ping','systemHealthCheck','getDashboardSummary51','getCustomerInquiries','getInquiryReminders','getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getRegieAttachments','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts','getEmployeeWorkOverviewV10','getPartnerNetworkV10','getEmployeeLocationsV10','getAiAssistantV10','createRegieReportZip'].includes(action)) {
+  if (['ping','systemHealthCheck','getDashboardSummary51','getCustomerInquiries','getInquiryReminders','getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getRegieAttachments','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts','getEmployeeWorkOverviewV10','getPartnerNetworkV10','getWhatsappInboxV10','getWhatsappMediaV10','getEmployeeLocationsV10','getAiAssistantV10','createRegieReportZip'].includes(action)) {
     try {
       const direct=await tryDirectPostgresRead(action,body);
       if (direct!==null) {
@@ -12388,6 +12752,32 @@ const server = http.createServer(async (req, res) => {
       cors(req,res);
       res.writeHead(204);
       return res.end();
+    }
+
+    if (req.method === 'GET' && url.pathname === '/v1/whatsapp/webhook') {
+      const mode=String(url.searchParams.get('hub.mode')||''),token=String(url.searchParams.get('hub.verify_token')||''),challenge=String(url.searchParams.get('hub.challenge')||'');
+      if(mode==='subscribe'&&WHATSAPP_VERIFY_TOKEN&&token===WHATSAPP_VERIFY_TOKEN){
+        res.writeHead(200,{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'});
+        return res.end(challenge);
+      }
+      return json(res,403,{ok:false,error:'WhatsApp webhook verification failed'},req);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/whatsapp/webhook') {
+      const raw=await readBinary(req,2*1024*1024);
+      if(!whatsappSignatureOkV10(raw,req.headers['x-hub-signature-256'])){
+        return json(res,401,{ok:false,error:'Invalid WhatsApp webhook signature'},req);
+      }
+      let payload={};try{payload=raw.length?JSON.parse(raw.toString('utf8')):{};}catch(_e){return json(res,400,{ok:false,error:'Invalid webhook JSON'},req);}
+      const eventHash=crypto.createHash('sha256').update(raw).digest('hex');
+      if(pool){
+        await pool.query(
+          'INSERT INTO whatsapp_webhook_events_v10(event_hash,payload) VALUES($1,$2::jsonb) ON CONFLICT(event_hash) DO NOTHING',
+          [eventHash,JSON.stringify(payload)]
+        );
+        setImmediate(()=>processWhatsappWebhookV10(payload,eventHash).catch(e=>console.error('WhatsApp webhook processing failed',e.message)));
+      }
+      return json(res,200,{ok:true},req);
     }
 
     if (req.method === 'POST' && url.pathname === '/') {
