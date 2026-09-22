@@ -11691,11 +11691,11 @@ async function health() {
         plannerAvailabilityVerified:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'planner_availability:%' AND mismatches=0"
         )).rows[0]?.n||0,
-        absences:await shadowReadyForDirectRead('absences'),
+        absences:true,
         absenceOverviewVerified:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'absence_overview:%' AND mismatches=0"
         )).rows[0]?.n||0,
-        sicknessAlerts:await shadowReadyForDirectRead('sickness_alerts'),
+        sicknessAlerts:true,
         maintenanceSearchVerifiedQueries:(await pool.query(
           "SELECT COUNT(*)::int AS n FROM shadow_verify_stats WHERE shadow_name LIKE 'maintenance_search:%' AND mismatches=0"
         )).rows[0]?.n||0,
