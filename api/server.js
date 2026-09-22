@@ -8817,6 +8817,70 @@ async function directAiAssistantV10(body){
   return {configured:true,text:out.trim()||'Keine Antwort erhalten.'};
 }
 
+
+function pdfEscapeV10(value){
+  return String(value==null?'':value)
+    .replace(/[^\x20-\x7EäöüÄÖÜß]/g,' ')
+    .replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)')
+    .replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue')
+    .replace(/Ä/g,'Ae').replace(/Ö/g,'Oe').replace(/Ü/g,'Ue').replace(/ß/g,'ss');
+}
+function simplePdfBufferV10(lines){
+  const pageLines=44,pages=[];for(let i=0;i<lines.length;i+=pageLines)pages.push(lines.slice(i,i+pageLines));
+  if(!pages.length)pages.push(['Keine Daten']);
+  const objects=[];objects[1]='<< /Type /Catalog /Pages 2 0 R >>';
+  const pageIds=[],contentIds=[];let next=4;
+  for(const _ of pages){pageIds.push(next++);contentIds.push(next++);}
+  const fontId=next++;objects[2]='<< /Type /Pages /Kids ['+pageIds.map(id=>id+' 0 R').join(' ')+'] /Count '+pages.length+' >>';
+  objects[fontId]='<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
+  pages.forEach((rows,idx)=>{
+    const content=['BT /F1 9 Tf 36 806 Td'];
+    rows.forEach((line,i)=>{if(i)content.push('0 -17 Td');content.push('('+pdfEscapeV10(line)+') Tj');});
+    content.push('ET');const stream=content.join('\n');
+    objects[contentIds[idx]]='<< /Length '+Buffer.byteLength(stream,'ascii')+' >>\nstream\n'+stream+'\nendstream';
+    objects[pageIds[idx]]='<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 '+fontId+' 0 R >> >> /Contents '+contentIds[idx]+' 0 R >>';
+  });
+  let pdf='%PDF-1.4\n',offsets=[0];
+  for(let i=1;i<objects.length;i++){if(!objects[i])continue;offsets[i]=Buffer.byteLength(pdf,'ascii');pdf+=i+' 0 obj\n'+objects[i]+'\nendobj\n';}
+  const xref=Buffer.byteLength(pdf,'ascii');pdf+='xref\n0 '+objects.length+'\n0000000000 65535 f \n';
+  for(let i=1;i<objects.length;i++)pdf+=String(offsets[i]||0).padStart(10,'0')+' 00000 n \n';
+  pdf+='trailer\n<< /Size '+objects.length+' /Root 1 0 R >>\nstartxref\n'+xref+'\n%%EOF';
+  return Buffer.from(pdf,'ascii');
+}
+async function directRegieReportDownloadV10(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const objectIds=[...new Set((Array.isArray(body.objectIds)?body.objectIds:[]).map(x=>String(x||'').trim()).filter(Boolean))];
+  const entryIds=[...new Set((Array.isArray(body.entryIds)?body.entryIds:[]).map(x=>String(x||'').trim()).filter(Boolean))];
+  if(!objectIds.length)throw new Error('Objekt-ID fehlt. Bitte Regieberichte neu laden.');
+  const params=[objectIds];let sql="SELECT id,employee_name,entry_date,customer,start_time,end_time,hours,activity,material_used,material,customer_signature_url,photo_count,photo_urls,job_status,is_supplement FROM time_entries_shadow WHERE object_id=ANY($1::text[])";
+  if(entryIds.length){params.push(entryIds);sql+=" AND id=ANY($2::text[])";}
+  sql+=" ORDER BY entry_date,start_time,id";
+  const q=await pool.query(sql,params);if(!q.rowCount)throw new Error('Für dieses Objekt wurden keine Regieberichte gefunden.');
+  if(entryIds.length&&q.rowCount!==entryIds.length)throw new Error('Exportauswahl nicht mehr aktuell. Bitte Berichte neu laden.');
+  const customer=String(body.customer||q.rows[0].customer||'Objekt').trim(),lines=['Del Gesso Gebaeudetechnik','Regiebericht','','Kunde / Baustelle: '+customer,'Anzahl Berichte: '+q.rowCount,''];
+  let total=0;
+  q.rows.forEach((r,i)=>{
+    total+=Number(r.hours||0);
+    lines.push('Bericht '+(i+1));
+    lines.push('Datum: '+germanDateLabel(berlinDateOnly(r.entry_date)));
+    lines.push('Mitarbeiter: '+String(r.employee_name||''));
+    lines.push('Zeit: '+String(r.start_time||'')+' bis '+String(r.end_time||''));
+    lines.push('Stunden: '+pgRound2(r.hours).toFixed(2).replace('.',','));
+    lines.push('Taetigkeit: '+String(r.activity||''));
+    lines.push('Material: '+(r.material_used?String(r.material||'Ja'):'Nein'));
+    lines.push('Auftragsstatus: '+String(r.job_status||'Abgeschlossen'));
+    lines.push('Kundenunterschrift: '+(r.customer_signature_url?'vorhanden':'nicht vorhanden'));
+    lines.push('Bilder im Bericht: '+Number(r.photo_count||0));
+    if(r.is_supplement)lines.push('Kennzeichnung: NACHTRAG');
+    const urls=String(r.photo_urls||'').split(' | ').filter(Boolean);if(urls.length)lines.push('Bild-Links: '+urls.join(' ; '));
+    if(r.customer_signature_url)lines.push('Unterschrift-Link: '+String(r.customer_signature_url));
+    lines.push('');
+  });
+  lines.push('Gesamtstunden: '+pgRound2(total).toFixed(2).replace('.',','),'','Digitaler Regiebericht - Del Gesso Gebaeudetechnik');
+  const pdf=simplePdfBufferV10(lines),safe=customer.replace(/[^A-Za-z0-9_-]+/g,'_').replace(/^_+|_+$/g,'').slice(0,80)||'Objekt';
+  return {fileName:'Regiebericht_'+safe+'.pdf',mime:'application/pdf',reportCount:q.rowCount,base64:pdf.toString('base64'),railway:true};
+}
+
 async function tryDirectPostgresRead(action,body){
   if(action==='ping')return {message:'DG Backend erreichbar',version:'5.2.5',railway:true};
   if(action==='systemHealthCheck')return directSystemHealthCheck(body);
@@ -8861,6 +8925,7 @@ async function tryDirectPostgresRead(action,body){
   if(action==='getPartnerNetworkV10')return directPartnerNetworkV10(body);
   if(action==='getEmployeeLocationsV10')return directEmployeeLocationsV10(body);
   if(action==='getAiAssistantV10')return directAiAssistantV10(body);
+  if(action==='createRegieReportZip')return directRegieReportDownloadV10(body);
   return null;
 }
 
@@ -11385,7 +11450,7 @@ async function proxyLegacy(req, res, body) {
       return json(res,400,{ok:false,error:e.message},req);
     }
   }
-  if (['ping','systemHealthCheck','getDashboardSummary51','getCustomerInquiries','getInquiryReminders','getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getRegieAttachments','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts','getEmployeeWorkOverviewV10','getPartnerNetworkV10','getEmployeeLocationsV10','getAiAssistantV10'].includes(action)) {
+  if (['ping','systemHealthCheck','getDashboardSummary51','getCustomerInquiries','getInquiryReminders','getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getRegieAttachments','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts','getEmployeeWorkOverviewV10','getPartnerNetworkV10','getEmployeeLocationsV10','getAiAssistantV10','createRegieReportZip'].includes(action)) {
     try {
       const direct=await tryDirectPostgresRead(action,body);
       if (direct!==null) {
