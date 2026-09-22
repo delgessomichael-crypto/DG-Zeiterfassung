@@ -885,6 +885,7 @@ async function initDb() {
   await bootstrapDashboardNativeV17();
   await bootstrapBossMonthComparisonV18();
   await bootstrapPayrollAuditComparisonV19();
+  await bootstrapFutureMonthCompareV20();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -8516,6 +8517,40 @@ async function bootstrapPayrollAuditComparisonV19(){
   const q=await pool.query('SELECT payload FROM exact_views_shadow WHERE view_key=$1 LIMIT 1',[payrollAuditViewKey(body)]);
   if(!q.rowCount){console.log('PAYROLL_AUDIT_COMPARE_V19 no_google_snapshot year='+body.year+' month='+body.month);return;}
   await verifyPayrollAuditNative(q.rows[0].payload,body);
+}
+
+async function bootstrapFutureMonthCompareV20(){
+  if(!pool)return;
+  const now=berlinNowParts(),current=now.year*100+now.month;
+  const q=await pool.query(
+    `SELECT request_payload,response_payload
+       FROM legacy_action_log
+      WHERE action='getMonthData' AND http_status=200 AND response_ok=true
+        AND response_payload IS NOT NULL
+      ORDER BY created_at DESC LIMIT 20`
+  );
+  for(const row of q.rows){
+    const body=row.request_payload||{},year=Number(body.year)||0,month=Number(body.month)||0;
+    if(!year||month<1||month>12||year*100+month<=current)continue;
+    const google=row.response_payload&&row.response_payload.data!==undefined?row.response_payload.data:row.response_payload;
+    const pg=await postgresMonthData(body);
+    if(!google||!pg)continue;
+    const keys=[...new Set([...Object.keys(google||{}),...Object.keys(pg||{})])].sort();
+    const changed=keys.filter(k=>stableJsonString(google&&google[k])!==stableJsonString(pg&&pg[k]));
+    const nested={};
+    for(const k of ['monthSummary','yearSummary']){
+      const a=google&&google[k]&&typeof google[k]==='object'?google[k]:{};
+      const b=pg&&pg[k]&&typeof pg[k]==='object'?pg[k]:{};
+      nested[k]=[...new Set([...Object.keys(a),...Object.keys(b)])].sort()
+        .filter(x=>stableJsonString(a[x])!==stableJsonString(b[x]));
+    }
+    console.log('FUTURE_MONTH_COMPARE_V20 year='+year+' month='+month+
+      ' changed='+JSON.stringify(changed)+' nested='+JSON.stringify(nested)+
+      ' googleRows='+(Array.isArray(google.rows)?google.rows.length:0)+
+      ' postgresRows='+(Array.isArray(pg.rows)?pg.rows.length:0));
+    return;
+  }
+  console.log('FUTURE_MONTH_COMPARE_V20 no_future_google_snapshot');
 }
 
 function payrollAuditViewKey(body){
