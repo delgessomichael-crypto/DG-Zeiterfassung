@@ -119,3 +119,33 @@ Intentional Google dependencies remain:
 - Gmail-driven inquiry acquisition
 - live Google Calendar operations and calendar-sensitive payroll checks
 - Google Drive/Gmail side-effect file/export actions
+
+
+## Near-final status — 2026-09-22
+
+Current production API commit: `f6ae3ef`.
+
+Completed performance/migration hardening:
+- frontend `ping` is handled locally by Railway instead of proxying to Google
+- employee admin, manual orders, own reminders, offer reminders and planner workers are PostgreSQL-authoritative reads
+- absences and sickness alerts are direct PostgreSQL reads and health output now reflects that correctly
+- maintenance overview, maintenance contracts and internal object notes are PostgreSQL-authoritative reads
+- customer inquiries and inquiry reminders use guarded PostgreSQL direct reads with Gmail/Google retained as acquisition source
+- manual orders reconciled to 12/12 with 0 mismatches
+- migration remains 884/884 imported rows with 0 migration mismatches
+- verification mismatch inventory was cleaned to 0 current mismatches
+- future-month month-data verification is intentionally excluded from readiness until that month is current
+
+Intentional Google dependencies retained:
+- employee login/PIN authority
+- Gmail acquisition of new customer inquiries
+- live Google Calendar / external calendar event operations
+- Drive/file upload and export side effects
+- future-month employee month view when Google contains future records not yet represented in PostgreSQL
+- first-use comparison for boss-month and payroll-audit native views until a current Google snapshot exists
+
+Operational state at this checkpoint:
+- legacy outbox pending=0, failed=0
+- Railway API deployment successful
+- database readiness OK
+- core current-period PostgreSQL reads verified and active
