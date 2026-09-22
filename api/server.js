@@ -7275,7 +7275,25 @@ async function bootstrapMonthDataFromLegacyV20(){
       ready++;
     }else{
       mismatch++;
-      console.log('MONTH_DATA_LEGACY_COMPARE mismatch key='+key+' source='+String(row.created_at||''));
+      const diffPaths=[];
+      const walk=(a,b,path)=>{
+        if(diffPaths.length>=60)return;
+        if(Array.isArray(a)||Array.isArray(b)){
+          const aa=Array.isArray(a)?a:[],bb=Array.isArray(b)?b:[];
+          if(aa.length!==bb.length)diffPaths.push(path+'.length');
+          const n=Math.min(aa.length,bb.length,20);
+          for(let i=0;i<n;i++)walk(aa[i],bb[i],path+'['+i+']');
+          return;
+        }
+        if(a&&b&&typeof a==='object'&&typeof b==='object'){
+          const keys=[...new Set([...Object.keys(a),...Object.keys(b)])].sort();
+          for(const k of keys)walk(a[k],b[k],path?path+'.'+k:k);
+          return;
+        }
+        if(stableJsonString(a)!==stableJsonString(b))diffPaths.push(path||'<root>');
+      };
+      walk(google,pg,'');
+      console.log('MONTH_DATA_LEGACY_COMPARE mismatch key='+key+' fields='+JSON.stringify(diffPaths));
     }
   }
   console.log('MONTH_DATA_LEGACY_COMPARE checked='+checked+' ready='+ready+' mismatch='+mismatch+' skipped='+skipped);
