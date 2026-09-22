@@ -107,6 +107,8 @@ const CATALOG=[
   {key:'sickness',label:'Krank-Fristen',parent:'d3Admin',child:'dg48AbsenceGroup',cls:'sickness734',counter:'d3Count-sickness734',loader:'loadChefAdministration',after:'sickness'},
   {key:'employeeAdmin',label:'Mitarbeiterverwaltung',parent:'d3Admin',child:'d3EmployeeAdmin',cls:'employee-admin',counter:null,loader:'loadChefAdministration'},
   {key:'employeeStats',label:'Mitarbeiter Auswertungen',panel:'dg80EmployeeStats',cls:'employee-stats',counter:null,loader:'dg80EmployeeStatsLoad'},
+  {key:'websiteInquiries',label:'Webseiten Anfragen',panel:'dg80WebsiteInquiries',cls:'website-inquiries',counter:null,loader:'dg80WebsiteInquiriesLoad'},
+  {key:'whatsappInquiries',label:'WhatsApp',panel:'dg80WhatsappInquiries',cls:'whatsapp-inquiries',counter:null,loader:'dg80WhatsappInquiriesLoad'},
   {key:'reminders',label:'Reminder',panel:'d3Reminder',cls:'reminders',counter:'d3Count-reminders',loader:'loadReminders'},
   {key:'inquiries',label:'Offene Anfragen',parent:'d3InquiriesGroup',child:'d3Inquiries',fallback:'d3Inquiries',cls:'inquiries',counter:'d3Count-inquiries',loader:'d3Inquiries'},
   {key:'inquiryArchive',label:'Anfragenarchiv',parent:'d3InquiriesGroup',child:'d3InquiryArchive',cls:'inquiry-archive',counter:null,loader:'d3InquiryArchiveList'},
@@ -154,7 +156,7 @@ function addCss(){
     +'#bossView .dg80-shell-active>.dg48-body>.d3-content{min-height:0!important}'
     +'#d3PayrollStandalone>.dg48-body{display:block!important}'
     +'#d3PayrollStandalone #dg520PayrollClose{margin:0!important}'
-    +'#employeeTimeBank small{display:block;margin-top:5px;font-size:13px;font-weight:700;line-height:1.35}'
+    +'#employeeMonthlyHours small{display:block;margin-top:5px;font-size:13px;font-weight:700;line-height:1.35}'
     +'@media(max-width:759px){#bossView .dg80-office-dashboard{grid-template-columns:repeat(2,minmax(0,1fr))!important}.dg80-office-toolbar h2{font-size:21px}.dg80-office-actions{width:100%}#dg80SaveChanges{flex:1;min-width:0}}';
   document.head.appendChild(s);
 }
@@ -412,7 +414,7 @@ function due80(y,m){let d=new Date(Number(y),Number(m)-1,20,12),h=holidays80(Num
 function nextYm80(y,m){m++;if(m>12){m=1;y++;}return {year:y,month:m};}
 function payrollKey80(){const t=new Date(),today=new Date(t.getFullYear(),t.getMonth(),t.getDate(),12);let y=t.getFullYear(),m=t.getMonth()+1;if(today>due80(y,m)){const n=nextYm80(y,m);y=n.year;m=n.month;}return {year:y,month:m};}
 async function refreshPayrollCounter80(force){
-  const box=q('employeeTimeBank'),employee=localStorage.getItem('dg_employee')||'',pin=localStorage.getItem('dg_device_session')||sessionStorage.getItem('dg_employee_pin')||'';if(!box||!employee||!pin||!navigator.onLine)return;
+  const box=q('employeeMonthlyHours'),employee=localStorage.getItem('dg_employee')||'',pin=localStorage.getItem('dg_device_session')||sessionStorage.getItem('dg_employee_pin')||'';if(!box||!employee||!pin||!navigator.onLine)return;
   if(S.counterPromise&&!force)return S.counterPromise;
   const k=payrollKey80();
   S.counterPromise=(async()=>{
@@ -493,6 +495,8 @@ const GROUPS={
     items:[
       {key:'inquiries',label:'Offene Kundenanfragen',count:'regularInquiries'},
       {key:'aqon',label:'AQON PURE Anfragen',count:'aqonInquiries'},
+      {key:'websiteInquiries',label:'Webseiten Anfragen',count:'websiteInquiries'},
+      {key:'whatsappInquiries',label:'WhatsApp',count:'whatsappInquiries'},
       {key:'inquiryArchive',label:'Anfragenarchiv',count:'inquiryArchive'}
     ]
   },
@@ -524,6 +528,8 @@ const LEAF={
   inquiries:{title:'Offene Kundenanfragen'},
   aqon:{title:'AQON PURE Anfragen'},
   inquiryArchive:{title:'Anfragenarchiv'},
+  websiteInquiries:{title:'Webseiten Anfragen'},
+  whatsappInquiries:{title:'WhatsApp'},
   employeeAdmin:{title:'Mitarbeiterverwaltung'},
   employeeStats:{title:'Mitarbeiter Auswertungen'},
   absence:{title:'Urlaub / Abwesenheiten / Feiertage'},
@@ -539,11 +545,31 @@ function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;',
 function empKey(){return String(localStorage.getItem('dg_employee')||'geraet').replace(/[^A-Za-z0-9_-]+/g,'_');}
 function layoutKey(){return 'dg80_final_layout_'+empKey();}
 function subKey(g){return 'dg80_final_sub_'+g+'_'+empKey();}
+function topKey(){return 'dg80_final_top_'+empKey();}
 function extraKey(){return 'dg80_final_extra_v2_'+empKey();}
 function readJson(k,f){try{const v=JSON.parse(localStorage.getItem(k)||'null');return v===null?f:v;}catch(_e){return f;}}
 function writeJson(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(_e){}}
 function visibleBoss(){const r=root();return !!(r&&!r.classList.contains('hidden'));}
 function shopCount(){try{const a=JSON.parse(localStorage.getItem(SHOP_KEY)||'[]');return Array.isArray(a)?a.length:0;}catch(_e){return 0;}}
+
+function ensureExternalInquiryPanels(){
+  const r=root();if(!r)return;
+  if(!q('dg80WebsiteInquiries')){
+    const p=document.createElement('div');p.id='dg80WebsiteInquiries';p.className='card d3-main';
+    p.innerHTML='<div class="status info"><strong>Webseiten Anfragen</strong><br>Der Bereich ist vorbereitet. Die direkte Übergabe der Website-Anfragen per API richten wir später ein.</div><div id="dg80WebsiteInquiryList" class="muted">Noch keine direkte Webseiten-Anbindung aktiv.</div>';
+    r.appendChild(p);
+  }
+  if(!q('dg80WhatsappInquiries')){
+    const p=document.createElement('div');p.id='dg80WhatsappInquiries';p.className='card d3-main';
+    p.innerHTML='<div class="status info"><strong>WhatsApp</strong><br>Der Bereich ist für die spätere WhatsApp-Business-Anbindung vorbereitet. Private Chats werden nicht übernommen.</div>'
+      +'<div class="button-row" style="margin:12px 0"><button type="button" class="btn primary" data-wa-filter="Anfragen">Anfragen</button><button type="button" class="btn secondary" data-wa-filter="Aufträge">Aufträge</button></div>'
+      +'<div id="dg80WhatsappInquiryList" class="muted">Noch keine WhatsApp-Business-Verbindung aktiv.</div>';
+    r.appendChild(p);
+    p.querySelectorAll('[data-wa-filter]').forEach(b=>b.addEventListener('click',()=>{p.querySelectorAll('[data-wa-filter]').forEach(x=>{x.classList.toggle('primary',x===b);x.classList.toggle('secondary',x!==b);});const out=q('dg80WhatsappInquiryList');if(out)out.textContent='Filter „'+b.dataset.waFilter+'“ ist vorbereitet. Daten erscheinen hier nach Einrichtung der WhatsApp-Business-Schnittstelle.';}));
+  }
+}
+window.dg80WebsiteInquiriesLoad=async function(){ensureExternalInquiryPanels();const out=q('dg80WebsiteInquiryList');if(out)out.textContent='Noch keine direkte Webseiten-Anbindung aktiv.';};
+window.dg80WhatsappInquiriesLoad=async function(){ensureExternalInquiryPanels();const out=q('dg80WhatsappInquiryList');if(out&&!out.textContent.trim())out.textContent='Noch keine WhatsApp-Business-Verbindung aktiv.';};
 
 function empStatsFmt(v){return Number(v||0).toFixed(2).replace('.',',');}
 function empStatsDate(v){const p=String(v||'').split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:String(v||'');}
@@ -702,16 +728,19 @@ function saveLayout(){
   d.querySelectorAll('.dg80-final-section').forEach(sec=>out[sec.dataset.section]=[...sec.querySelectorAll('.dg80-final-tile[data-dg80-final]')].map(x=>x.dataset.dg80Final));
   writeJson(layoutKey(),out);
 }
+function topOrder(){
+  const saved=readJson(topKey(),[]),def=['save','calendar'],out=[];
+  (Array.isArray(saved)?saved:[]).forEach(k=>{if(def.includes(k)&&!out.includes(k))out.push(k);});def.forEach(k=>{if(!out.includes(k))out.push(k);});return out;
+}
+function saveTopOrder(){const host=dash()?.querySelector('.dg80-final-top');if(host)writeJson(topKey(),[...host.querySelectorAll('[data-dg80-top]')].map(x=>x.dataset.dg80Top));}
 
 function buildDashboard(force){
   const d=dash();if(!d)return false;
   if(d.dataset.dg80Final==='1'&&!force)return true;
   const counts=currentCounts(),lay=layout();
   d.className='d3-dashboard dg80-office-dashboard dg80-final-dashboard';
-  d.innerHTML='<div class="dg80-final-top">'
-    +'<button type="button" id="dg80FinalSave" class="dg80-final-top-btn"><span>Änderungen Speichern</span><strong id="dg80FinalSaveCount">0</strong></button>'
-    +'<button type="button" id="dg80FinalCalendar" class="dg80-final-top-btn"><span>Mitarbeiter Kalender</span><strong id="dg80c-calendar">'+esc(counts.calendar!==undefined?counts.calendar:'…')+'</strong></button>'
-    +'</div>'
+  const topHtml={save:'<button type="button" draggable="true" data-dg80-top="save" id="dg80FinalSave" class="dg80-final-top-btn"><span>Änderungen Speichern</span><strong id="dg80FinalSaveCount">0</strong></button>',calendar:'<button type="button" draggable="true" data-dg80-top="calendar" id="dg80FinalCalendar" class="dg80-final-top-btn"><span>Mitarbeiter Kalender</span><strong id="dg80c-calendar">'+esc(counts.calendar!==undefined?counts.calendar:'…')+'</strong></button>'};
+  d.innerHTML='<div class="dg80-final-top">'+topOrder().map(k=>topHtml[k]).join('')+'</div>'
     +SECTIONS.map(s=>'<section class="dg80-final-section" data-section="'+esc(s.key)+'"><div class="dg80-final-section-title">'+esc(s.label)+'</div><div class="dg80-final-grid">'+(lay[s.key]||[]).map(k=>tileHtml(k,counts)).join('')+'</div></section>').join('');
   d.dataset.dg80Final='1';
   wireDashboard(d);paintDirty();applyExtra(readJson(extraKey(),null)?.data||{});syncShopping();return true;
@@ -725,10 +754,10 @@ function wireDashboard(d){
     e.preventDefault();const key=t.dataset.dg80Final,c=TILES[key];if(!c)return;
     c.group?openGroup(c.group):openLeaf(c.leaf);
   });
-  d.addEventListener('dragstart',e=>{const t=e.target.closest('.dg80-final-tile[data-dg80-final]');if(!t)return;S.drag=t.dataset.dg80Final;t.classList.add('dragging');try{e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',S.drag);}catch(_e){}});
-  d.addEventListener('dragover',e=>{if(!S.drag)return;const grid=e.target.closest('.dg80-final-grid');if(!grid)return;e.preventDefault();const src=d.querySelector('[data-dg80-final="'+CSS.escape(S.drag)+'"]');if(!src)return;const target=e.target.closest('.dg80-final-tile[data-dg80-final]');if(target&&target!==src){const r=target.getBoundingClientRect();grid.insertBefore(src,e.clientY<r.top+r.height/2?target:target.nextSibling);}else if(!target)grid.appendChild(src);});
-  d.addEventListener('drop',e=>{if(!S.drag)return;e.preventDefault();saveLayout();});
-  d.addEventListener('dragend',()=>{d.querySelectorAll('.dragging').forEach(x=>x.classList.remove('dragging'));S.drag='';saveLayout();});
+  d.addEventListener('dragstart',e=>{const top=e.target.closest('[data-dg80-top]');if(top){S.topDrag=top.dataset.dg80Top;top.classList.add('dragging');try{e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain','top:'+S.topDrag);}catch(_e){}return;}const t=e.target.closest('.dg80-final-tile[data-dg80-final]');if(!t)return;S.drag=t.dataset.dg80Final;t.classList.add('dragging');try{e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',S.drag);}catch(_e){}});
+  d.addEventListener('dragover',e=>{if(S.topDrag){const host=e.target.closest('.dg80-final-top');if(!host)return;e.preventDefault();const src=host.querySelector('[data-dg80-top="'+CSS.escape(S.topDrag)+'"]'),target=e.target.closest('[data-dg80-top]');if(!src)return;if(target&&target!==src){const r=target.getBoundingClientRect();host.insertBefore(src,e.clientX<r.left+r.width/2?target:target.nextSibling);}else if(!target)host.appendChild(src);return;}if(!S.drag)return;const grid=e.target.closest('.dg80-final-grid');if(!grid)return;e.preventDefault();const src=d.querySelector('[data-dg80-final="'+CSS.escape(S.drag)+'"]');if(!src)return;const target=e.target.closest('.dg80-final-tile[data-dg80-final]');if(target&&target!==src){const r=target.getBoundingClientRect();grid.insertBefore(src,e.clientY<r.top+r.height/2?target:target.nextSibling);}else if(!target)grid.appendChild(src);});
+  d.addEventListener('drop',e=>{if(S.topDrag){e.preventDefault();saveTopOrder();return;}if(!S.drag)return;e.preventDefault();saveLayout();});
+  d.addEventListener('dragend',()=>{d.querySelectorAll('.dragging').forEach(x=>x.classList.remove('dragging'));if(S.topDrag){saveTopOrder();S.topDrag='';}S.drag='';saveLayout();});
 }
 
 function markActive(main){
@@ -736,13 +765,13 @@ function markActive(main){
   if(main)dash()?.querySelector('[data-dg80-final="'+CSS.escape(main)+'"]')?.classList.add('active');
 }
 function mainForLeaf(key){
-  if(['inquiries','aqon','inquiryArchive'].includes(key))return 'customers';
+  if(['inquiries','aqon','websiteInquiries','whatsappInquiries','inquiryArchive'].includes(key))return 'customers';
   if(['employeeAdmin','employeeStats','absence','sickness'].includes(key))return 'admin';
   return key;
 }
 function openLeaf(key,force){
   q('dg80GroupChooser')?.classList.remove('dg80-shell-active');S.group='';
-  if(key==='employeeStats')ensureEmployeeStatsPanel();
+  if(key==='employeeStats')ensureEmployeeStatsPanel();if(key==='websiteInquiries'||key==='whatsappInquiries')ensureExternalInquiryPanels();
   const open=fn('dg80OfficeOpen');if(!open)return false;
   const same=S.active===key;
   open(key,{force:!!force});
@@ -766,7 +795,7 @@ function openGroup(g){
   closeMenus();
   let host=q('dg80GroupChooser');if(!host){host=document.createElement('div');host.id='dg80GroupChooser';host.className='card';r.appendChild(host);}
   const items=orderedGroupItems(g);
-  host.innerHTML='<div class="dg80-group-head"><h2>'+esc(def.title)+'</h2><button type="button" class="btn secondary dg80-group-close">×</button></div><div class="dg80-sub-help">Unterpunkte können per Drag & Drop frei angeordnet werden.</div><div class="dg80-sub-list">'+items.map(x=>'<button type="button" draggable="true" class="dg80-sub-button" data-dg80-sub="'+esc(x.key)+'"><span>'+esc(x.label)+'</span><strong data-sub-count="'+esc(x.count||'')+'">'+(x.count?'…':'›')+'</strong></button>').join('')+'</div>';
+  host.innerHTML='<div class="dg80-group-head"><h2>'+esc(def.title)+'</h2><button type="button" class="btn secondary dg80-group-close">×</button></div><div class="dg80-sub-help">Unterpunkte können per Drag & Drop frei angeordnet werden. Die Reihenfolge wird persönlich für den angemeldeten Mitarbeiter gespeichert.</div><div class="dg80-sub-list">'+items.map(x=>'<button type="button" draggable="true" class="dg80-sub-button" data-dg80-sub="'+esc(x.key)+'"><span>'+esc(x.label)+'</span><strong data-sub-count="'+esc(x.count||'')+'">'+(x.count?'…':'›')+'</strong></button>').join('')+'</div>';
   host.classList.add('dg80-shell-active');S.group=g;markActive(g);
   host.querySelector('.dg80-group-close').addEventListener('click',closeMenus);
   const list=host.querySelector('.dg80-sub-list');let drag='';
@@ -879,6 +908,8 @@ async function refreshInquirySubcounts(){
     const open=Array.isArray(o)?o:[],aq=open.filter(x=>String(x.source||'').toUpperCase().includes('AQON')).length,reg=open.length-aq;
     document.querySelectorAll('[data-sub-count="regularInquiries"]').forEach(e=>e.textContent=String(reg));
     document.querySelectorAll('[data-sub-count="aqonInquiries"]').forEach(e=>e.textContent=String(aq));
+    document.querySelectorAll('[data-sub-count="websiteInquiries"]').forEach(e=>e.textContent='0');
+    document.querySelectorAll('[data-sub-count="whatsappInquiries"]').forEach(e=>e.textContent='0');
     document.querySelectorAll('[data-sub-count="inquiryArchive"]').forEach(e=>e.textContent=String(Array.isArray(a)?a.length:0));
   }catch(_e){}
 }
@@ -2558,6 +2589,12 @@ async function runLoaderByTitle(title){
   }
   if(t==='anfragenarchiv'){
     if(typeof window.d3InquiryArchiveList==='function'){await window.d3InquiryArchiveList();return;}
+  }
+  if(t==='webseiten anfragen'){
+    if(typeof window.dg80WebsiteInquiriesLoad==='function'){await window.dg80WebsiteInquiriesLoad();return;}
+  }
+  if(t==='whatsapp'){
+    if(typeof window.dg80WhatsappInquiriesLoad==='function'){await window.dg80WhatsappInquiriesLoad();return;}
   }
 
   // Kalender / Planung

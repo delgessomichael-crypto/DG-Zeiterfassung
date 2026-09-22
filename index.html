@@ -14,7 +14,7 @@
 <link rel="preconnect" href="https://dg-app-10-api-production.up.railway.app"/>
 <link rel="dns-prefetch" href="//dg-app-10-api-production.up.railway.app"/>
 <link rel="preload" href="./app-5.0.css?v=20260918-800-prod1" as="style"/>
-<link rel="preload" href="./core-9.0-final.js?v=20260922-1000-absence2" as="script" fetchpriority="high"/>
+<link rel="preload" href="./core-9.0-final.js?v=20260922-1000-officeprefs1" as="script" fetchpriority="high"/>
 <link rel="manifest" href="manifest.json"/>
 <link href="dg_icon_192.png" rel="icon"/>
 <link href="dg_icon_192.png" rel="apple-touch-icon"/>
@@ -88,7 +88,7 @@
 <div class="button-row"><button class="btn danger" onclick="clearCustomerSignature()">Unterschrift löschen</button><button class="btn success" onclick="markNoCustomer()">Kein Kunde vor Ort</button></div>
 <button class="btn primary" data-enter-default="" onclick="saveEntry()" style="width:100%;margin-top:14px">Eintrag speichern</button><div id="entryStatus"></div>
 </div>
-<div class="card"><h2>Einträge des Tages</h2><div class="muted" id="entries">Noch keine Tagesdaten geladen.</div><div class="day-balance bad" id="dayTotal">Heute: 0,00 Std.</div><div class="timebank-box" id="employeeTimeBank">Zeitguthaben: 0,00 Std.</div><button class="btn secondary" onclick="loadDay()" style="width:100%">Tag aktualisieren</button></div>
+<div class="card"><h2>Einträge des Tages</h2><div class="muted" id="entries">Noch keine Tagesdaten geladen.</div><div class="day-balance bad" id="dayTotal">Heute: 0,00 Std.</div><div class="day-balance good" id="employeeMonthlyHours">Geleistete Monatsstunden: werden geladen ...</div><button class="btn secondary" onclick="loadDay()" style="width:100%">Tag aktualisieren</button></div>
 <div class="card" id="dayCloseCard">
 <h2>Tagesabschluss</h2>
 <label for="pauseHours">Pause gesamt</label>
@@ -178,21 +178,13 @@
 <div class="sum-box" id="adminHoursSum">Summe Mo–Fr: 0,00 Std.</div>
 <div class="field-hint">Die Tageswerte sind entscheidend für Urlaub, Krankheit und Feiertage. Die Wochenstunden werden daraus automatisch kontrolliert.</div>
 </div>
-<div class="admin-section">
-<h3>9. Zeitkorrekturen</h3>
-<div class="admin-grid"><div><label>Mitarbeiter</label><select id="adminTimeBankEmployee" onchange="loadSelectedTimeBankEmployee()"><option value="">Bitte Mitarbeiter wählen</option></select></div><div><label>Aktuelles Zeitkonto</label><div class="timebank-box" id="adminTimeBankBalance" style="margin:0">Zeitguthaben: 0,00 Std.</div></div></div>
-<div class="muted small">Die Buchung gilt immer für den hier ausgewählten Mitarbeiter. Gutschriften erhöhen sein Zeitkonto, Abzüge vermindern es dauerhaft.</div>
-<div class="admin-grid"><div><label>Stunden</label><input id="adminTimeBankHours" inputmode="decimal" placeholder="z. B. 2,5" type="text"/></div><div><label>Grund</label><input id="adminTimeBankReason" placeholder="Grund ist Pflicht"/></div></div>
-<div class="button-row"><button class="btn success" onclick="saveTimeBankManualUi('Stunden Gutschreiben')" type="button">Stunden Gutschreiben</button><button class="btn danger" onclick="saveTimeBankManualUi('Stunden abziehen')" type="button">Stunden abziehen</button></div>
-<div id="timeBankAdminStatus"></div><div id="timeBankHistory"></div>
-</div>
 <div class="save-bar"><button class="btn primary" data-enter-default="" onclick="saveEmployeeAdminUi()" style="width:100%">✓ Mitarbeiter speichern</button></div>
 <div id="employeeAdminStatus"></div>
 </div>
 <div class="card">
 <h2>Urlaub / Krankheit / Abwesenheiten eintragen</h2>
 <div class="admin-grid"><div><label>Mitarbeiter</label><select id="absenceEmployee"></select></div><div><label>Art</label><select id="absenceType"><option>Urlaub</option><option>Krank</option><option>Schulung</option><option>Unerlaubte Abwesenheit</option></select></div></div>
-<div class="grid2"><div><label>Von</label><input id="absenceStart" type="date"/></div><div><label>Bis</label><input id="absenceEnd" type="date"/></div></div><div class="field-hint">Bei Freizeitausgleich berechnet die App automatisch die Sollstunden des Zeitraums, zieht sie vom Zeitguthaben ab und schreibt sie dem Monat als bezahlte Stunden gut.</div>
+<div class="grid2"><div><label>Von</label><input id="absenceStart" type="date"/></div><div><label>Bis</label><input id="absenceEnd" type="date"/></div></div><div class="field-hint">Urlaub, Krankheit und Schulung werden nach den hinterlegten Sollstunden berücksichtigt. Unerlaubte Abwesenheit wird mit 0,00 Std. gespeichert.</div>
 <button class="btn primary" data-enter-default="" onclick="saveAbsenceUi()" style="width:100%;margin-top:12px">Zeitraum eintragen</button>
 <div id="absenceStatus"></div><div id="absenceList"></div>
 </div>
@@ -238,7 +230,7 @@
   if(!('serviceWorker' in navigator))return;
   window.addEventListener('load',function(){
     var start=function(){
-      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260922-1000-empstats1',{updateViaCache:'none'})
+      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260922-1000-officeprefs1',{updateViaCache:'none'})
         .then(function(r){return r.update();})
         .catch(function(e){console.warn('DG Offline-Cache nicht bereit',e);});
     };
@@ -251,10 +243,10 @@
 })();
 </script>
 
-<script defer fetchpriority="high" src="./core-9.0-final.js?v=20260922-1000-absence2"></script>
+<script defer fetchpriority="high" src="./core-9.0-final.js?v=20260922-1000-officeprefs1"></script>
 <script defer fetchpriority="low" src="./customerflow-9.0-final.js?v=20260920-900-final1"></script>
 <script defer fetchpriority="low" src="./payroll-9.0-final.js?v=20260920-900-final1"></script>
-<script defer fetchpriority="low" src="./ui-9.0-final.js?v=20260922-1000-empstats1"></script>
+<script defer fetchpriority="low" src="./ui-9.0-final.js?v=20260922-1000-officeprefs1"></script>
 <script>
 (function(){
 'use strict';
