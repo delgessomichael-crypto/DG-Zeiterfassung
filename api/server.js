@@ -7340,7 +7340,9 @@ async function bootstrapMonthDataFromLegacyV20(){
           timeBankMonthCredit:Number(pg.monthSummary&&pg.monthSummary.timeBankMonthCredit||0)
         })+
         ' googleRows='+JSON.stringify(rowSig(google))+
-        ' postgresRows='+JSON.stringify(rowSig(pg))
+        ' postgresRows='+JSON.stringify(rowSig(pg))+
+        ' googleTransmitted='+JSON.stringify((Array.isArray(google.rows)?google.rows:[]).map(r=>String(r&&r.transmittedDate||'')))+
+        ' postgresTransmitted='+JSON.stringify((Array.isArray(pg.rows)?pg.rows:[]).map(r=>String(r&&r.transmittedDate||'')))
       );
     }
   }
