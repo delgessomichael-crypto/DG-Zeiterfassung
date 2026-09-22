@@ -3583,8 +3583,12 @@ async function directMonthDataRead(body){
   const session=await localSessionForBody(body,false);if(!session)return null;
   const employee=String(body.employee||session.employee||'').trim();
   if(!employee||employee!==session.employee)return null;
-  const key=monthDataVerifyKey(body);if(!key)return null;
-  if(!(await shadowReadyForDirectRead(key)))return null;
+  const year=Number(body.year)||0,month=Number(body.month)||0;
+  const key=monthDataVerifyKey(body);if(!key||!year||month<1||month>12)return null;
+  const cycle=pgPayrollCycleRange(year,month);
+  // PostgreSQL is authoritative for payroll cycles covered by the production migration.
+  // Older cycles keep the Google fallback because the local migration intentionally starts on 2026-09-07.
+  if(cycle.end<'2026-09-07'&&!(await shadowReadyForDirectRead(key,87600)))return null;
   return postgresMonthData(body);
 }
 
