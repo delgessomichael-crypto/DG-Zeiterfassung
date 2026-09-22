@@ -899,11 +899,6 @@ async function initDb() {
   }, 5 * 60 * 1000);
   if (typeof latencyTimer.unref === 'function') latencyTimer.unref();
 
-  const pingTimer = setInterval(() => {
-    refreshGooglePing().catch(e => console.error('scheduled Google ping failed', e.message));
-  }, GOOGLE_PING_REFRESH_MS);
-  if (typeof pingTimer.unref === 'function') pingTimer.unref();
-
   const legacyOutboxTimer = setInterval(() => {
     flushLegacyWriteOutbox().catch(e => console.error('legacy outbox scheduled flush failed', e.message));
   }, 10 * 1000);
@@ -12106,9 +12101,7 @@ initDb()
   })
   .then(() => server.listen(PORT, '0.0.0.0', () => {
     console.log('DG-App-10 API listening on ' + PORT);
-    if (!googlePingFresh()) {
-      setTimeout(() => refreshGooglePing().catch(e => console.error('startup Google ping failed', e.message)), 0);
-    }
+    // Google health is checked on demand by the frontend/status endpoint; no periodic background ping.
   }))
   .catch(err => {
     console.error('Database initialization failed', err);
