@@ -325,6 +325,17 @@ CREATE TABLE IF NOT EXISTS employee_locations_v10 (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS inquiry_merge_members_v10 (
+  inquiry_id TEXT PRIMARY KEY,
+  group_id TEXT NOT NULL,
+  manual BOOLEAN NOT NULL DEFAULT true,
+  merged_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  merged_by TEXT
+);
+
+CREATE INDEX IF NOT EXISTS inquiry_merge_members_v10_group_idx
+  ON inquiry_merge_members_v10(group_id);
+
 CREATE TABLE IF NOT EXISTS planner_workers_shadow (
   id TEXT PRIMARY KEY,
   employee_name TEXT,
@@ -5509,6 +5520,46 @@ async function directInquiryRemindersRead(body){
   return postgresInquiryReminderView(includeDone);
 }
 
+
+function inquiryNormTextV10(v){
+  return String(v||'').trim().toLowerCase().replace(/ß/g,'ss').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
+}
+function inquiryNormEmailV10(v){return String(v||'').trim().toLowerCase();}
+function inquiryNormPhoneV10(v){const d=String(v||'').replace(/\D/g,'');return d.length>=7?d:'';}
+async function mergeInquiryRowsV10(rows){
+  const list=Array.isArray(rows)?rows.slice():[];if(list.length<2)return list.map(x=>Object.assign({},x,{mergedIds:[x.id],mergedCount:1,sources:[x.source].filter(Boolean)}));
+  const parent=list.map((_,i)=>i);
+  function find(i){while(parent[i]!==i){parent[i]=parent[parent[i]];i=parent[i];}return i;}
+  function unite(a,b){a=find(a);b=find(b);if(a!==b)parent[b]=a;}
+  const keyOwner=new Map();
+  list.forEach((r,i)=>{
+    const keys=[],email=inquiryNormEmailV10(r.email),phone=inquiryNormPhoneV10(r.phone),name=inquiryNormTextV10(r.customer),plz=String(r.postalCode||'').replace(/\D/g,''),city=inquiryNormTextV10(r.city);
+    if(email)keys.push('e:'+email);if(phone)keys.push('p:'+phone);if(name&&plz)keys.push('np:'+name+'|'+plz);else if(name&&city)keys.push('nc:'+name+'|'+city);
+    keys.forEach(k=>{if(keyOwner.has(k))unite(i,keyOwner.get(k));else keyOwner.set(k,i);});
+  });
+  try{
+    const ids=list.map(r=>String(r.id||'')).filter(Boolean);
+    if(ids.length){
+      const q=await pool.query('SELECT inquiry_id,group_id FROM inquiry_merge_members_v10 WHERE inquiry_id=ANY($1::text[])',[ids]);
+      const byGroup=new Map(),pos=new Map(list.map((r,i)=>[String(r.id||''),i]));
+      for(const r of q.rows){const p=pos.get(String(r.inquiry_id||''));if(p==null)continue;const g=String(r.group_id||'');if(byGroup.has(g))unite(p,byGroup.get(g));else byGroup.set(g,p);}
+    }
+  }catch(e){console.error('Inquiry manual merge map read failed:',e.message);}
+  const groups=new Map();
+  list.forEach((r,i)=>{const k=find(i);if(!groups.has(k))groups.set(k,[]);groups.get(k).push(r);});
+  const out=[];
+  for(const g of groups.values()){
+    g.sort((a,b)=>String(b._receivedSort||'').localeCompare(String(a._receivedSort||'')));
+    const c=Object.assign({},g[0]),pick=field=>{for(const r of g)if(String(r[field]||'').trim())return r[field];return '';};
+    const unique=field=>[...new Set(g.map(r=>String(r[field]||'').trim()).filter(Boolean))];
+    c.email=pick('email');c.phone=pick('phone');c.postalCode=pick('postalCode');c.city=pick('city');c.customer=pick('customer');
+    c.subject=pick('subject');c.description=unique('description').join('\n\n');c.internalNote=unique('internalNote').join('\n');
+    c.sources=unique('source');c.source=c.sources.join(' + ');c.mergedIds=g.map(r=>String(r.id||'')).filter(Boolean);c.mergedCount=c.mergedIds.length;
+    delete c._receivedSort;out.push(c);
+  }
+  out.sort((a,b)=>String(b.receivedAt||'').localeCompare(String(a.receivedAt||'')));return out;
+}
+
 async function postgresCustomerInquiryView(status){
   status=String(status||'Offen');
   const q=await pool.query(
@@ -5517,13 +5568,7 @@ async function postgresCustomerInquiryView(status){
             offer_id,external_url,phone_url,dropbox_url,aqon_appointment_url,aqon_details,aqon_replied_at_text
        FROM customer_inquiries_shadow`
   );
-  const excluded=new Set(['Erledigt','Gelöscht','Übernommen','Archiviert','Reminder']);
-  const rows=q.rows.filter(r=>{
-    const st=String(r.status||'Neu');
-    if(status==='Offen')return !excluded.has(st);
-    if(status&&status!=='Alle')return st===status;
-    return true;
-  }).map(r=>({
+  const base=q.rows.map(r=>({
     id:String(r.id||''),source:String(r.source||''),customer:String(r.customer||''),
     email:String(r.email||''),phone:String(r.phone||''),postalCode:String(r.postal_code||''),
     city:String(r.city||''),subject:String(r.subject||''),description:String(r.description||''),
@@ -5533,10 +5578,16 @@ async function postgresCustomerInquiryView(status){
     contactNote:String(r.contact_note||''),offerId:String(r.offer_id||''),
     externalUrl:String(r.external_url||''),phoneUrl:String(r.phone_url||''),
     dropboxUrl:String(r.dropbox_url||''),aqonAppointmentUrl:String(r.aqon_appointment_url||''),
-    aqonDetails:String(r.aqon_details||''),aqonRepliedAt:berlinDateTime(r.aqon_replied_at_text)
+    aqonDetails:String(r.aqon_details||''),aqonRepliedAt:berlinDateTime(r.aqon_replied_at_text),
+    _receivedSort:String(r.received_at_text||'')
   }));
-  rows.sort((a,b)=>String(b.receivedAt).localeCompare(String(a.receivedAt)));
-  return rows;
+  const grouped=await mergeInquiryRowsV10(base),excluded=new Set(['Erledigt','Gelöscht','Übernommen','Archiviert','Reminder']);
+  return grouped.filter(r=>{
+    const st=String(r.status||'Neu');
+    if(status==='Offen')return !excluded.has(st);
+    if(status&&status!=='Alle')return st===status;
+    return true;
+  });
 }
 function canonicalCustomerInquiries(rows){
   return (Array.isArray(rows)?rows:[]).map(x=>({
@@ -8989,7 +9040,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','syncHolidays','saveEmployeeAdmin','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','reserveMaintenanceDeviceId','saveMaintenanceCustomer','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','saveAbsence','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue',
-  'savePartnerCategoryV10','savePartnerV10','deactivatePartnerV10','saveEmployeeLocationV10'
+  'savePartnerCategoryV10','savePartnerV10','deactivatePartnerV10','saveEmployeeLocationV10','mergeCustomerInquiriesV10','completeManualOrderV10'
 ]);
 
 function berlinTodayIso(){
@@ -9129,7 +9180,44 @@ async function tryDirectPostgresWrite(action,body){
   let result=null,outboxId=0,legacyAction=action,legacyPayload=body,skipLegacySync=false;
   try{
     await client.query('BEGIN');
-    if(action==='savePartnerCategoryV10'){
+    if(action==='mergeCustomerInquiriesV10'){
+      let ids=[...new Set((Array.isArray(body.ids)?body.ids:[]).map(x=>String(x||'').trim()).filter(Boolean))];
+      if(ids.length<2)throw new Error('Bitte mindestens zwei Anfragen auswählen.');
+      const q=await client.query('SELECT id FROM customer_inquiries_shadow WHERE id=ANY($1::text[])',[ids]);
+      ids=q.rows.map(r=>String(r.id||''));if(ids.length<2)throw new Error('Mindestens zwei ausgewählte Anfragen wurden nicht gefunden.');
+      const old=await client.query('SELECT DISTINCT group_id FROM inquiry_merge_members_v10 WHERE inquiry_id=ANY($1::text[])',[ids]);
+      const groupId=String(old.rows[0]?.group_id||'IM-'+crypto.randomUUID());
+      if(old.rowCount>1){
+        const oldGroups=old.rows.map(r=>String(r.group_id||'')).filter(Boolean);
+        const all=await client.query('SELECT inquiry_id FROM inquiry_merge_members_v10 WHERE group_id=ANY($1::text[])',[oldGroups]);
+        ids=[...new Set(ids.concat(all.rows.map(r=>String(r.inquiry_id||''))))];
+      }
+      for(const id of ids)await client.query(
+        'INSERT INTO inquiry_merge_members_v10(inquiry_id,group_id,manual,merged_by,merged_at) VALUES($1,$2,true,$3,now()) ON CONFLICT(inquiry_id) DO UPDATE SET group_id=EXCLUDED.group_id,manual=true,merged_by=EXCLUDED.merged_by,merged_at=now()',
+        [id,groupId,by]
+      );
+      result={ok:true,groupId,ids,count:ids.length};skipLegacySync=true;
+    }else if(action==='completeManualOrderV10'){
+      const id=String(body.id||'').trim();if(!id)throw new Error('Auftrag-ID fehlt.');
+      const oq=await client.query('SELECT customer,address FROM manual_orders_shadow WHERE id=$1 FOR UPDATE',[id]);
+      if(!oq.rowCount)throw new Error('Auftrag wurde nicht gefunden.');
+      const customer=String(oq.rows[0].customer||''),address=String(oq.rows[0].address||''),keys=[shadowObjectKey(customer),shadowObjectKey(address),shadowObjectKey(customer+' '+address)].filter(Boolean);
+      const tq=await client.query("SELECT DISTINCT object_id,customer FROM time_entries_shadow WHERE COALESCE(billing_status,'Offen')='Offen' AND COALESCE(object_id,'')<>''");
+      let objectIds=[...new Set(tq.rows.filter(r=>{const k=shadowObjectKey(String(r.customer||''));return keys.some(x=>x&&k&&(k===x||k.includes(x)||x.includes(k)));}).map(r=>String(r.object_id||'')).filter(Boolean))];
+      let mergeId='';
+      if(objectIds.length>1){
+        mergeId='MERGE-'+crypto.randomUUID();
+        for(const oid of objectIds)await client.query(
+          'INSERT INTO regie_merges_shadow(object_id,merge_id,merged_at_text,merged_by,shadow_updated_at) VALUES($1,$2,$3,$4,now()) ON CONFLICT(object_id) DO UPDATE SET merge_id=EXCLUDED.merge_id,merged_at_text=EXCLUDED.merged_at_text,merged_by=EXCLUDED.merged_by,shadow_updated_at=now()',
+          [oid,mergeId,nowIso,by]
+        );
+      }
+      if(objectIds.length)await client.query("UPDATE time_entries_shadow SET job_status='Abgeschlossen',shadow_updated_at=now() WHERE object_id=ANY($1::text[]) AND COALESCE(billing_status,'Offen')='Offen'",[objectIds]);
+      await client.query("UPDATE manual_orders_shadow SET status='Abgeschlossen',completed_at_text=$2,changed_at_text=$2,changed_by=$3,shadow_updated_at=now() WHERE id=$1",[id,nowIso,by]);
+      if(objectIds.length>1)await enqueueLegacyWriteWithClient(client,'mergeRegieObjects',Object.assign({},body,{action:'mergeRegieObjects',objectIds}));
+      for(const oid of objectIds)await enqueueLegacyWriteWithClient(client,'setRegieObjectJobStatus',Object.assign({},body,{action:'setRegieObjectJobStatus',objectId:oid,jobStatus:'Abgeschlossen'}));
+      result={ok:true,id,objectIds,merged:objectIds.length>1,mergeId};skipLegacySync=true;
+    }else if(action==='savePartnerCategoryV10'){
       const name=String(body.name||'').trim();if(!name)throw new Error('Kategoriebezeichnung fehlt.');if(name.length>80)throw new Error('Kategoriebezeichnung ist zu lang.');
       const existing=await client.query('SELECT id FROM partner_categories_v10 WHERE lower(name)=lower($1) AND active=true LIMIT 1',[name]);
       const id=existing.rows[0]?.id||String(body.id||'').trim()||('PC-'+crypto.randomUUID());
