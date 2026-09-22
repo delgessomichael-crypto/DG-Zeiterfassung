@@ -395,6 +395,30 @@ CREATE TABLE IF NOT EXISTS whatsapp_webhook_events_v10 (
   process_error TEXT
 );
 
+CREATE TABLE IF NOT EXISTS whatsapp_contacts_v10 (
+  wa_id TEXT PRIMARY KEY,
+  full_name TEXT,
+  first_name TEXT,
+  active BOOLEAN NOT NULL DEFAULT true,
+  source TEXT NOT NULL DEFAULT 'coexistence',
+  last_action TEXT,
+  source_timestamp TIMESTAMPTZ,
+  raw_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS whatsapp_contacts_v10_active_idx
+  ON whatsapp_contacts_v10(active,full_name,wa_id);
+
+CREATE TABLE IF NOT EXISTS whatsapp_sync_state_v10 (
+  sync_type TEXT PRIMARY KEY,
+  status TEXT,
+  phase TEXT,
+  progress TEXT,
+  details JSONB NOT NULL DEFAULT '{}'::jsonb,
+  last_event_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS employee_locations_v10 (
   employee_name TEXT PRIMARY KEY,
   latitude DOUBLE PRECISION NOT NULL,
@@ -9081,9 +9105,14 @@ async function directWhatsappInboxV10(body){
     messages:byThread.get(String(t.id||''))||[]
   }));
   const publicDomain=String(process.env.RAILWAY_PUBLIC_DOMAIN||process.env.RAILWAY_STATIC_URL||'').replace(/^https?:\/\//,'').replace(/\/$/,'');
+  const contactCount=Number((await pool.query("SELECT count(*)::int AS n FROM whatsapp_contacts_v10 WHERE active=true")).rows[0]?.n||0);
+  const syncRows=(await pool.query("SELECT sync_type,status,phase,progress,last_event_at FROM whatsapp_sync_state_v10 ORDER BY sync_type")).rows;
   return {
     configured:whatsappConfiguredV10(),webhookConfigured:Boolean(WHATSAPP_VERIFY_TOKEN),
-    archiveSupported:false,markReadSupported:true,historyImportSupported:false,
+    archiveSupported:false,markReadSupported:true,historyImportSupported:true,coexistenceSupport:true,
+    coexistenceFields:['messages','history','smb_app_state_sync','smb_message_echoes','account_update'],
+    syncedContactCount:contactCount,
+    syncState:syncRows.map(x=>({type:String(x.sync_type||''),status:String(x.status||''),phase:String(x.phase||''),progress:String(x.progress||''),lastEventAt:x.last_event_at?new Date(x.last_event_at).toISOString():''})),
     phoneNumberId:WHATSAPP_PHONE_NUMBER_ID?('…'+WHATSAPP_PHONE_NUMBER_ID.slice(-6)):'',
     webhookUrl:publicDomain?('https://'+publicDomain+'/v1/whatsapp/webhook'):'',
     needs:{
@@ -9155,58 +9184,184 @@ function whatsappSignatureOkV10(raw,signature){
   if(given.length!==expected.length)return false;
   return crypto.timingSafeEqual(Buffer.from(given),Buffer.from(expected));
 }
+function whatsappDigitsV10(v){return String(v||'').replace(/\D/g,'');}
+async function whatsappKnownContactNameV10(waId){
+  const id=whatsappDigitsV10(waId);if(!id)return '';
+  const q=await pool.query("SELECT full_name,first_name FROM whatsapp_contacts_v10 WHERE wa_id=$1 AND active=true LIMIT 1",[id]);
+  return String(q.rows[0]?.full_name||q.rows[0]?.first_name||'');
+}
+async function ensureWhatsappThreadV10(waId,contactName,messageAt,initialStatus){
+  waId=whatsappDigitsV10(waId);if(!waId)return '';
+  const when=messageAt instanceof Date?messageAt:new Date(messageAt||Date.now());
+  const q=await pool.query(
+    `SELECT id,status FROM whatsapp_threads_v10
+      WHERE wa_id=$1 AND status IN ('Offen','Kontext')
+        AND COALESCE(last_message_at,created_at)>now()-interval '7 days'
+      ORDER BY last_message_at DESC NULLS LAST,created_at DESC LIMIT 1`,[waId]
+  );
+  if(q.rowCount){
+    const id=String(q.rows[0].id||'');
+    if(String(initialStatus||'Offen')==='Offen'&&String(q.rows[0].status||'')==='Kontext'){
+      await pool.query("UPDATE whatsapp_threads_v10 SET status='Offen',updated_at=now() WHERE id=$1",[id]);
+    }
+    if(contactName)await pool.query("UPDATE whatsapp_threads_v10 SET contact_name=$2,updated_at=now() WHERE id=$1 AND COALESCE(contact_name,'')='' ",[id,String(contactName)]);
+    return id;
+  }
+  const id='WA-THREAD-'+crypto.randomUUID(),status=String(initialStatus||'Offen');
+  await pool.query(
+    `INSERT INTO whatsapp_threads_v10(id,wa_id,contact_name,category,relevance_score,classification_reason,status,first_message_at,last_message_at)
+     VALUES($1,$2,$3,'Prüfen',0,$4,$5,$6,$6)`,
+    [id,waId,String(contactName||''),status==='Historie'?'WhatsApp-Historie synchronisiert':(status==='Kontext'?'Ausgehende WhatsApp-Unterhaltung':'Neue WhatsApp-Unterhaltung'),status,when.toISOString()]
+  );
+  return id;
+}
+async function storeWhatsappMessageV10(msg,ctx){
+  msg=msg||{};ctx=ctx||{};
+  const direction=String(ctx.direction||'inbound');
+  const customerWa=whatsappDigitsV10(ctx.waId||(direction==='outbound'?msg.to:msg.from));
+  const messageId=String(msg.id||'').trim();if(!messageId||!customerWa)return null;
+  const messageAt=msg.timestamp?new Date(Number(msg.timestamp)*1000):(ctx.messageAt?new Date(ctx.messageAt):new Date());
+  const contactName=String(ctx.contactName||await whatsappKnownContactNameV10(customerWa)||'');
+  const initialStatus=String(ctx.initialStatus||(direction==='outbound'?'Kontext':'Offen'));
+  const threadId=await ensureWhatsappThreadV10(customerWa,contactName,messageAt,initialStatus);if(!threadId)return null;
+  const text=whatsappExtractTextV10(msg),type=String(msg.type||'unknown');
+  await pool.query(
+    `INSERT INTO whatsapp_messages_v10(id,thread_id,wa_id,direction,message_type,message_text,message_at,phone_number_id,raw_payload)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
+     ON CONFLICT(id) DO UPDATE SET raw_payload=EXCLUDED.raw_payload`,
+    [messageId,threadId,customerWa,direction,type,text,messageAt.toISOString(),String(ctx.phoneNumberId||''),JSON.stringify(msg)]
+  );
+  const media=whatsappMediaObjectV10(msg);
+  if(media){
+    await pool.query(
+      `INSERT INTO whatsapp_media_v10(media_id,message_id,media_type,mime_type,filename,caption,sha256,download_status)
+       VALUES($1,$2,$3,$4,$5,$6,$7,'pending')
+       ON CONFLICT(media_id) DO NOTHING`,
+      [media.id,messageId,media.type,media.mime,media.filename,media.caption,media.sha256]
+    );
+    if(whatsappConfiguredV10())setImmediate(()=>downloadWhatsappMediaV10(media).catch(e=>console.error('WhatsApp media async error',e.message)));
+  }
+  if(initialStatus!=='Historie'){
+    if(direction==='inbound'){
+      const cls=await whatsappThreadClassificationV10(threadId);
+      await pool.query(
+        `UPDATE whatsapp_threads_v10
+            SET contact_name=CASE WHEN $2<>'' THEN $2 ELSE contact_name END,
+                last_text=CASE WHEN $3<>'' THEN $3 ELSE last_text END,last_message_at=$4,updated_at=now(),
+                category=CASE WHEN manual_classification THEN category ELSE $5 END,
+                relevance_score=CASE WHEN manual_classification THEN relevance_score ELSE $6 END,
+                classification_reason=CASE WHEN manual_classification THEN classification_reason ELSE $7 END
+          WHERE id=$1`,
+        [threadId,contactName,text,messageAt.toISOString(),cls.category,cls.score,cls.reason]
+      );
+    }else{
+      await pool.query(
+        `UPDATE whatsapp_threads_v10
+            SET contact_name=CASE WHEN $2<>'' THEN $2 ELSE contact_name END,
+                last_message_at=GREATEST(COALESCE(last_message_at,$3),$3),updated_at=now()
+          WHERE id=$1`,[threadId,contactName,messageAt.toISOString()]
+      );
+    }
+  }
+  return threadId;
+}
+async function processWhatsappStateSyncV10(value){
+  const rows=Array.isArray(value&&value.state_sync)?value.state_sync:[];
+  for(const x of rows){
+    if(String(x&&x.type||'')!=='contact')continue;
+    const ct=x.contact||{},waId=whatsappDigitsV10(ct.phone_number);if(!waId)continue;
+    const action=String(x.action||'add'),ts=x.metadata&&x.metadata.timestamp?new Date(Number(x.metadata.timestamp)*1000):new Date();
+    await pool.query(
+      `INSERT INTO whatsapp_contacts_v10(wa_id,full_name,first_name,active,last_action,source_timestamp,raw_payload,updated_at)
+       VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,now())
+       ON CONFLICT(wa_id) DO UPDATE SET full_name=EXCLUDED.full_name,first_name=EXCLUDED.first_name,
+         active=EXCLUDED.active,last_action=EXCLUDED.last_action,source_timestamp=EXCLUDED.source_timestamp,
+         raw_payload=EXCLUDED.raw_payload,updated_at=now()`,
+      [waId,String(ct.full_name||''),String(ct.first_name||''),action!=='remove',action,ts.toISOString(),JSON.stringify(x)]
+    );
+    if(action!=='remove'&&(ct.full_name||ct.first_name)){
+      await pool.query("UPDATE whatsapp_threads_v10 SET contact_name=$2,updated_at=now() WHERE wa_id=$1 AND COALESCE(contact_name,'')=''",[waId,String(ct.full_name||ct.first_name)]);
+    }
+  }
+  await pool.query(
+    `INSERT INTO whatsapp_sync_state_v10(sync_type,status,details,last_event_at)
+     VALUES('smb_app_state_sync','received',$1::jsonb,now())
+     ON CONFLICT(sync_type) DO UPDATE SET status='received',details=EXCLUDED.details,last_event_at=now()`,
+    [JSON.stringify({count:rows.length})]
+  );
+}
+async function processWhatsappHistoryV10(value){
+  const batches=Array.isArray(value&&value.history)?value.history:[];
+  let stored=0;
+  for(const batch of batches){
+    const meta=batch&&batch.metadata||{},threads=Array.isArray(batch&&batch.threads)?batch.threads:[];
+    for(const th of threads){
+      const threadWa=whatsappDigitsV10(th&&th.id);
+      for(const msg of (Array.isArray(th&&th.messages)?th.messages:[])){
+        const business=whatsappDigitsV10(value&&value.metadata&&value.metadata.display_phone_number);
+        const from=whatsappDigitsV10(msg&&msg.from),direction=business&&from===business?'outbound':'inbound';
+        const customerWa=direction==='outbound'?(whatsappDigitsV10(msg&&msg.to)||threadWa):(from||threadWa);
+        if(await storeWhatsappMessageV10(msg,{direction,waId:customerWa,phoneNumberId:String(value&&value.metadata&&value.metadata.phone_number_id||''),initialStatus:'Historie'}))stored++;
+      }
+    }
+    await pool.query(
+      `INSERT INTO whatsapp_sync_state_v10(sync_type,status,phase,progress,details,last_event_at)
+       VALUES('history','received',$1,$2,$3::jsonb,now())
+       ON CONFLICT(sync_type) DO UPDATE SET status='received',phase=EXCLUDED.phase,progress=EXCLUDED.progress,details=EXCLUDED.details,last_event_at=now()`,
+      [String(meta.phase||''),String(meta.progress||''),JSON.stringify({chunkOrder:meta.chunk_order||null,stored})]
+    );
+  }
+}
+async function processWhatsappEchoesV10(value){
+  const echoes=Array.isArray(value&&value.message_echoes)?value.message_echoes:[];
+  const phoneNumberId=String(value&&value.metadata&&value.metadata.phone_number_id||'');
+  for(const msg of echoes){
+    if(['edit','revoke'].includes(String(msg&&msg.type||''))){
+      const original=String(msg&&msg.original_message_id||'');
+      if(original)await pool.query("UPDATE whatsapp_messages_v10 SET raw_payload=raw_payload || $2::jsonb WHERE id=$1",[original,JSON.stringify({coexistence_event:msg})]);
+      continue;
+    }
+    await storeWhatsappMessageV10(msg,{direction:'outbound',waId:msg&&msg.to,phoneNumberId,initialStatus:'Kontext'});
+  }
+  await pool.query(
+    `INSERT INTO whatsapp_sync_state_v10(sync_type,status,details,last_event_at)
+     VALUES('smb_message_echoes','active',$1::jsonb,now())
+     ON CONFLICT(sync_type) DO UPDATE SET status='active',details=EXCLUDED.details,last_event_at=now()`,
+    [JSON.stringify({count:echoes.length})]
+  );
+}
 async function processWhatsappWebhookV10(payload,eventHash){
   if(!pool)return;
   try{
+    // Some coexistence partner deliveries use {event,data}; Meta's direct webhooks use entry[].changes[].
+    if(payload&&payload.event&&payload.data){
+      const event=String(payload.event||'');
+      if(event==='history')await processWhatsappHistoryV10(payload.data||{});
+      else if(event==='smb_app_state_sync')await processWhatsappStateSyncV10(payload.data||{});
+      else if(event==='smb_message_echoes')await processWhatsappEchoesV10(payload.data||{});
+    }
     for(const entry of (payload&&payload.entry)||[]){
       for(const change of (entry&&entry.changes)||[]){
-        if(String(change&&change.field||'')!=='messages')continue;
-        const value=change&&change.value||{},contacts=Array.isArray(value.contacts)?value.contacts:[],contactByWa=new Map();
-        for(const ct of contacts)contactByWa.set(String(ct.wa_id||''),String(ct.profile&&ct.profile.name||''));
-        for(const msg of (Array.isArray(value.messages)?value.messages:[])){
-          const messageId=String(msg.id||'').trim(),waId=String(msg.from||'').trim();if(!messageId||!waId)continue;
-          const messageAt=msg.timestamp?new Date(Number(msg.timestamp)*1000):new Date(),contactName=contactByWa.get(waId)||'';
-          let tq=await pool.query(
-            `SELECT id FROM whatsapp_threads_v10
-              WHERE wa_id=$1 AND status='Offen' AND last_message_at>now()-interval '72 hours'
-              ORDER BY last_message_at DESC LIMIT 1`,[waId]
-          );
-          let threadId=String(tq.rows[0]?.id||'');
-          if(!threadId){
-            threadId='WA-THREAD-'+crypto.randomUUID();
-            await pool.query(
-              `INSERT INTO whatsapp_threads_v10(id,wa_id,contact_name,category,relevance_score,classification_reason,status,first_message_at,last_message_at)
-               VALUES($1,$2,$3,'Prüfen',0,'Neue WhatsApp-Unterhaltung','Offen',$4,$4)`,
-              [threadId,waId,contactName,messageAt.toISOString()]
-            );
+        const field=String(change&&change.field||''),value=change&&change.value||{};
+        if(field==='messages'){
+          const contacts=Array.isArray(value.contacts)?value.contacts:[],contactByWa=new Map();
+          for(const ct of contacts)contactByWa.set(whatsappDigitsV10(ct.wa_id),String(ct.profile&&ct.profile.name||''));
+          for(const msg of (Array.isArray(value.messages)?value.messages:[])){
+            const waId=whatsappDigitsV10(msg&&msg.from);
+            await storeWhatsappMessageV10(msg,{direction:'inbound',waId,contactName:contactByWa.get(waId)||'',phoneNumberId:String(value.metadata&&value.metadata.phone_number_id||''),initialStatus:'Offen'});
           }
-          const text=whatsappExtractTextV10(msg),type=String(msg.type||'unknown');
+        }else if(field==='history'){
+          await processWhatsappHistoryV10(value);
+        }else if(field==='smb_app_state_sync'){
+          await processWhatsappStateSyncV10(value);
+        }else if(field==='smb_message_echoes'){
+          await processWhatsappEchoesV10(value);
+        }else if(field==='account_update'){
           await pool.query(
-            `INSERT INTO whatsapp_messages_v10(id,thread_id,wa_id,direction,message_type,message_text,message_at,phone_number_id,raw_payload)
-             VALUES($1,$2,$3,'inbound',$4,$5,$6,$7,$8::jsonb)
-             ON CONFLICT(id) DO NOTHING`,
-            [messageId,threadId,waId,type,text,messageAt.toISOString(),String(value.metadata&&value.metadata.phone_number_id||''),JSON.stringify(msg)]
-          );
-          const media=whatsappMediaObjectV10(msg);
-          if(media){
-            await pool.query(
-              `INSERT INTO whatsapp_media_v10(media_id,message_id,media_type,mime_type,filename,caption,sha256,download_status)
-               VALUES($1,$2,$3,$4,$5,$6,$7,'pending')
-               ON CONFLICT(media_id) DO NOTHING`,
-              [media.id,messageId,media.type,media.mime,media.filename,media.caption,media.sha256]
-            );
-            setImmediate(()=>downloadWhatsappMediaV10(media).catch(e=>console.error('WhatsApp media async error',e.message)));
-          }
-          const cls=await whatsappThreadClassificationV10(threadId);
-          await pool.query(
-            `UPDATE whatsapp_threads_v10
-                SET contact_name=CASE WHEN $2<>'' THEN $2 ELSE contact_name END,
-                    last_text=CASE WHEN $3<>'' THEN $3 ELSE last_text END,last_message_at=$4,updated_at=now(),
-                    category=CASE WHEN manual_classification THEN category ELSE $5 END,
-                    relevance_score=CASE WHEN manual_classification THEN relevance_score ELSE $6 END,
-                    classification_reason=CASE WHEN manual_classification THEN classification_reason ELSE $7 END
-              WHERE id=$1`,
-            [threadId,contactName,text,messageAt.toISOString(),cls.category,cls.score,cls.reason]
+            `INSERT INTO whatsapp_sync_state_v10(sync_type,status,details,last_event_at)
+             VALUES('account_update',$1,$2::jsonb,now())
+             ON CONFLICT(sync_type) DO UPDATE SET status=EXCLUDED.status,details=EXCLUDED.details,last_event_at=now()`,
+            [String(value.event||value.disconnection_info&&value.disconnection_info.reason||'received'),JSON.stringify(value||{})]
           );
         }
       }
