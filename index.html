@@ -230,7 +230,7 @@
   if(!('serviceWorker' in navigator))return;
   window.addEventListener('load',function(){
     var start=function(){
-      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260922-1000-partnerfix4',{updateViaCache:'none'})
+      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260922-1000-whatsapp1',{updateViaCache:'none'})
         .then(function(r){return r.update();})
         .catch(function(e){console.warn('DG Offline-Cache nicht bereit',e);});
     };
@@ -246,7 +246,7 @@
 <script defer fetchpriority="high" src="./core-9.0-final.js?v=20260922-1000-partnerfix3"></script>
 <script defer fetchpriority="low" src="./customerflow-9.0-final.js?v=20260920-900-final1"></script>
 <script defer fetchpriority="low" src="./payroll-9.0-final.js?v=20260920-900-final1"></script>
-<script defer fetchpriority="low" src="./ui-9.0-final.js?v=20260922-1000-partnerfix4"></script>
+<script defer fetchpriority="low" src="./ui-9.0-final.js?v=20260922-1000-whatsapp1"></script>
 <script>
 (function(){
 'use strict';
