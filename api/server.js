@@ -282,6 +282,49 @@ CREATE TABLE IF NOT EXISTS employee_admin_shadow (
   shadow_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS partner_categories_v10 (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 999,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS partner_categories_v10_name_idx
+  ON partner_categories_v10((lower(name))) WHERE active=true;
+
+CREATE TABLE IF NOT EXISTS partners_v10 (
+  id TEXT PRIMARY KEY,
+  category_id TEXT NOT NULL,
+  company TEXT,
+  contact_name TEXT,
+  phone TEXT,
+  mobile TEXT,
+  email TEXT,
+  address TEXT,
+  website TEXT,
+  notes TEXT,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by TEXT
+);
+
+CREATE INDEX IF NOT EXISTS partners_v10_category_idx
+  ON partners_v10(category_id,active,company,contact_name);
+
+CREATE TABLE IF NOT EXISTS employee_locations_v10 (
+  employee_name TEXT PRIMARY KEY,
+  latitude DOUBLE PRECISION NOT NULL,
+  longitude DOUBLE PRECISION NOT NULL,
+  accuracy_m DOUBLE PRECISION,
+  captured_at TIMESTAMPTZ NOT NULL,
+  context TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS planner_workers_shadow (
   id TEXT PRIMARY KEY,
   employee_name TEXT,
@@ -840,6 +883,7 @@ async function bootstrapTrustedShadowReadiness(){
 async function initDb() {
   if (!pool) return;
   await pool.query(schema);
+  await pool.query("INSERT INTO partner_categories_v10(id,name,sort_order,active,created_by) VALUES ('PC-ELEKTRIKER','Elektriker',10,true,'System'),('PC-FLIESENLEGER','Fliesenleger',20,true,'System'),('PC-TROCKENBAUER','Trockenbauer',30,true,'System') ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,sort_order=EXCLUDED.sort_order,active=true,updated_at=now()");
   await cleanupInternalData();
   await loadGooglePingCache();
   await initManualOrdersShadow();
@@ -3497,8 +3541,8 @@ async function postgresMonthData(body){
       if(yy===year&&mm===month)timeBankMonthCredit+=hours;
     }
   }
-  timeBankMonthCredit=round(timeBankMonthCredit);
-  const creditedTotal=round(statusCredit+timeBankMonthCredit);
+  timeBankMonthCredit=0;
+  const creditedTotal=round(statusCredit);
   const adjustments=adjQ.rows.filter(r=>{
     const created=berlinDateOnly(r.created_at_text||'');
     return !(year===2026&&month===9&&created&&created<'2026-09-07');
@@ -3508,9 +3552,11 @@ async function postgresMonthData(body){
     vacationDays:statuses.filter(x=>x.status==='Urlaub').length,
     sickDays:statuses.filter(x=>x.status==='Krank').length,
     holidayDays:statuses.filter(x=>x.status==='Feiertag').length,
-    compensatoryDays:statuses.filter(x=>x.status==='Freizeitausgleich').length,
-    compensatoryHours:round(statuses.filter(x=>x.status==='Freizeitausgleich').reduce((s,x)=>s+Number(x.creditedHours||0),0)),
-    timeBankMonthCredit,adjustmentTotal
+    trainingDays:statuses.filter(x=>x.status==='Schulung').length,
+    unexcusedDays:statuses.filter(x=>x.status==='Unentschuldigte Abwesenheit').length,
+    compensatoryDays:0,
+    compensatoryHours:0,
+    timeBankMonthCredit:0,adjustmentTotal
   };
   const yearSummary={
     year,vacationEntitlement:Number(annual.vacationEntitlement||0),vacationUsed:Number(annual.vacationUsed||0),
@@ -3519,7 +3565,7 @@ async function postgresMonthData(body){
   const actualTotal=round(workTotal+creditedTotal+adjustmentTotal);
   return {
     rows,total:actualTotal,actualTotal,adjustmentTotal,workTotal,workTotalGross,automaticPauseTotal,dayTotals,
-    creditedTotal,statusCredit,timeBankMonthCredit,timeBankBalance:0,statuses,monthSummary,yearSummary,
+    creditedTotal,statusCredit,timeBankMonthCredit:0,timeBankBalance:0,statuses,monthSummary,yearSummary,
     cycleStart,cycleEnd
   };
 }
@@ -4293,7 +4339,7 @@ async function pgSyncAutoClosures(year){
   year=Number(year)||0;
   const q=await pool.query(
     `SELECT employee_name,status_date,status,source,credited_hours FROM day_status_shadow
-      WHERE status IN ('Urlaub','Feiertag') AND status_date>='2026-09-07'
+      WHERE status IN ('Urlaub','Krank','Schulung','Unentschuldigte Abwesenheit','Feiertag') AND status_date>='2026-09-07'
         AND ($1::int=0 OR status_date LIKE ($1::text||'-%'))`,
     [year]
   );
@@ -4336,9 +4382,9 @@ async function mirrorAbsenceStatuses(action,body,parsed){
         [employee,date]
       );
       if(old.rowCount&&String(old.rows[0].status||'')==='Feiertag')continue;
-      const credit=profileHoursForDate(profile,date);
+      const credit=type==='Unentschuldigte Abwesenheit'?0:profileHoursForDate(profile,date);
       await upsertDayStatusShadow(employee,date,type,'Chef Abwesenheit',credit,id);
-      if(type==='Urlaub')await pgAutoClosureForStatus(employee,date,type,credit,'Chef Abwesenheit');
+      if(['Urlaub','Krank','Schulung','Unentschuldigte Abwesenheit'].includes(type))await pgAutoClosureForStatus(employee,date,type,credit,'Chef Abwesenheit');
     }
   }else if(action==='deleteAbsence'){
     const id=String(body.id||'');if(!id)return;
@@ -4347,7 +4393,7 @@ async function mirrorAbsenceStatuses(action,body,parsed){
       [id]
     );
     await pool.query('DELETE FROM day_status_shadow WHERE reference=$1',[id]);
-    for(const r of q.rows)if(['Urlaub','Feiertag'].includes(String(r.status||'')))
+    for(const r of q.rows)if(['Urlaub','Krank','Schulung','Unentschuldigte Abwesenheit','Feiertag'].includes(String(r.status||'')))
       await pgRemoveAutoClosure(r.employee_name,berlinDateOnly(r.status_date),r.status);
   }
 }
@@ -8004,7 +8050,7 @@ async function postgresBossMonthData(body){
     const workGross=pgRound2([...grossBy.values()].reduce((a,x)=>a+Number(x||0),0));
     const pause=pgRound2([...grossBy.values()].reduce((a,x)=>a+(Number(x||0)>=6?1:0),0));
     const work=pgRound2(workGross-pause),statusCredit=pgRound2(sts.reduce((a,x)=>a+Number(x.creditedHours||0),0));
-    const tbCredit=pgRound2(timeMaps.monthCredit[rec.name]||0),credited=pgRound2(statusCredit+tbCredit);
+    const tbCredit=0,credited=pgRound2(statusCredit);
     const adjustments=adjs.get(rec.name)||[],adj=pgRound2(adjustments.reduce((a,x)=>a+Number(x.hours||0),0));
     const actualBefore=pgRound2(work+credited),actual=pgRound2(actualBefore+adj),target=pgMonthlyTarget(rec,year,month);
     const dates=[...grossBy.keys()],closedDays=dates.filter(d=>closed.has(rec.name+'|'+d)).length;
@@ -8024,10 +8070,10 @@ async function postgresBossMonthData(body){
       entryDate:rec.entryDate,exitDate:rec.exitDate,hourlyWage:rec.hourlyWage,payrollType:rec.payrollType,
       monthlySalary:rec.monthlySalary,payrollRelevant:rec.payrollRelevant,weeklyHours:rec.weeklyHours,
       targetTotal:target,actualTotal:actual,actualBeforeAdjustment:actualBefore,adjustmentTotal:adj,adjustments,
-      balance:pgRound2(actual-target),total:actual,payableHours:pgRound2(target>0?Math.min(actual,target):actual),
+      balance:pgRound2(actual-target),total:actual,payableHours:pgRound2(actual),
       workTotal:work,workTotalGross:workGross,automaticPauseTotal:pause,creditedTotal:credited,statusCredit,
-      timeBankMonthCredit:tbCredit,timeBankBalance:pgRound2(timeMaps.balance[rec.name]||0),
-      monthSurplusBanked:Boolean(timeMaps.monthSurplusBanked[rec.name]),days:dates.length,closedDays,openDays:dates.length-closedDays,
+      timeBankMonthCredit:0,timeBankBalance:0,
+      monthSurplusBanked:false,days:dates.length,closedDays,openDays:dates.length-closedDays,
       entries:rows,statuses:sts,sickDays:sts.filter(x=>x.status==='Krank').length,
       vacationDays:sts.filter(x=>x.status==='Urlaub').length,holidayDays:sts.filter(x=>x.status==='Feiertag').length,
       compensatoryDays:sts.filter(x=>x.status==='Freizeitausgleich').length,
@@ -8713,6 +8759,64 @@ async function directSystemHealthCheck(body){
   return {ok:errors.length===0,version:'DG App 10 Railway',checks,warnings,errors,checkedAt:shadowGermanDateTime(new Date().toISOString())};
 }
 
+
+async function directEmployeeWorkOverviewV10(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const employee=String(body&&body.targetEmployee||'').trim();if(!employee)throw new Error('Mitarbeiter fehlt.');
+  const today=berlinTodayIso(),year=Number(today.slice(0,4)),month=Number(today.slice(5,7));
+  let weekStart=today;while(isoWeekday(weekStart)!==1)weekStart=isoAddDays(weekStart,-1);
+  const weekEnd=isoAddDays(weekStart,6),monthStart=String(year)+'-'+String(month).padStart(2,'0')+'-01',
+        monthEnd=String(year)+'-'+String(month).padStart(2,'0')+'-'+String(new Date(Date.UTC(year,month,0)).getUTCDate()).padStart(2,'0'),
+        yearStart=String(year)+'-01-01',yearEnd=String(year)+'-12-31';
+  async function work(start,end){
+    const sql="WITH w AS (SELECT entry_date AS d,hours::numeric AS h FROM time_entries_shadow WHERE employee_name=$1 AND entry_date>=$2 AND entry_date<=$3 UNION ALL SELECT t.entry_date AS d,a.hours::numeric AS h FROM assignments_shadow a JOIN time_entries_shadow t ON t.id=a.source_entry_id WHERE a.employee_name=$1 AND COALESCE(a.status,'Zugeordnet')<>'Ersetzt' AND t.entry_date>=$2 AND t.entry_date<=$3), daily AS (SELECT d,COALESCE(SUM(h),0) gross FROM w GROUP BY d) SELECT COALESCE(SUM(GREATEST(gross-CASE WHEN gross>=6 THEN 1 ELSE 0 END,0)),0)::numeric AS h FROM daily";
+    const q=await pool.query(sql,[employee,start,end]);return pgRound2(q.rows[0]?.h||0);
+  }
+  const eq=await pool.query('SELECT payload FROM employee_admin_shadow WHERE employee_name=$1 LIMIT 1',[employee]);
+  if(!eq.rowCount)throw new Error('Mitarbeiter wurde nicht gefunden.');
+  const p=eq.rows[0].payload||{},annual=await postgresVacationSummary(employee,year);
+  const sq=await pool.query("SELECT status,COUNT(DISTINCT status_date)::int n FROM day_status_shadow WHERE employee_name=$1 AND status_date>=$2 AND status_date<=$3 GROUP BY status",[employee,yearStart,yearEnd]);
+  const sc={};for(const r of sq.rows)sc[String(r.status||'')]=Number(r.n||0);
+  const values=await Promise.all([work(weekStart,weekEnd),work(monthStart,monthEnd),work(yearStart,yearEnd)]);
+  return {employee,year,weekStart,weekEnd,weekHours:values[0],weeklyTarget:pgRound2(p.weeklyHours||0),month,monthHours:values[1],yearHours:values[2],
+    vacationEntitlement:pgRound2(annual.vacationEntitlement||0),vacationUsed:pgRound2(annual.vacationUsed||0),
+    vacationRemaining:pgRound2(annual.vacationRemaining||0),sickDays:Number(sc.Krank||0),trainingDays:Number(sc.Schulung||0),
+    unexcusedDays:Number(sc['Unentschuldigte Abwesenheit']||0)};
+}
+
+async function directPartnerNetworkV10(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const cq=await pool.query('SELECT id,name,sort_order FROM partner_categories_v10 WHERE active=true ORDER BY sort_order,name');
+  const pq=await pool.query('SELECT id,category_id,company,contact_name,phone,mobile,email,address,website,notes FROM partners_v10 WHERE active=true ORDER BY company,contact_name');
+  const partners=pq.rows.map(r=>({id:String(r.id),categoryId:String(r.category_id),company:String(r.company||''),contactName:String(r.contact_name||''),phone:String(r.phone||''),mobile:String(r.mobile||''),email:String(r.email||''),address:String(r.address||''),website:String(r.website||''),notes:String(r.notes||'')}));
+  return cq.rows.map(c=>({id:String(c.id),name:String(c.name),sortOrder:Number(c.sort_order||999),partners:partners.filter(p=>p.categoryId===String(c.id))}));
+}
+
+async function directEmployeeLocationsV10(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const q=await pool.query("SELECT employee_name,latitude,longitude,accuracy_m,captured_at,context FROM employee_locations_v10 WHERE captured_at>now()-interval '14 hours' ORDER BY employee_name");
+  return q.rows.map(r=>({employee:String(r.employee_name),latitude:Number(r.latitude),longitude:Number(r.longitude),accuracy:Number(r.accuracy_m||0),capturedAt:new Date(r.captured_at).toISOString(),context:String(r.context||'')}));
+}
+
+async function directAiAssistantV10(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const prompt=String(body&&body.prompt||'').trim();if(!prompt)throw new Error('Bitte eine Frage oder Aufgabe eingeben.');
+  const apiKey=String(process.env.OPENAI_API_KEY||'').trim(),model=String(process.env.OPENAI_MODEL||'').trim();
+  if(!apiKey||!model)return {configured:false,text:'KI-Integration ist vorbereitet. Für die Aktivierung fehlen noch OPENAI_API_KEY und/oder OPENAI_MODEL auf Railway.'};
+  const inq=await pool.query("SELECT customer,source,subject,description,status,received_at_text FROM customer_inquiries_shadow WHERE COALESCE(status,'Offen') NOT IN ('Archiviert','Gelöscht') ORDER BY received_at_text DESC NULLS LAST LIMIT 25");
+  const orders=await pool.query("SELECT customer,address,description,status,changed_at_text FROM manual_orders_shadow WHERE COALESCE(status,'') NOT IN ('Abgeschlossen','Abgerechnet') ORDER BY changed_at_text DESC NULLS LAST LIMIT 25");
+  const offers=await pool.query("SELECT customer,description,status,created_at_text FROM inquiry_offers_shadow ORDER BY created_at_text DESC NULLS LAST LIMIT 25");
+  const context={inquiries:inq.rows,orders:orders.rows,offers:offers.rows};
+  const upstream=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+apiKey},body:JSON.stringify({model,input:[
+    {role:'system',content:[{type:'input_text',text:'Du bist der interne Büro-Assistent der Del Gesso Gebäudetechnik. Nutze nur den bereitgestellten App-Kontext. Unterstütze bei Überblick, Priorisierung, Textentwürfen und Vorbereitung. Führe keine externen oder irreversiblen Aktionen aus. Antworte auf Deutsch, klar und praxisnah.'}]},
+    {role:'user',content:[{type:'input_text',text:'App-Kontext:\\n'+JSON.stringify(context)+'\\n\\nAufgabe:\\n'+prompt}]}
+  ]})});
+  const raw=await upstream.text();let data=null;try{data=JSON.parse(raw)}catch(_e){}
+  if(!upstream.ok)throw new Error('KI-Dienst meldet HTTP '+upstream.status+(data&&data.error&&data.error.message?': '+data.error.message:''));
+  let out=String(data&&data.output_text||'');if(!out&&data&&Array.isArray(data.output))for(const item of data.output||[])for(const c of item.content||[])if(c&&c.text)out+=String(c.text);
+  return {configured:true,text:out.trim()||'Keine Antwort erhalten.'};
+}
+
 async function tryDirectPostgresRead(action,body){
   if(action==='ping')return {message:'DG Backend erreichbar',version:'5.2.5',railway:true};
   if(action==='systemHealthCheck')return directSystemHealthCheck(body);
@@ -8753,6 +8857,10 @@ async function tryDirectPostgresRead(action,body){
   if(action==='getWeekData')return directWeekDataRead(body);
   if(action==='getVacationAccount')return directVacationAccountRead(body);
   if(action==='getVacationAccounts')return directVacationAccountsRead(body);
+  if(action==='getEmployeeWorkOverviewV10')return directEmployeeWorkOverviewV10(body);
+  if(action==='getPartnerNetworkV10')return directPartnerNetworkV10(body);
+  if(action==='getEmployeeLocationsV10')return directEmployeeLocationsV10(body);
+  if(action==='getAiAssistantV10')return directAiAssistantV10(body);
   return null;
 }
 
@@ -8815,7 +8923,8 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry','inquiryToOffer',
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','syncHolidays','saveEmployeeAdmin','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','reserveMaintenanceDeviceId','saveMaintenanceCustomer','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','saveAbsence','deleteAbsence','endSicknessAbsence',
-  'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue'
+  'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue',
+  'savePartnerCategoryV10','savePartnerV10','deactivatePartnerV10','saveEmployeeLocationV10'
 ]);
 
 function berlinTodayIso(){
@@ -8948,14 +9057,35 @@ async function tryDirectPostgresWrite(action,body){
     const payrollAction=String(body&&body.payrollAction||'').trim();
     if(!['Freigegeben','Uebergeben','Wieder geoeffnet'].includes(payrollAction))return null;
   }
-  const employeeSelfAction=['confirmEmployeeAssignment','reportEmployeeAssignmentIssue','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay'].includes(action);
+  const employeeSelfAction=['confirmEmployeeAssignment','reportEmployeeAssignmentIssue','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','saveEmployeeLocationV10'].includes(action);
   const session=await localSessionForBody(body,!employeeSelfAction);if(!session)return null;
   const by=String(session.employee||body.employee||'').trim(),nowIso=new Date().toISOString();
   const client=await pool.connect();
   let result=null,outboxId=0,legacyAction=action,legacyPayload=body,skipLegacySync=false;
   try{
     await client.query('BEGIN');
-    if(action==='createOwnReminder'){
+    if(action==='savePartnerCategoryV10'){
+      const name=String(body.name||'').trim();if(!name)throw new Error('Kategoriebezeichnung fehlt.');if(name.length>80)throw new Error('Kategoriebezeichnung ist zu lang.');
+      const existing=await client.query('SELECT id FROM partner_categories_v10 WHERE lower(name)=lower($1) AND active=true LIMIT 1',[name]);
+      const id=existing.rows[0]?.id||String(body.id||'').trim()||('PC-'+crypto.randomUUID());
+      await client.query("INSERT INTO partner_categories_v10(id,name,sort_order,active,created_by,updated_at) VALUES($1,$2,COALESCE((SELECT MAX(sort_order)+10 FROM partner_categories_v10),10),true,$3,now()) ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,active=true,updated_at=now()",[id,name,by]);
+      result={ok:true,id,name};skipLegacySync=true;
+    }else if(action==='savePartnerV10'){
+      const item=body.item||{},categoryId=String(item.categoryId||'').trim(),company=String(item.company||'').trim(),contactName=String(item.contactName||'').trim();
+      if(!categoryId)throw new Error('Partner-Kategorie fehlt.');if(!company&&!contactName)throw new Error('Bitte Firma oder Ansprechpartner eintragen.');
+      const cat=await client.query('SELECT 1 FROM partner_categories_v10 WHERE id=$1 AND active=true',[categoryId]);if(!cat.rowCount)throw new Error('Partner-Kategorie wurde nicht gefunden.');
+      const id=String(item.id||'').trim()||('PART-'+crypto.randomUUID());
+      await client.query("INSERT INTO partners_v10(id,category_id,company,contact_name,phone,mobile,email,address,website,notes,active,updated_by,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,$11,now()) ON CONFLICT(id) DO UPDATE SET category_id=EXCLUDED.category_id,company=EXCLUDED.company,contact_name=EXCLUDED.contact_name,phone=EXCLUDED.phone,mobile=EXCLUDED.mobile,email=EXCLUDED.email,address=EXCLUDED.address,website=EXCLUDED.website,notes=EXCLUDED.notes,active=true,updated_by=EXCLUDED.updated_by,updated_at=now()",[id,categoryId,company,contactName,String(item.phone||''),String(item.mobile||''),String(item.email||''),String(item.address||''),String(item.website||''),String(item.notes||''),by]);
+      result={ok:true,id};skipLegacySync=true;
+    }else if(action==='deactivatePartnerV10'){
+      const id=String(body.id||'').trim();if(!id)throw new Error('Partner fehlt.');await client.query('UPDATE partners_v10 SET active=false,updated_by=$2,updated_at=now() WHERE id=$1',[id,by]);result={ok:true,id};skipLegacySync=true;
+    }else if(action==='saveEmployeeLocationV10'){
+      const latitude=Number(body.latitude),longitude=Number(body.longitude),accuracy=Math.max(0,Number(body.accuracy||0));
+      if(!Number.isFinite(latitude)||latitude<-90||latitude>90||!Number.isFinite(longitude)||longitude<-180||longitude>180)throw new Error('Ungültige Standortdaten.');
+      const captured=new Date(String(body.capturedAt||'')||Date.now());if(Number.isNaN(captured.getTime()))throw new Error('Ungültige Standortzeit.');
+      await client.query("INSERT INTO employee_locations_v10(employee_name,latitude,longitude,accuracy_m,captured_at,context,updated_at) VALUES($1,$2,$3,$4,$5,$6,now()) ON CONFLICT(employee_name) DO UPDATE SET latitude=EXCLUDED.latitude,longitude=EXCLUDED.longitude,accuracy_m=EXCLUDED.accuracy_m,captured_at=EXCLUDED.captured_at,context=EXCLUDED.context,updated_at=now()",[by,latitude,longitude,accuracy,captured.toISOString(),String(body.context||'App aktiv').slice(0,120)]);
+      result={ok:true,capturedAt:captured.toISOString()};skipLegacySync=true;
+    }else if(action==='createOwnReminder'){
       const item=body.item||{},reminderText=String(item.text||'').trim(),due=String(item.dueDate||'').trim();
       if(!reminderText)throw new Error('Bitte einen Reminder-Text eingeben.');
       if(reminderText.length>5000)throw new Error('Der Reminder-Text ist zu lang.');
@@ -9566,7 +9696,7 @@ async function tryDirectPostgresWrite(action,body){
       const closureQ=await client.query(
         'SELECT legacy_col5 FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 FOR UPDATE',[target,date]
       );
-      if(closureQ.rowCount&&!/^Automatisch:\\s*(Urlaub|Feiertag)/i.test(String(closureQ.rows[0].legacy_col5||'')))
+      if(closureQ.rowCount&&!/^Automatisch:\\s*(Urlaub|Krank|Schulung|Unentschuldigte Abwesenheit|Feiertag)/i.test(String(closureQ.rows[0].legacy_col5||'')))
         throw new Error('Der Tag wurde bereits abgeschlossen.');
       if(status!=='Arbeiten'){
         const work=await client.query(
@@ -9592,7 +9722,7 @@ async function tryDirectPostgresWrite(action,body){
       if(['Urlaub','Feiertag'].includes(status)&&date>='2026-09-07'){
         const note='Automatisch: '+status+' · Mitarbeiter';
         if(closureQ.rowCount){
-          if(/^Automatisch:\\s*(Urlaub|Feiertag)/i.test(String(closureQ.rows[0].legacy_col5||''))){
+          if(/^Automatisch:\\s*(Urlaub|Krank|Schulung|Unentschuldigte Abwesenheit|Feiertag)/i.test(String(closureQ.rows[0].legacy_col5||''))){
             await client.query(
               `UPDATE day_closures_shadow SET closed_at_text=$3,gross_total=$4,legacy_col5=$5,legacy_col6='',
                  pause_minutes=0,net_total=$4,updated_at_text=$3,update_reason='DG 7.2 Statusautomatik',shadow_updated_at=now()
@@ -9610,7 +9740,7 @@ async function tryDirectPostgresWrite(action,body){
         }
       }else if(status==='Arbeiten'&&['Urlaub','Feiertag'].includes(oldStatus)&&closureQ.rowCount){
         const note=String(closureQ.rows[0].legacy_col5||'');
-        if(/^Automatisch:\\s*(Urlaub|Feiertag)/i.test(note)&&note.toLowerCase().includes(oldStatus.toLowerCase())){
+        if(/^Automatisch:\\s*(Urlaub|Krank|Schulung|Unentschuldigte Abwesenheit|Feiertag)/i.test(note)&&note.toLowerCase().includes(oldStatus.toLowerCase())){
           await client.query('DELETE FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2',[target,date]);
         }
       }
@@ -10450,8 +10580,8 @@ async function tryDirectPostgresWrite(action,body){
       const target=String(body.targetEmployee||'').trim(),type=String(body.type||'').trim();
       const startDate=berlinDateOnly(body.startDate||''),endDate=berlinDateOnly(body.endDate||'');
       const sicknessMode=String(body.sicknessMode||'').trim(),continuationCaseId=String(body.continuationCaseId||'').trim();
-      if(!['Urlaub','Krank','Schulung','Freizeitausgleich'].includes(type))
-        throw new Error('Als Abwesenheit sind Urlaub, Krankheit, Schulung oder Freizeitausgleich möglich.');
+      if(!['Urlaub','Krank','Schulung','Unentschuldigte Abwesenheit'].includes(type))
+        throw new Error('Als Abwesenheit sind Urlaub, Krankheit, Schulung oder unentschuldigte Abwesenheit möglich.');
       if(!target)throw new Error('Mitarbeiter wurde nicht gefunden.');
       if(!validIsoDateText(startDate)||!validIsoDateText(endDate)||endDate<startDate)
         throw new Error('Ungültiger Abwesenheitszeitraum.');
@@ -10547,13 +10677,13 @@ async function tryDirectPostgresWrite(action,body){
       const creditRows=[];
       let creditedHours=0;
       for(const date of workDates){
-        let credit=Math.round(profileHoursForDate(profile,date)*100)/100;
+        let credit=type==='Unentschuldigte Abwesenheit'?0:Math.round(profileHoursForDate(profile,date)*100)/100;
         if(type==='Krank'&&!paidSet.has(date))credit=0;
         creditRows.push({date,credit});
         creditedHours=Math.round((creditedHours+credit)*100)/100;
       }
 
-      if(type==='Freizeitausgleich'){
+      if(false&&type==='Freizeitausgleich'){
         await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",['timebank:'+target]);
         const bq=await client.query(
           'SELECT COALESCE(SUM(hours),0)::numeric AS balance FROM time_bank_shadow WHERE employee_name=$1',[target]
@@ -10594,7 +10724,7 @@ async function tryDirectPostgresWrite(action,body){
         );
       }
 
-      if(type==='Freizeitausgleich'){
+      if(false&&type==='Freizeitausgleich'){
         const ref='absence:'+id;
         const oldTb=await client.query('SELECT id FROM time_bank_shadow WHERE employee_name=$1 AND reference=$2 LIMIT 1',[target,ref]);
         if(!oldTb.rowCount){
@@ -10624,7 +10754,7 @@ async function tryDirectPostgresWrite(action,body){
       if(!q.rowCount||q.rows[0].active===false)throw new Error('Abwesenheit nicht gefunden.');
       const row=q.rows[0],target=String(row.employee_name||''),type=String(row.absence_type||'');
       let credited=0;
-      if(type==='Freizeitausgleich'){
+      if(false&&type==='Freizeitausgleich'){
         const cr=await client.query('SELECT COALESCE(SUM(credited_hours),0)::numeric AS h FROM day_status_shadow WHERE reference=$1',[id]);
         credited=Math.round(Math.max(0,Number(cr.rows[0]?.h||0))*100)/100;
         await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",['timebank:'+target]);
@@ -10641,7 +10771,7 @@ async function tryDirectPostgresWrite(action,body){
             [String(s.employee_name||''),berlinDateOnly(s.status_date)]
           );
           const note=String(noteQ.rows[0]?.legacy_col5||'');
-          if(/^Automatisch:\\s*(Urlaub|Feiertag)/i.test(note)){
+          if(/^Automatisch:\\s*(Urlaub|Krank|Schulung|Unentschuldigte Abwesenheit|Feiertag)/i.test(note)){
             await client.query('DELETE FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2',
               [String(s.employee_name||''),berlinDateOnly(s.status_date)]);
           }
@@ -11016,13 +11146,13 @@ async function tryDirectPostgresWrite(action,body){
   }
   if(action==='saveAbsence'){
     const type=String(body.type||''),sy=Number(String(body.startDate||'').slice(0,4))||0,ey=Number(String(body.endDate||'').slice(0,4))||sy;
-    if(type==='Urlaub')for(let y=sy;y<=ey;y++)if(y)await pgSyncAutoClosures(y);
+    if(['Urlaub','Krank','Schulung','Unentschuldigte Abwesenheit'].includes(type))for(let y=sy;y<=ey;y++)if(y)await pgSyncAutoClosures(y);
     await Promise.all([
       pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'absences%' OR shadow_name LIKE 'vacation_full:%' OR shadow_name LIKE 'absence_overview:%' OR shadow_name LIKE 'planner_availability:%' OR shadow_name LIKE 'day_data:%' OR shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'month_data:%' OR shadow_name LIKE 'boss_day_closures:%'"),
       pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getMonthPayrollAudit','getPayrollCycleState','getDashboardSummary51')")
     ]);
     if(type==='Krank')await invalidateShadowVerify('sickness_alerts');
-    if(type==='Freizeitausgleich'){
+    if(false&&type==='Freizeitausgleich'){
       await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'time_bank:%' OR shadow_name LIKE 'my_time_bank:%' OR shadow_name='employee_admin'");
     }
   }
@@ -11255,7 +11385,7 @@ async function proxyLegacy(req, res, body) {
       return json(res,400,{ok:false,error:e.message},req);
     }
   }
-  if (['ping','systemHealthCheck','getDashboardSummary51','getCustomerInquiries','getInquiryReminders','getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getRegieAttachments','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts'].includes(action)) {
+  if (['ping','systemHealthCheck','getDashboardSummary51','getCustomerInquiries','getInquiryReminders','getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getRegieAttachments','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts','getEmployeeWorkOverviewV10','getPartnerNetworkV10','getEmployeeLocationsV10','getAiAssistantV10'].includes(action)) {
     try {
       const direct=await tryDirectPostgresRead(action,body);
       if (direct!==null) {
