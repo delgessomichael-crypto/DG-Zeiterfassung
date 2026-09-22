@@ -3513,9 +3513,17 @@ async function postgresMonthData(body){
 function canonicalMonthData(x){return x?JSON.parse(JSON.stringify(x)):null;}
 async function verifyMonthDataShadow(data,body){
   if(!pool||!data)return;
+  const year=Number(body&&body.year)||0,month=Number(body&&body.month)||0;
+  const now=berlinNowParts(),requested=year*100+month,current=now.year*100+now.month;
+  const key=monthDataVerifyKey(body);
+  if(requested>current){
+    if(key)await pool.query('DELETE FROM shadow_verify_stats WHERE shadow_name=$1',[key]);
+    console.log('SHADOW_VERIFY '+key+' skipped=future_month');
+    return;
+  }
   const pg=await postgresMonthData(body);if(!pg)return;
   const a=canonicalMonthData(data),b=canonicalMonthData(pg);
-  const mismatches=JSON.stringify(a)===JSON.stringify(b)?0:1,key=monthDataVerifyKey(body);
+  const mismatches=JSON.stringify(a)===JSON.stringify(b)?0:1;
   console.log('SHADOW_VERIFY '+key+' mismatches='+mismatches);
   await saveShadowVerifyStat(key,1,1,mismatches);
 }
