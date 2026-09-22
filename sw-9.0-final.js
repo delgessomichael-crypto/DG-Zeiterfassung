@@ -1,12 +1,12 @@
 /* DG Zeiterfassung 9.0 FINAL - exact UI28 parity cache */
-const CACHE='dg-zeiterfassung-10.0-partnerfix-20260922-3';
+const CACHE='dg-zeiterfassung-10.0-partnerfix-20260922-4';
 const STATIC=[
   './index.html',
   './app-5.0.css?v=20260918-800-prod1',
   './core-9.0-final.js?v=20260922-1000-partnerfix3',
   './customerflow-9.0-final.js?v=20260920-900-final1',
   './payroll-9.0-final.js?v=20260920-900-final1',
-  './ui-9.0-final.js?v=20260922-1000-partnerfix3',
+  './ui-9.0-final.js?v=20260922-1000-partnerfix4',
   './dg_icon_192.png',
   './dg_icon_512.png',
   './manifest.json'
