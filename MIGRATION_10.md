@@ -149,3 +149,18 @@ Operational state at this checkpoint:
 - Railway API deployment successful
 - database readiness OK
 - core current-period PostgreSQL reads verified and active
+
+
+## Migration complete — 2026-09-22
+
+Technical migration status: **100% complete** for the intended Railway/PostgreSQL scope.
+
+Final checks:
+- production API commit with functional changes: `f6ae3ef`
+- migration rows: 884 source / 884 imported / 0 migration mismatches
+- current verification mismatch inventory: 0
+- legacy outbox: 0 pending / 0 failed
+- final 15-minute legacy action check after cutover: no legacy Google actions recorded
+- Railway API deployment: SUCCESS
+
+Google remains only where intentionally required by product behavior: login/PIN authority, Gmail inquiry acquisition, live/external Google Calendar operations, Drive/file side effects, and future-month data that exists in Google but is not yet represented in PostgreSQL. Boss-month and payroll-audit native views retain first-use comparison guards until a current Google snapshot exists; this is a validation guard, not unfinished data migration.
