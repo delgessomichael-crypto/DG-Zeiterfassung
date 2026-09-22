@@ -16,6 +16,9 @@ const MIGRATION_XLSX_URL = process.env.MIGRATION_XLSX_URL || '';
 const WHATSAPP_ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN || '';
 const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
 const WHATSAPP_WABA_ID = process.env.WHATSAPP_WABA_ID || '';
+const D360_API_KEY = process.env.D360_API_KEY || '';
+const WHATSAPP_PROVIDER = String(process.env.WHATSAPP_PROVIDER || (D360_API_KEY?'360dialog':'meta')).trim().toLowerCase();
+const D360_API_BASE = String(process.env.D360_API_BASE || 'https://waba-v2.360dialog.io').replace(/\/$/,'');
 const WHATSAPP_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || '';
 const WHATSAPP_APP_SECRET = process.env.WHATSAPP_APP_SECRET || '';
 const WHATSAPP_GRAPH_VERSION = process.env.WHATSAPP_GRAPH_VERSION || 'v25.0';
@@ -8998,6 +9001,7 @@ async function directPartnerNetworkV10(body){
 }
 
 function whatsappConfiguredV10(){
+  if(WHATSAPP_PROVIDER==='360dialog')return Boolean(D360_API_KEY);
   return Boolean(WHATSAPP_ACCESS_TOKEN&&WHATSAPP_PHONE_NUMBER_ID&&WHATSAPP_WABA_ID);
 }
 function whatsappSafeTextV10(v){return String(v==null?'':v).trim();}
@@ -9109,13 +9113,15 @@ async function directWhatsappInboxV10(body){
   const syncRows=(await pool.query("SELECT sync_type,status,phase,progress,last_event_at FROM whatsapp_sync_state_v10 ORDER BY sync_type")).rows;
   return {
     configured:whatsappConfiguredV10(),webhookConfigured:Boolean(WHATSAPP_VERIFY_TOKEN),
-    archiveSupported:false,markReadSupported:true,historyImportSupported:true,coexistenceSupport:true,
+    provider:WHATSAPP_PROVIDER,archiveSupported:false,markReadSupported:true,historyImportSupported:true,coexistenceSupport:true,
     coexistenceFields:['messages','history','smb_app_state_sync','smb_message_echoes','account_update'],
     syncedContactCount:contactCount,
     syncState:syncRows.map(x=>({type:String(x.sync_type||''),status:String(x.status||''),phase:String(x.phase||''),progress:String(x.progress||''),lastEventAt:x.last_event_at?new Date(x.last_event_at).toISOString():''})),
     phoneNumberId:WHATSAPP_PHONE_NUMBER_ID?('…'+WHATSAPP_PHONE_NUMBER_ID.slice(-6)):'',
     webhookUrl:publicDomain?('https://'+publicDomain+'/v1/whatsapp/webhook'):'',
-    needs:{
+    needs:WHATSAPP_PROVIDER==='360dialog'?{
+      d360ApiKey:!D360_API_KEY,verifyToken:!WHATSAPP_VERIFY_TOKEN
+    }:{
       accessToken:!WHATSAPP_ACCESS_TOKEN,phoneNumberId:!WHATSAPP_PHONE_NUMBER_ID,
       wabaId:!WHATSAPP_WABA_ID,verifyToken:!WHATSAPP_VERIFY_TOKEN,appSecret:!WHATSAPP_APP_SECRET
     },
@@ -9130,22 +9136,41 @@ async function directWhatsappMediaV10(body){
   const r=q.rows[0];if(!r.media_data)throw new Error(r.download_error||'Anhang wurde noch nicht heruntergeladen.');
   return {mediaId:String(r.media_id),mime:String(r.mime_type||'application/octet-stream'),filename:String(r.filename||''),fileSize:Number(r.file_size||0),base64:Buffer.from(r.media_data).toString('base64')};
 }
-async function whatsappGraphV10(path,options){
+async function whatsappProviderJsonV10(path,options){
+  options=options||{};
+  if(WHATSAPP_PROVIDER==='360dialog'){
+    if(!D360_API_KEY)throw new Error('360dialog API-Key fehlt.');
+    const url=D360_API_BASE+'/'+String(path||'').replace(/^\/+/, '');
+    const res=await fetch(url,Object.assign({},options,{
+      headers:Object.assign({'D360-API-KEY':D360_API_KEY},options.headers||{})
+    }));
+    const text=await res.text();let data=null;try{data=text?JSON.parse(text):null;}catch(_e){}
+    if(!res.ok)throw new Error((data&&data.error&&data.error.message)||(data&&data.meta&&data.meta.developer_message)||('360dialog API HTTP '+res.status));
+    return data;
+  }
   if(!WHATSAPP_ACCESS_TOKEN)throw new Error('WhatsApp Access Token fehlt.');
   const url='https://graph.facebook.com/'+encodeURIComponent(WHATSAPP_GRAPH_VERSION)+'/'+String(path||'').replace(/^\/+/, '');
-  const res=await fetch(url,Object.assign({},options||{},{
-    headers:Object.assign({'Authorization':'Bearer '+WHATSAPP_ACCESS_TOKEN},options&&options.headers||{})
+  const res=await fetch(url,Object.assign({},options,{
+    headers:Object.assign({'Authorization':'Bearer '+WHATSAPP_ACCESS_TOKEN},options.headers||{})
   }));
-  const text=await res.text();let data=null;try{data=JSON.parse(text);}catch(_e){}
+  const text=await res.text();let data=null;try{data=text?JSON.parse(text):null;}catch(_e){}
   if(!res.ok)throw new Error((data&&data.error&&data.error.message)||('WhatsApp API HTTP '+res.status));
   return data;
 }
 async function downloadWhatsappMediaV10(media){
   if(!media||!media.id||!whatsappConfiguredV10())return;
   try{
-    const meta=await whatsappGraphV10(encodeURIComponent(media.id)+'?phone_number_id='+encodeURIComponent(WHATSAPP_PHONE_NUMBER_ID));
-    if(!meta||!meta.url)throw new Error('Keine Media-URL erhalten.');
-    const res=await fetch(meta.url,{headers:{'Authorization':'Bearer '+WHATSAPP_ACCESS_TOKEN}});
+    let meta,res;
+    if(WHATSAPP_PROVIDER==='360dialog'){
+      meta=await whatsappProviderJsonV10(encodeURIComponent(media.id));
+      if(!meta||!meta.url)throw new Error('Keine 360dialog Media-URL erhalten.');
+      const dl=String(meta.url).replace(/^https:\/\/lookaside\.fbsbx\.com/i,D360_API_BASE);
+      res=await fetch(dl,{headers:{'D360-API-KEY':D360_API_KEY}});
+    }else{
+      meta=await whatsappProviderJsonV10(encodeURIComponent(media.id)+'?phone_number_id='+encodeURIComponent(WHATSAPP_PHONE_NUMBER_ID));
+      if(!meta||!meta.url)throw new Error('Keine Media-URL erhalten.');
+      res=await fetch(meta.url,{headers:{'Authorization':'Bearer '+WHATSAPP_ACCESS_TOKEN}});
+    }
     if(!res.ok)throw new Error('Media Download HTTP '+res.status);
     const max=25*1024*1024,ab=await res.arrayBuffer(),buf=Buffer.from(ab);
     if(buf.length>max)throw new Error('Anhang größer als 25 MB; nicht automatisch gespeichert.');
@@ -9163,14 +9188,17 @@ async function downloadWhatsappMediaV10(media){
 async function markWhatsappMessageReadV10(messageId){
   if(!whatsappConfiguredV10()||!messageId)return false;
   try{
-    await whatsappGraphV10(encodeURIComponent(WHATSAPP_PHONE_NUMBER_ID)+'/messages',{
-      method:'PUT',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({messaging_product:'whatsapp',status:'read',message_id:String(messageId)})
-    });
+    const body=JSON.stringify({messaging_product:'whatsapp',status:'read',message_id:String(messageId)});
+    if(WHATSAPP_PROVIDER==='360dialog'){
+      await whatsappProviderJsonV10('messages',{method:'POST',headers:{'Content-Type':'application/json'},body});
+    }else{
+      await whatsappProviderJsonV10(encodeURIComponent(WHATSAPP_PHONE_NUMBER_ID)+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body});
+    }
     await pool.query('UPDATE whatsapp_messages_v10 SET read_marked=true WHERE id=$1',[String(messageId)]);
     return true;
   }catch(e){console.error('WhatsApp mark read failed',e.message);return false;}
 }
+
 async function markWhatsappThreadReadV10(threadId){
   if(!WHATSAPP_MARK_READ_ON_IMPORT)return {enabled:false,marked:0};
   const q=await pool.query("SELECT id FROM whatsapp_messages_v10 WHERE thread_id=$1 AND direction='inbound' AND read_marked=false ORDER BY message_at",[threadId]);
