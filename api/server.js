@@ -3454,7 +3454,7 @@ async function postgresMonthData(body){
     rawRows.push({
       _start:String(r.start_time||''),date:berlinDateOnly(r.entry_date),customer:String(r.customer||''),
       hours:Number(r.hours||0),activity:String(r.activity||''),
-      transmittedDate:r.transmitted_at_text?germanDateLabel(r.transmitted_at_text):'',
+      transmittedDate:r.transmitted_at_text?germanDateLabel(shadowDateIso(r.transmitted_at_text)||r.transmitted_at_text):'',
       closed:closed.has(berlinDateOnly(r.entry_date)),isAdditionalAssignment:false,assignedBy:'',
       assignmentStatus:'',assignmentNote:'',isSupplement:Boolean(r.is_supplement),
       supplementCreatedAt:berlinDateTime(r.supplement_created_at_text||'')
@@ -3464,7 +3464,7 @@ async function postgresMonthData(body){
     rawRows.push({
       _start:String(r.start_time||''),date:berlinDateOnly(r.entry_date),customer:String(r.customer||''),
       hours:Number(r.assignment_hours||0),activity:String(r.activity||''),
-      transmittedDate:r.transmitted_at_text?germanDateLabel(r.transmitted_at_text):'',
+      transmittedDate:r.transmitted_at_text?germanDateLabel(shadowDateIso(r.transmitted_at_text)||r.transmitted_at_text):'',
       closed:closed.has(berlinDateOnly(r.entry_date)),isAdditionalAssignment:true,
       assignedBy:String(r.assigned_by||''),assignmentStatus:String(r.assignment_status||'Zugeordnet'),
       assignmentNote:String(r.assignment_note||''),isSupplement:false,supplementCreatedAt:''
@@ -3528,7 +3528,41 @@ async function postgresMonthData(body){
     cycleStart,cycleEnd
   };
 }
-function canonicalMonthData(x){return x?JSON.parse(JSON.stringify(x)):null;}
+function canonicalMonthData(x){
+  if(!x)return null;
+  const out=JSON.parse(JSON.stringify(x));
+  const normTransmitted=v=>{
+    const s=String(v||'').trim();if(!s)return '';
+    const de=s.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+    if(de)return de[1]+'.'+de[2]+'.'+de[3];
+    const iso=shadowDateIso(s);
+    return iso?germanDateLabel(iso):s;
+  };
+  out.rows=(Array.isArray(out.rows)?out.rows:[]).map(r=>Object.assign({},r,{
+    date:berlinDateOnly(r&&r.date||''),
+    hours:Math.round(Number(r&&r.hours||0)*100)/100,
+    transmittedDate:normTransmitted(r&&r.transmittedDate)
+  })).sort((a,b)=>{
+    const ka=[
+      String(a.date||''),String(a.customer||''),String(a.activity||''),
+      String(Number(a.hours||0)),String(Boolean(a.isAdditionalAssignment)),
+      String(Boolean(a.isSupplement)),String(a.assignedBy||''),String(a.assignmentStatus||'')
+    ].join('|');
+    const kb=[
+      String(b.date||''),String(b.customer||''),String(b.activity||''),
+      String(Number(b.hours||0)),String(Boolean(b.isAdditionalAssignment)),
+      String(Boolean(b.isSupplement)),String(b.assignedBy||''),String(b.assignmentStatus||'')
+    ].join('|');
+    return ka.localeCompare(kb,'de');
+  });
+  out.monthSummary=Object.assign({
+    vacationDays:0,sickDays:0,holidayDays:0,compensatoryDays:0,compensatoryHours:0,
+    timeBankMonthCredit:0,adjustmentTotal:0
+  },out.monthSummary||{});
+  out.monthSummary.timeBankMonthCredit=Number(out.monthSummary.timeBankMonthCredit||0);
+  out.monthSummary.adjustmentTotal=Number(out.monthSummary.adjustmentTotal||0);
+  return out;
+}
 async function verifyMonthDataShadow(data,body){
   if(!pool||!data)return;
   const year=Number(body&&body.year)||0,month=Number(body&&body.month)||0;
@@ -7292,7 +7326,7 @@ async function bootstrapMonthDataFromLegacyV20(){
     const pg=await postgresMonthData(body);
     if(!pg){skipped++;continue;}
     checked++;
-    const same=stableJsonString(google)===stableJsonString(pg);
+    const same=stableJsonString(canonicalMonthData(google))===stableJsonString(canonicalMonthData(pg));
     const key=monthDataVerifyKey(body);
     if(same){
       await saveShadowVerifyStat(key,1,1,0);
