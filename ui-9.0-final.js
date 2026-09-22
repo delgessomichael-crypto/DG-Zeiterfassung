@@ -713,6 +713,117 @@ function writeJson(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(_e)
 function visibleBoss(){const r=root();return !!(r&&!r.classList.contains('hidden'));}
 function shopCount(){try{const a=JSON.parse(localStorage.getItem(SHOP_KEY)||'[]');return Array.isArray(a)?a.length:0;}catch(_e){return 0;}}
 
+const WA80=window.DG80_WHATSAPP=window.DG80_WHATSAPP||{filter:'Anfrage',data:null,busy:false};
+
+function waCss80(){
+  if(q('dg80WaCss'))return;
+  const s=document.createElement('style');s.id='dg80WaCss';
+  s.textContent=''
+    +'.dg80-wa-status{margin-bottom:12px}.dg80-wa-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0}'
+    +'.dg80-wa-tab{min-height:52px;border:0;border-radius:13px;background:#e5e7eb;color:#111827;font:inherit;font-weight:900;cursor:pointer;padding:10px}'
+    +'.dg80-wa-tab.active{background:#4864a7;color:#fff}.dg80-wa-list{display:grid;gap:12px}'
+    +'.dg80-wa-card{border:1px solid #dbe3ec;border-radius:16px;background:#fff;padding:14px;box-shadow:0 4px 14px rgba(15,23,42,.05)}'
+    +'.dg80-wa-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}'
+    +'.dg80-wa-head strong{font-size:18px}.dg80-wa-badges{display:flex;gap:7px;align-items:center;flex-wrap:wrap}'
+    +'.dg80-wa-score{background:#eef4ff;color:#31589e;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:900}'
+    +'.dg80-wa-cat{background:#e8f7ea;color:#185c2c;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:900}'
+    +'.dg80-wa-msgs{display:grid;gap:7px;margin:10px 0}.dg80-wa-msg{background:#f8fafc;border-radius:10px;padding:9px 10px;white-space:pre-wrap}'
+    +'.dg80-wa-msg time{display:block;color:#64748b;font-size:11px;margin-bottom:3px}.dg80-wa-media{display:flex;gap:7px;flex-wrap:wrap;margin-top:7px}'
+    +'.dg80-wa-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.dg80-wa-setup{border:1px solid #bfd7ff;background:#eef6ff;border-radius:14px;padding:12px;margin-bottom:12px}'
+    +'.dg80-wa-setup code{font-size:12px;word-break:break-all}.dg80-wa-reason{color:#64748b;font-size:13px;margin-top:5px}'
+    +'@media(max-width:700px){.dg80-wa-tabs{grid-template-columns:1fr 1fr}.dg80-wa-actions .btn{flex:1;min-width:140px}}';
+  document.head.appendChild(s);
+}
+function waFmt80(v){
+  if(!v)return '';try{return new Date(v).toLocaleString('de-DE',{dateStyle:'short',timeStyle:'short'});}catch(_e){return String(v);}
+}
+function waNeedNames80(n){
+  const map={accessToken:'Access Token',phoneNumberId:'Phone Number ID',wabaId:'WABA ID',verifyToken:'Verify Token',appSecret:'App Secret'};
+  return Object.keys(n||{}).filter(k=>n[k]).map(k=>map[k]||k);
+}
+function waMediaButtons80(media){
+  return (media||[]).map(m=>{
+    const label=/^image\//.test(String(m.mime||''))?'🖼 Bild öffnen':(/pdf/i.test(String(m.mime||''))?'📄 PDF öffnen':'📎 '+(m.filename||m.type||'Anhang'));
+    const disabled=String(m.status||'')!=='ready';
+    return '<button type="button" class="btn secondary" data-wa-media="'+esc(m.mediaId)+'" data-wa-file="'+esc(m.filename||'')+'" '+(disabled?'disabled title="Anhang wird noch verarbeitet"':'')+'>'+label+'</button>';
+  }).join('');
+}
+function waCard80(t){
+  const msgs=(t.messages||[]).slice(-12).map(m=>{
+    const text=String(m.text||'').trim();
+    const media=waMediaButtons80(m.media);
+    if(!text&&!media)return '';
+    return '<div class="dg80-wa-msg"><time>'+esc(waFmt80(m.messageAt))+' · '+esc(m.type||'Nachricht')+'</time>'+(text?esc(text):'')+(media?'<div class="dg80-wa-media">'+media+'</div>':'')+'</div>';
+  }).join('');
+  const transfer=t.status==='Offen'
+    ?'<button type="button" class="btn success" data-wa-transfer="Anfrage" data-wa-id="'+esc(t.id)+'">Als Anfrage übernehmen</button>'
+      +'<button type="button" class="btn primary" data-wa-transfer="Auftrag" data-wa-id="'+esc(t.id)+'">Als Auftrag übernehmen</button>'
+    :'<span class="status ok">Übernommen als '+esc(t.transferredTo||t.category||'Vorgang')+(t.transferredId?' · '+esc(t.transferredId):'')+'</span>';
+  const classify=t.status==='Offen'
+    ?'<button type="button" class="btn secondary" data-wa-cat="Anfrage" data-wa-id="'+esc(t.id)+'">Anfrage</button>'
+      +'<button type="button" class="btn secondary" data-wa-cat="Auftrag" data-wa-id="'+esc(t.id)+'">Auftrag</button>'
+      +'<button type="button" class="btn secondary" data-wa-cat="Prüfen" data-wa-id="'+esc(t.id)+'">Prüfen</button>'
+      +'<button type="button" class="btn danger" data-wa-cat="Ignoriert" data-wa-id="'+esc(t.id)+'">Nicht relevant</button>'
+    :'';
+  return '<div class="dg80-wa-card" data-wa-thread="'+esc(t.id)+'"><div class="dg80-wa-head"><div><strong>'+esc(t.contactName||t.waId||'WhatsApp-Kontakt')+'</strong>'
+    +'<div class="muted small">'+(t.waId?'<a href="tel:'+esc(t.waId)+'">'+esc(t.waId)+'</a>':'')+(t.lastMessageAt?' · '+esc(waFmt80(t.lastMessageAt)):'')+'</div></div>'
+    +'<div class="dg80-wa-badges"><span class="dg80-wa-cat">'+esc(t.category||'Prüfen')+'</span><span class="dg80-wa-score">Relevanz '+Number(t.relevanceScore||0)+' %</span></div></div>'
+    +(t.classificationReason?'<div class="dg80-wa-reason">'+esc(t.classificationReason)+'</div>':'')
+    +'<div class="dg80-wa-msgs">'+(msgs||'<div class="muted">Keine lesbare Textnachricht.</div>')+'</div>'
+    +'<div class="dg80-wa-actions">'+transfer+classify+'</div></div>';
+}
+function waRender80(){
+  const p=q('dg80WhatsappInquiries'),out=q('dg80WhatsappInquiryList'),st=q('dg80WhatsappStatus');if(!p||!out)return;
+  waCss80();const d=WA80.data||{},threads=Array.isArray(d.threads)?d.threads:[];
+  const missing=waNeedNames80(d.needs);
+  if(st){
+    if(d.configured&&d.webhookConfigured){st.className='status ok dg80-wa-status';st.textContent='WhatsApp Business ist technisch verbunden. Neue Nachrichten kommen per Webhook in Echtzeit an.';}
+    else{st.className='status warn dg80-wa-status';st.textContent='WhatsApp Business ist vorbereitet, aber die Meta-Verbindung ist noch nicht vollständig eingerichtet.';}
+  }
+  const setup=q('dg80WhatsappSetup');
+  if(setup){
+    if(d.configured&&d.webhookConfigured)setup.innerHTML='<strong>Verbindung aktiv.</strong> Nach erfolgreicher Übernahme wird der Vorgang aus diesem DG-Eingang entfernt und die WhatsApp-Nachricht – soweit von Meta unterstützt – als gelesen markiert. WhatsApp-Chats selbst können über die Cloud API nicht archiviert werden.';
+    else setup.innerHTML='<strong>Noch erforderlich:</strong> '+esc(missing.join(', ')||'Meta Webhook-Konfiguration')+(d.webhookUrl?'<br><strong>Webhook:</strong> <code>'+esc(d.webhookUrl)+'</code>':'');
+  }
+  const cats=['Anfrage','Auftrag','Prüfen','Übernommen'];
+  p.querySelectorAll('[data-wa-filter]').forEach(b=>{
+    const f=b.dataset.waFilter;b.classList.toggle('active',f===WA80.filter);
+    const n=threads.filter(t=>f==='Übernommen'?t.status==='Übernommen':(t.status==='Offen'&&t.category===f)).length;
+    b.textContent=(f==='Anfrage'?'Anfragen':f==='Auftrag'?'Aufträge':f)+' ('+n+')';
+  });
+  const rows=threads.filter(t=>WA80.filter==='Übernommen'?t.status==='Übernommen':(t.status==='Offen'&&t.category===WA80.filter));
+  out.innerHTML=rows.map(waCard80).join('')||'<div class="status info">In diesem Bereich sind aktuell keine WhatsApp-Vorgänge.</div>';
+  out.querySelectorAll('[data-wa-cat]').forEach(b=>b.addEventListener('click',()=>waSetCategory80(b.dataset.waId,b.dataset.waCat)));
+  out.querySelectorAll('[data-wa-transfer]').forEach(b=>b.addEventListener('click',()=>waTransfer80(b.dataset.waId,b.dataset.waTransfer)));
+  out.querySelectorAll('[data-wa-media]').forEach(b=>b.addEventListener('click',()=>waOpenMedia80(b.dataset.waMedia,b.dataset.waFile)));
+}
+async function waSetCategory80(id,category){
+  if(WA80.busy)return;WA80.busy=true;
+  try{await api(chefPayload({action:'setWhatsappThreadCategoryV10',id,category}));await window.dg80WhatsappInquiriesLoad(true);}
+  catch(e){alert('WhatsApp-Zuordnung fehlgeschlagen: '+(e&&e.message?e.message:e));}finally{WA80.busy=false;}
+}
+async function waTransfer80(id,kind){
+  if(WA80.busy)return;
+  const text=kind==='Auftrag'?'als laufenden Auftrag':'als Kundenanfrage';
+  if(!confirm('Diesen WhatsApp-Vorgang '+text+' übernehmen?'))return;
+  WA80.busy=true;
+  try{
+    const r=await api(chefPayload({action:'transferWhatsappThreadV10',id,kind}));
+    await window.dg80WhatsappInquiriesLoad(true);
+    try{if(typeof window.d3Dashboard==='function')await window.d3Dashboard(true);}catch(_e){}
+    if(r&&r.targetId)alert('Übernommen: '+r.targetId);
+  }catch(e){alert('WhatsApp-Übernahme fehlgeschlagen: '+(e&&e.message?e.message:e));}finally{WA80.busy=false;}
+}
+async function waOpenMedia80(mediaId,filename){
+  if(!mediaId)return;
+  try{
+    const r=await api(chefPayload({action:'getWhatsappMediaV10',mediaId,force:true}));
+    const bin=atob(String(r.base64||'')),bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+    const blob=new Blob([bytes],{type:r.mime||'application/octet-stream'}),url=URL.createObjectURL(blob);
+    const w=window.open(url,'_blank','noopener,noreferrer');if(!w){const a=document.createElement('a');a.href=url;a.download=r.filename||filename||'WhatsApp-Anhang';a.click();}
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+  }catch(e){alert('Anhang konnte nicht geöffnet werden: '+(e&&e.message?e.message:e));}
+}
 function ensureExternalInquiryPanels(){
   const r=root();if(!r)return;
   if(!q('dg80WebsiteInquiries')){
@@ -721,16 +832,23 @@ function ensureExternalInquiryPanels(){
     r.appendChild(p);
   }
   if(!q('dg80WhatsappInquiries')){
+    waCss80();
     const p=document.createElement('div');p.id='dg80WhatsappInquiries';p.className='card d3-main';
-    p.innerHTML='<div class="status info"><strong>WhatsApp</strong><br>Der Bereich ist für die spätere WhatsApp-Business-Anbindung vorbereitet. Private Chats werden nicht übernommen.</div>'
-      +'<div class="button-row" style="margin:12px 0"><button type="button" class="btn primary" data-wa-filter="Anfragen">Anfragen</button><button type="button" class="btn secondary" data-wa-filter="Aufträge">Aufträge</button></div>'
-      +'<div id="dg80WhatsappInquiryList" class="muted">Noch keine WhatsApp-Business-Verbindung aktiv.</div>';
+    p.innerHTML='<div id="dg80WhatsappStatus" class="status info dg80-wa-status">WhatsApp-Eingang wird geladen ...</div>'
+      +'<div id="dg80WhatsappSetup" class="dg80-wa-setup"></div>'
+      +'<div class="dg80-wa-tabs"><button type="button" class="dg80-wa-tab active" data-wa-filter="Anfrage">Anfragen</button><button type="button" class="dg80-wa-tab" data-wa-filter="Auftrag">Aufträge</button><button type="button" class="dg80-wa-tab" data-wa-filter="Prüfen">Prüfen</button><button type="button" class="dg80-wa-tab" data-wa-filter="Übernommen">Übernommen</button></div>'
+      +'<div id="dg80WhatsappInquiryList" class="dg80-wa-list"><div class="muted">WhatsApp-Daten werden geladen ...</div></div>';
     r.appendChild(p);
-    p.querySelectorAll('[data-wa-filter]').forEach(b=>b.addEventListener('click',()=>{p.querySelectorAll('[data-wa-filter]').forEach(x=>{x.classList.toggle('primary',x===b);x.classList.toggle('secondary',x!==b);});const out=q('dg80WhatsappInquiryList');if(out)out.textContent='Filter „'+b.dataset.waFilter+'“ ist vorbereitet. Daten erscheinen hier nach Einrichtung der WhatsApp-Business-Schnittstelle.';}));
+    p.querySelectorAll('[data-wa-filter]').forEach(btn=>btn.addEventListener('click',()=>{WA80.filter=btn.dataset.waFilter;waRender80();}));
   }
 }
 window.dg80WebsiteInquiriesLoad=async function(){ensureExternalInquiryPanels();const out=q('dg80WebsiteInquiryList');if(out)out.textContent='Noch keine direkte Webseiten-Anbindung aktiv.';};
-window.dg80WhatsappInquiriesLoad=async function(){ensureExternalInquiryPanels();const out=q('dg80WhatsappInquiryList');if(out&&!out.textContent.trim())out.textContent='Noch keine WhatsApp-Business-Verbindung aktiv.';};
+window.dg80WhatsappInquiriesLoad=async function(force){
+  ensureExternalInquiryPanels();const st=q('dg80WhatsappStatus');if(st){st.className='status info dg80-wa-status';st.textContent='WhatsApp-Eingang wird geladen ...';}
+  try{WA80.data=await api(chefPayload({action:'getWhatsappInboxV10',force:!!force}));waRender80();return WA80.data;}
+  catch(e){if(st){st.className='status error dg80-wa-status';st.textContent='WhatsApp-Eingang konnte nicht geladen werden: '+(e&&e.message?e.message:e);}throw e;}
+};
+window.dg80WhatsappOpenMedia=waOpenMedia80;
 
 function empStatsFmt(v){return Number(v||0).toFixed(2).replace('.',',');}
 function empStatsDate(v){const p=String(v||'').split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:String(v||'');}
@@ -990,6 +1108,7 @@ function openLeaf(key,force){
   setOfficePath(parent?GROUPS[parent].title:'',leafTitle,!!parent);
   markActive(parent||mainForLeaf(key));
   if(key==='partnerNetwork')setTimeout(()=>{loadPartnerNetwork80().catch(()=>{});},0);
+  if(key==='whatsappInquiries')setTimeout(()=>{window.dg80WhatsappInquiriesLoad?.(false).catch(()=>{});},0);
   if(key==='days')setTimeout(()=>{installDayReviewWrap();const f=fn('loadBossDayClosuresV48');if(f)Promise.resolve(f()).catch(()=>{});},20);
   setTimeout(syncLabels,0);return true;
 }
@@ -2862,6 +2981,9 @@ async function runLoaderByTitle(title){
   }
   if(t==='mitarbeiter auswertungen'){
     if(typeof window.dg80EmployeeStatsLoad==='function'){await window.dg80EmployeeStatsLoad(true);return;}
+  }
+  if(t==='whatsapp'){
+    if(typeof window.dg80WhatsappInquiriesLoad==='function'){await window.dg80WhatsappInquiriesLoad(true);return;}
   }
   if(t==='krank-fristen'){
     if(typeof window.loadSicknessAlerts734==='function'){await window.loadSicknessAlerts734();return;}
