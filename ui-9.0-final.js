@@ -101,6 +101,7 @@ const CATALOG=[
   {key:'offerStats',label:'Angebotsstatistik',parent:'d3Offers',child:'d3Stats',cls:'offer-stats',counter:null,loader:'loadStats'},
   {key:'shopping',label:'Einkaufsliste',special:'shopping',cls:'shopping',counter:'d3Count-shopping'},
   {key:'maintenance',label:'Wartungen',panel:'d36Maintenance',cls:'maintenance',counter:'d3Count-maintenance',loader:'d36LoadMaintenance'},
+  {key:'partnerNetwork',label:'Partnernetzwerk',panel:'dg10Partner',cls:'partner-network',counter:'dg80c-partnerNetwork',loader:'loadPartner10'},
   {key:'days',label:'Offene Tagesabschlüsse',parent:'d3Admin',child:'dg48EmployeeClosures',cls:'days',counter:'d3Count-days',loader:'loadBossDayClosuresV48'},
   {key:'payroll',label:'Monatsabschluss & Lohnübergabe',panel:'d3PayrollStandalone',cls:'payroll',counter:'dg80TopPayroll',loader:'dg80PayrollInstall'},
   {key:'absence',label:'Urlaub / Abwesenheiten / Feiertage',parent:'d3Admin',child:'dg48AbsenceGroup',cls:'absence',counter:null,loader:'loadChefAdministration'},
@@ -468,7 +469,7 @@ const EXTRA_TTL=3600000;
 const SHOP_KEY='dg71_shopping_lists_v1';
 
 const SECTIONS=[
-  {key:'daily',label:'Tägliches Geschäft',tiles:['completed','running','offerCreate','offerOpen','shopping','maintenance','days','reminders','customers']},
+  {key:'daily',label:'Tägliches Geschäft',tiles:['completed','running','offerCreate','offerOpen','shopping','maintenance','partnerNetwork','days','reminders','customers']},
   {key:'admin',label:'Personal & Verwaltung',tiles:['payroll','admin','health']},
   {key:'archive',label:'Archive & Auswertung',tiles:['billed','offerArchive','offerStats']}
 ];
@@ -479,6 +480,7 @@ const TILES={
   offerOpen:{label:'Offene Angebote',count:'dg80c-offerOpen',legacy:'offer-open',leaf:'offerOpen'},
   shopping:{label:'Einkaufsliste',count:'d3Count-shopping',legacy:'shopping',leaf:'shopping'},
   maintenance:{label:'Wartungen',count:'d3Count-maintenance',legacy:'maintenance',leaf:'maintenance'},
+  partnerNetwork:{label:'Partnernetzwerk',count:'dg80c-partnerNetwork',legacy:'partner-network',leaf:'partnerNetwork'},
   days:{label:'Offene Tagesabschlüsse',count:'d3Count-days',legacy:'days',leaf:'days'},
   reminders:{label:'Reminder',count:'d3Count-reminders',legacy:'reminders',leaf:'reminders'},
   customers:{label:'Offene Anfragen',count:'d3Count-inquiries',legacy:'inquiries',group:'customers'},
@@ -522,6 +524,7 @@ const LEAF={
   offerStats:{title:'Angebotsstatistik'},
   shopping:{title:'Einkaufsliste'},
   maintenance:{title:'Wartungen'},
+  partnerNetwork:{title:'Partnernetzwerk'},
   days:{title:'Offene Tagesabschlüsse'},
   reminders:{title:'Reminder'},
   payroll:{title:'Lohnübergabe'},
@@ -720,7 +723,7 @@ function layout(){
   return out;
 }
 function tileHtml(k,counts){
-  const t=TILES[k],v=counts[k]!==undefined?counts[k]:'…';
+  const t=TILES[k],v=counts[k]!==undefined?counts[k]:(k==='partnerNetwork'?'›':'…');
   return '<button type="button" draggable="true" class="d3-tile dg80-final-tile '+esc(t.legacy||k)+'" data-dg80-final="'+esc(k)+'" data-dg80-key="'+esc(t.leaf||k)+'"><span>'+esc(t.label)+'</span><strong id="'+esc(t.count)+'">'+esc(v)+'</strong></button>';
 }
 function saveLayout(){

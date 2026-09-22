@@ -5609,7 +5609,7 @@ window.dg742EnsureOffice=installOffice742;
 const q=id=>document.getElementById(id);
 const esc10=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const bossPayload10=o=>typeof chefPayload==='function'?chefPayload(o):Object.assign({},o,{employee:(typeof auth==='function'?auth().employee:''),employeePin:(typeof auth==='function'?auth().pin:'')});
-function addCss10(){if(q('dg10EnhanceCss'))return;const st=document.createElement('style');st.id='dg10EnhanceCss';st.textContent='.dg10-mic{width:auto!important;min-width:44px!important;margin-left:6px;padding:8px 10px!important}.dg10-speech-wrap{display:flex;align-items:flex-start;gap:6px}.dg10-speech-wrap>input,.dg10-speech-wrap>textarea{flex:1}.dg10-panel{border:1px solid #dbe3ec;border-radius:14px;padding:14px;margin:12px 0;background:#fff}.dg10-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.dg10-stat{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:10px}.dg10-stat b{display:block;font-size:20px}.dg10-mergebar{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.dg10-partner{border-top:1px solid #e5e7eb;padding:9px 0}.dg10-aiout{white-space:pre-wrap;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px;min-height:60px}.dg10-hide{display:none!important}';document.head.appendChild(st);}
+function addCss10(){if(q('dg10EnhanceCss'))return;const st=document.createElement('style');st.id='dg10EnhanceCss';st.textContent='.dg10-mic{width:auto!important;min-width:44px!important;margin-left:6px;padding:8px 10px!important}.dg10-speech-wrap{display:flex;align-items:flex-start;gap:6px}.dg10-speech-wrap>input,.dg10-speech-wrap>textarea{flex:1}.dg10-panel{border:1px solid #dbe3ec;border-radius:14px;padding:14px;margin:12px 0;background:#fff}.dg10-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.dg10-stat{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:10px}.dg10-stat b{display:block;font-size:20px}.dg10-mergebar{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.dg10-partner{border:1px solid #e5e7eb;border-radius:14px;padding:12px;margin:10px 0;background:#fff}.dg10-trade-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:10px 0 14px}.dg10-trade-btn{min-height:72px;border:1px solid #a9d9b4;border-radius:16px;background:#e8f7ea;color:#185c2c;padding:12px;font:inherit;font-weight:900;cursor:pointer;text-align:center}.dg10-trade-btn:hover,.dg10-trade-btn.active{background:#d9f2de;border-color:#78c48a;box-shadow:0 0 0 3px rgba(47,133,90,.12)}.dg10-trade-add{font-size:34px;line-height:1;display:flex;align-items:center;justify-content:center}.dg10-trade-detail{border-top:1px solid #e5e7eb;padding-top:14px;margin-top:4px}.dg10-trade-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}.dg10-partner-meta{display:grid;gap:4px;margin-top:7px}.dg10-partner-note{margin-top:8px;padding-top:8px;border-top:1px dashed #dbe3ec}.dg10-partner-empty{padding:14px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;background:#f8fafc}@media(max-width:650px){.dg10-trade-grid{grid-template-columns:1fr 1fr}.dg10-trade-btn{min-height:64px}}.dg10-aiout{white-space:pre-wrap;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px;min-height:60px}.dg10-hide{display:none!important}';document.head.appendChild(st);}
 
 /* 1. Spracheingabe */
 const Speech10=window.SpeechRecognition||window.webkitSpeechRecognition;let rec10=null,btn10=null;
@@ -5627,11 +5627,90 @@ function refreshEmpSelect10(){const sel=q('dg10EmpSelect');if(!sel)return;const 
 async function loadEmp10(){const sel=q('dg10EmpSelect'),out=q('dg10EmpResult');if(!sel||!sel.value||!out)return;out.textContent='Wird geladen ...';try{const d=await api(bossPayload10({action:'getEmployeeWorkOverviewV10',targetEmployee:sel.value}));const fmt=n=>Number(n||0).toFixed(2).replace('.',',');const rows=[['Woche aktuell',fmt(d.weekHours)+' Std.'],['Wochenstunden',fmt(d.weeklyTarget)+' Std.'],['Monat aktuell',fmt(d.monthHours)+' Std.'],['Jahr aktuell',fmt(d.yearHours)+' Std.'],['Urlaubsanspruch',fmt(d.vacationEntitlement)+' Tage'],['Urlaub genommen',fmt(d.vacationUsed)+' Tage'],['Resturlaub',fmt(d.vacationRemaining)+' Tage'],['Krankheit '+d.year,d.sickDays+' Tage'],['Unerlaubte Abwesenheit '+d.year,d.unexcusedDays+' Tage']];out.innerHTML='<div class="dg10-grid">'+rows.map(x=>'<div class="dg10-stat"><span>'+esc10(x[0])+'</span><b>'+esc10(x[1])+'</b></div>').join('')+'</div>';}catch(e){out.textContent=e.message;}}
 
 /* 4. Partnernetzwerk */
-let partner10=[];
-function ensurePartner10(){if(q('dg10Partner')||!q('bossView'))return;const c=document.createElement('div');c.id='dg10Partner';c.className='card';c.innerHTML='<h2>Partnernetzwerk</h2><div class="button-row"><button class="btn primary" id="dg10PartnerLoad">Aktualisieren</button><button class="btn success" id="dg10PartnerCat">+ Kategorie</button></div><div id="dg10PartnerBody"></div>';q('bossView').appendChild(c);q('dg10PartnerLoad').onclick=loadPartner10;q('dg10PartnerCat').onclick=addCat10;loadPartner10();}
-async function loadPartner10(){const out=q('dg10PartnerBody');if(!out)return;try{partner10=await api(bossPayload10({action:'getPartnerNetworkV10'}))||[];out.innerHTML=partner10.map(c=>'<details><summary><strong>'+esc10(c.name)+'</strong> · '+(c.partners||[]).length+'</summary><div class="button-row"><button class="btn success" onclick="return dg10AddPartner(\''+esc10(c.id)+'\')">+ Partner</button></div>'+((c.partners||[]).map(p=>'<div class="dg10-partner"><strong>'+esc10(p.company||p.contactName||'Partner')+'</strong><div class="muted small">'+esc10([p.contactName,p.phone,p.mobile,p.email,p.address].filter(Boolean).join(' · '))+'</div></div>').join('')||'<div class="muted">Noch keine Partner.</div>')+'</details>').join('');speech10(out);}catch(e){out.textContent=e.message;}}
-function addCat10(){const n=prompt('Neue Kategorie:');if(!n||!n.trim())return;api(bossPayload10({action:'savePartnerCategoryV10',name:n.trim()})).then(loadPartner10).catch(e=>alert(e.message));}
-window.dg10AddPartner=function(cat){if(typeof d3Form!=='function')return false;d3Form('Partner anlegen',[{name:'company',label:'Firma'},{name:'contactName',label:'Ansprechpartner'},{name:'phone',label:'Telefon'},{name:'mobile',label:'Mobil'},{name:'email',label:'E-Mail',type:'email'},{name:'address',label:'Adresse'},{name:'website',label:'Website'},{name:'notes',label:'Notizen',type:'textarea'}],{},async v=>{await api(bossPayload10({action:'savePartnerV10',item:Object.assign({},v,{categoryId:cat})}));await loadPartner10();});setTimeout(()=>speech10(document),0);return false;};
+const PARTNER_DEFAULTS10=['Elektriker','Fliesenleger','Trockenbauer','Estrichleger'];
+let partner10=[],activePartnerCat10='';
+function ensurePartner10(){
+  if(q('dg10Partner')||!q('bossView'))return;
+  const c=document.createElement('div');c.id='dg10Partner';c.className='card d3-main';
+  c.innerHTML='<div class="muted small" style="margin-bottom:10px">Partnerbetriebe nach Gewerk verwalten.</div><div id="dg10PartnerStatus"></div><div id="dg10PartnerBody"></div>';
+  q('bossView').appendChild(c);
+}
+function sortPartnerCats10(rows){
+  const pos=new Map(PARTNER_DEFAULTS10.map((n,i)=>[n.toLowerCase(),i]));
+  return (rows||[]).slice().sort((a,b)=>{const ai=pos.has(String(a.name||'').toLowerCase())?pos.get(String(a.name||'').toLowerCase()):1000+Number(a.sortOrder||999),bi=pos.has(String(b.name||'').toLowerCase())?pos.get(String(b.name||'').toLowerCase()):1000+Number(b.sortOrder||999);return ai-bi||String(a.name||'').localeCompare(String(b.name||''),'de');});
+}
+async function ensureDefaultPartnerCats10(rows){
+  const names=new Set((rows||[]).map(x=>String(x.name||'').trim().toLowerCase()));
+  let changed=false;
+  for(const name of PARTNER_DEFAULTS10)if(!names.has(name.toLowerCase())){await api(bossPayload10({action:'savePartnerCategoryV10',name}));changed=true;}
+  return changed;
+}
+function partnerMeta10(label,value){
+  value=String(value||'').trim();return value?'<div><strong>'+esc10(label)+':</strong> '+esc10(value)+'</div>':'';
+}
+function partnerCard10(p){
+  return '<div class="dg10-partner"><strong>'+esc10(p.company||p.contactName||'Partnerbetrieb')+'</strong><div class="dg10-partner-meta muted small">'
+    +partnerMeta10('Ansprechpartner',p.contactName)+partnerMeta10('Telefon',p.phone)+partnerMeta10('Mobil',p.mobile)+partnerMeta10('E-Mail',p.email)+partnerMeta10('Adresse',p.address)+partnerMeta10('Website',p.website)
+    +'</div>'+(p.notes?'<div class="dg10-partner-note muted small">'+esc10(p.notes)+'</div>':'')+'</div>';
+}
+function renderPartnerMenu10(){
+  const out=q('dg10PartnerBody');if(!out)return;
+  const total=partner10.reduce((n,c)=>n+(c.partners||[]).length,0),counter=q('dg80c-partnerNetwork');if(counter)counter.textContent=String(total);
+  out.innerHTML='<div class="dg10-trade-grid">'+partner10.map(c=>'<button type="button" class="dg10-trade-btn" data-dg10-cat="'+esc10(c.id)+'">'+esc10(c.name)+'</button>').join('')
+    +'<button type="button" class="dg10-trade-btn dg10-trade-add" id="dg10PartnerCat" title="Weiteres Gewerk anlegen" aria-label="Weiteres Gewerk anlegen">+</button></div><div id="dg10TradeDetail" class="dg10-trade-detail"></div>';
+  out.querySelectorAll('[data-dg10-cat]').forEach(b=>b.addEventListener('click',()=>dg10OpenTrade(b.dataset.dg10Cat)));
+  q('dg10PartnerCat').addEventListener('click',addCat10);
+  if(activePartnerCat10&&partner10.some(x=>String(x.id)===String(activePartnerCat10)))dg10OpenTrade(activePartnerCat10);
+}
+function dg10OpenTrade(id){
+  activePartnerCat10=String(id||'');
+  const cat=partner10.find(x=>String(x.id)===activePartnerCat10),detail=q('dg10TradeDetail');if(!cat||!detail)return false;
+  q('dg10PartnerBody')?.querySelectorAll('[data-dg10-cat]').forEach(b=>b.classList.toggle('active',String(b.dataset.dg10Cat)===activePartnerCat10));
+  const partners=cat.partners||[];
+  detail.innerHTML='<div class="dg10-trade-head"><div><h3 style="margin:0">'+esc10(cat.name)+'</h3><div class="muted small">'+partners.length+' Partnerbetrieb(e)</div></div><button type="button" class="btn success" id="dg10AddPartnerBtn">+ Partner hinzufügen</button></div>'
+    +'<div style="margin-top:10px">'+(partners.map(partnerCard10).join('')||'<div class="dg10-partner-empty">Noch kein Partnerbetrieb in diesem Gewerk hinterlegt.</div>')+'</div>';
+  q('dg10AddPartnerBtn').addEventListener('click',()=>window.dg10AddPartner(activePartnerCat10));
+  return false;
+}
+async function loadPartner10(){
+  const out=q('dg10PartnerBody'),st=q('dg10PartnerStatus');if(!out)return;
+  try{
+    if(st){st.className='status info';st.textContent='Partnernetzwerk wird geladen ...';}
+    let rows=await api(bossPayload10({action:'getPartnerNetworkV10'}))||[];
+    if(await ensureDefaultPartnerCats10(rows))rows=await api(bossPayload10({action:'getPartnerNetworkV10'}))||[];
+    partner10=sortPartnerCats10(rows);renderPartnerMenu10();
+    if(st){st.className='status ok';st.textContent='Partnernetzwerk geladen.';}
+  }catch(e){if(st){st.className='status error';st.textContent=e.message;}else out.textContent=e.message;}
+}
+function addCat10(){
+  if(typeof d3Form!=='function')return false;
+  d3Form('Weiteres Gewerk anlegen',[{name:'name',label:'Gewerk',required:true}],{},async v=>{
+    const name=String(v.name||'').trim();if(!name)throw new Error('Bitte das Gewerk eintragen.');
+    const r=await api(bossPayload10({action:'savePartnerCategoryV10',name}));activePartnerCat10=String(r.id||'');await loadPartner10();
+  });
+  return false;
+}
+window.dg10AddPartner=function(cat){
+  if(typeof d3Form!=='function')return false;
+  const c=partner10.find(x=>String(x.id)===String(cat)),title=c?'Partner hinzufügen – '+c.name:'Partner hinzufügen';
+  d3Form(title,[
+    {name:'company',label:'Firmenname',required:true},
+    {name:'contactName',label:'Ansprechpartner'},
+    {name:'address',label:'Anschrift'},
+    {name:'phone',label:'Telefon'},
+    {name:'mobile',label:'Mobil'},
+    {name:'email',label:'E-Mail',type:'email'},
+    {name:'website',label:'Website'},
+    {name:'notes',label:'Notizen',type:'textarea'}
+  ],{},async v=>{
+    if(!String(v.company||'').trim())throw new Error('Bitte den Firmennamen eintragen.');
+    await api(bossPayload10({action:'savePartnerV10',item:Object.assign({},v,{categoryId:String(cat)})}));
+    activePartnerCat10=String(cat);await loadPartner10();
+  });
+  setTimeout(()=>{speech10(document);places10(document);},0);return false;
+};
+window.loadPartner10=loadPartner10;
+window.dg10OpenTrade=dg10OpenTrade;
 
 /* 6. Anfragen zusammenführen */
 let mergeIds10=new Set();
