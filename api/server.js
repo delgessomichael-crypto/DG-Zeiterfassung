@@ -3383,14 +3383,14 @@ function monthDataVerifyKey(body){
 async function postgresMonthData(body){
   const employee=String(body&&body.employee||'').trim(),year=Number(body&&body.year)||0,month=Number(body&&body.month)||0;
   if(!employee||!year||month<1||month>12)return null;
-  const prefix=String(year)+'-'+String(month).padStart(2,'0')+'-';
+  const cycle=pgPayrollCycleRange(year,month),cycleStart=cycle.start,cycleEnd=cycle.end;
   const [own,assigned,statusQ,closureQ,adjQ,bankQ,annual]=await Promise.all([
     pool.query(
       `SELECT id,entry_date,customer,start_time,hours,activity,transmitted_at_text,is_supplement,supplement_created_at_text
          FROM time_entries_shadow
-        WHERE employee_name=$1 AND entry_date LIKE $2 AND entry_date>='2026-09-07'
+        WHERE employee_name=$1 AND entry_date>=$2 AND entry_date<=$3
         ORDER BY entry_date ASC,start_time ASC,id ASC`,
-      [employee,prefix+'%']
+      [employee,cycleStart,cycleEnd]
     ),
     pool.query(
       `SELECT a.id AS assignment_id,a.hours AS assignment_hours,a.status AS assignment_status,a.note AS assignment_note,
@@ -3398,19 +3398,19 @@ async function postgresMonthData(body){
          FROM assignments_shadow a
          JOIN time_entries_shadow t ON t.id=a.source_entry_id
         WHERE a.employee_name=$1 AND COALESCE(a.status,'Zugeordnet')<>'Ersetzt'
-          AND t.entry_date LIKE $2 AND t.entry_date>='2026-09-07'
+          AND t.entry_date>=$2 AND t.entry_date<=$3
         ORDER BY t.entry_date ASC,t.start_time ASC,a.id ASC`,
-      [employee,prefix+'%']
+      [employee,cycleStart,cycleEnd]
     ),
     pool.query(
       `SELECT status_date,status,source,credited_hours,credited_hours_missing FROM day_status_shadow
-        WHERE employee_name=$1 AND status_date LIKE $2 AND status_date>='2026-09-07'
+        WHERE employee_name=$1 AND status_date>=$2 AND status_date<=$3
         ORDER BY status_date ASC`,
-      [employee,prefix+'%']
+      [employee,cycleStart,cycleEnd]
     ),
     pool.query(
-      `SELECT closure_date FROM day_closures_shadow WHERE employee_name=$1 AND closure_date LIKE $2`,
-      [employee,prefix+'%']
+      `SELECT closure_date FROM day_closures_shadow WHERE employee_name=$1 AND closure_date>=$2 AND closure_date<=$3`,
+      [employee,cycleStart,cycleEnd]
     ),
     pool.query(
       `SELECT id,hours,reason,created_at_text,created_by FROM monthly_adjustments_shadow
@@ -3500,18 +3500,19 @@ async function postgresMonthData(body){
   const actualTotal=round(workTotal+creditedTotal+adjustmentTotal);
   return {
     rows,total:actualTotal,actualTotal,adjustmentTotal,workTotal,workTotalGross,automaticPauseTotal,dayTotals,
-    creditedTotal,statusCredit,timeBankMonthCredit,timeBankBalance:0,statuses,monthSummary,yearSummary
+    creditedTotal,statusCredit,timeBankMonthCredit,timeBankBalance:0,statuses,monthSummary,yearSummary,
+    cycleStart,cycleEnd
   };
 }
 function canonicalMonthData(x){return x?JSON.parse(JSON.stringify(x)):null;}
 async function verifyMonthDataShadow(data,body){
   if(!pool||!data)return;
   const year=Number(body&&body.year)||0,month=Number(body&&body.month)||0;
-  const now=berlinNowParts(),requested=year*100+month,current=now.year*100+now.month;
-  const key=monthDataVerifyKey(body);
-  if(requested>current){
+  const now=berlinNowParts(),today=String(now.year)+'-'+String(now.month).padStart(2,'0')+'-'+String(now.day).padStart(2,'0');
+  const key=monthDataVerifyKey(body),cycle=pgPayrollCycleRange(year,month);
+  if(cycle.start>today){
     if(key)await pool.query('DELETE FROM shadow_verify_stats WHERE shadow_name=$1',[key]);
-    console.log('SHADOW_VERIFY '+key+' skipped=future_month');
+    console.log('SHADOW_VERIFY '+key+' skipped=future_cycle');
     return;
   }
   const pg=await postgresMonthData(body);if(!pg)return;
