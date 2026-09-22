@@ -106,6 +106,7 @@ const CATALOG=[
   {key:'absence',label:'Urlaub / Abwesenheiten / Feiertage',parent:'d3Admin',child:'dg48AbsenceGroup',cls:'absence',counter:null,loader:'loadChefAdministration'},
   {key:'sickness',label:'Krank-Fristen',parent:'d3Admin',child:'dg48AbsenceGroup',cls:'sickness734',counter:'d3Count-sickness734',loader:'loadChefAdministration',after:'sickness'},
   {key:'employeeAdmin',label:'Mitarbeiterverwaltung',parent:'d3Admin',child:'d3EmployeeAdmin',cls:'employee-admin',counter:null,loader:'loadChefAdministration'},
+  {key:'employeeStats',label:'Mitarbeiter Auswertungen',panel:'dg80EmployeeStats',cls:'employee-stats',counter:null,loader:'dg80EmployeeStatsLoad'},
   {key:'reminders',label:'Reminder',panel:'d3Reminder',cls:'reminders',counter:'d3Count-reminders',loader:'loadReminders'},
   {key:'inquiries',label:'Offene Anfragen',parent:'d3InquiriesGroup',child:'d3Inquiries',fallback:'d3Inquiries',cls:'inquiries',counter:'d3Count-inquiries',loader:'d3Inquiries'},
   {key:'inquiryArchive',label:'Anfragenarchiv',parent:'d3InquiriesGroup',child:'d3InquiryArchive',cls:'inquiry-archive',counter:null,loader:'d3InquiryArchiveList'},
@@ -309,7 +310,7 @@ function dirtyTarget(e){
   const t=e.target;if(!t||!S.active)return false;
   if(!t.matches('input,textarea,select'))return false;
   if(t.matches('.regie-merge-select,.d3-photo,.dg62cb,.dg62-share-extra'))return false;
-  if(/^(bossYear|bossMonth|empYear|empMonth|regieYear|regieMonth|dg48DayYear|dg48DayMonth|dg520Year|dg520Month|adminEmployeeSearch|adminEmployeeSelect|adminTimeBankEmployee|vacationEmployee|vacationYear|holidayYear)$/i.test(t.id||''))return false;
+  if(/^(bossYear|bossMonth|empYear|empMonth|regieYear|regieMonth|dg48DayYear|dg48DayMonth|dg520Year|dg520Month|adminEmployeeSearch|adminEmployeeSelect|adminTimeBankEmployee|vacationEmployee|vacationYear|holidayYear|dg80EmployeeStatsSelect)$/i.test(t.id||''))return false;
   const c=cfg(S.active),w=wrapperFor(c);return !!(w&&w.contains(t));
 }
 function bindDirtyTracking(){
@@ -499,6 +500,7 @@ const GROUPS={
     title:'Mitarbeiterverwaltung',
     items:[
       {key:'employeeAdmin',label:'Mitarbeiterverwaltung'},
+      {key:'employeeStats',label:'Mitarbeiter Auswertungen'},
       {key:'days',label:'Übertragene Tagesabschlüsse / Prüfung'},
       {key:'absence',label:'Urlaub / Abwesenheiten / Feiertage'},
       {key:'sickness',label:'Krank-Fristen'}
@@ -523,6 +525,7 @@ const LEAF={
   aqon:{title:'AQON PURE Anfragen'},
   inquiryArchive:{title:'Anfragenarchiv'},
   employeeAdmin:{title:'Mitarbeiterverwaltung'},
+  employeeStats:{title:'Mitarbeiter Auswertungen'},
   absence:{title:'Urlaub / Abwesenheiten / Feiertage'},
   sickness:{title:'Krank-Fristen'},
   health:{title:'Systemcheck'}
@@ -541,6 +544,67 @@ function readJson(k,f){try{const v=JSON.parse(localStorage.getItem(k)||'null');r
 function writeJson(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(_e){}}
 function visibleBoss(){const r=root();return !!(r&&!r.classList.contains('hidden'));}
 function shopCount(){try{const a=JSON.parse(localStorage.getItem(SHOP_KEY)||'[]');return Array.isArray(a)?a.length:0;}catch(_e){return 0;}}
+
+function empStatsFmt(v){return Number(v||0).toFixed(2).replace('.',',');}
+function empStatsDate(v){const p=String(v||'').split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:String(v||'');}
+function ensureEmployeeStatsPanel(){
+  const r=root();if(!r)return null;
+  let p=q('dg80EmployeeStats');
+  if(p)return p;
+  p=document.createElement('div');p.id='dg80EmployeeStats';p.className='card d3-main';
+  p.innerHTML='<div class="dg80-empstats-intro">Arbeitszeit, Urlaub und Fehlzeiten eines Mitarbeiters auf einen Blick.</div>'
+    +'<div class="dg80-empstats-controls"><div><label for="dg80EmployeeStatsSelect">Mitarbeiter</label><select id="dg80EmployeeStatsSelect"><option value="">Bitte Mitarbeiter wählen</option></select></div>'
+    +'<button type="button" class="btn primary" id="dg80EmployeeStatsRefresh">Auswertung laden</button></div>'
+    +'<div id="dg80EmployeeStatsStatus"></div><div id="dg80EmployeeStatsResult"></div>';
+  r.appendChild(p);
+  q('dg80EmployeeStatsSelect').addEventListener('change',()=>{try{localStorage.setItem('dg80_employee_stats_selected',q('dg80EmployeeStatsSelect').value||'');}catch(_e){}dg80EmployeeStatsLoad(false);});
+  q('dg80EmployeeStatsRefresh').addEventListener('click',()=>dg80EmployeeStatsLoad(true));
+  return p;
+}
+async function fillEmployeeStatsEmployees(){
+  const sel=q('dg80EmployeeStatsSelect');if(!sel)return [];
+  let rows=Array.isArray(window.__employeeAdminRows)?window.__employeeAdminRows:[];
+  if(!rows.length){
+    try{rows=await api(chefPayload({action:'getEmployeeAdminData'}))||[];window.__employeeAdminRows=rows;}catch(_e){}
+  }
+  if(!rows.length){
+    try{const names=await api({action:'getEmployees'});rows=(names||[]).map(name=>({name,active:true}));}catch(_e){}
+  }
+  const old=sel.value,saved=(()=>{try{return localStorage.getItem('dg80_employee_stats_selected')||'';}catch(_e){return '';}})();
+  sel.innerHTML='<option value="">Bitte Mitarbeiter wählen</option>'+rows.map(x=>'<option value="'+esc(x.name)+'">'+esc(x.name)+(x.active===false?' (inaktiv)':'')+'</option>').join('');
+  const wanted=[old,saved,(typeof auth==='function'?auth().employee:'')].find(v=>v&&rows.some(x=>x.name===v))||String(rows.find(x=>x.active!==false)?.name||rows[0]?.name||'');
+  if(wanted)sel.value=wanted;
+  return rows;
+}
+async function dg80EmployeeStatsLoad(force){
+  const panel=ensureEmployeeStatsPanel(),out=q('dg80EmployeeStatsResult'),st=q('dg80EmployeeStatsStatus');if(!panel||!out)return;
+  await fillEmployeeStatsEmployees();
+  const sel=q('dg80EmployeeStatsSelect'),employee=String(sel?.value||'');if(!employee){out.innerHTML='';if(st){st.className='status info';st.textContent='Bitte Mitarbeiter auswählen.';}return;}
+  if(st){st.className='status info';st.textContent='Auswertung wird geladen ...';}
+  try{
+    const d=await api(chefPayload({action:'getEmployeeWorkOverviewV10',targetEmployee:employee,force:!!force}));
+    const work=[
+      ['Woche aktuell',empStatsFmt(d.weekHours)+' Std.',''],
+      ['Wochensoll',empStatsFmt(d.weeklyTarget)+' Std.',''],
+      ['Monat aktuell',empStatsFmt(d.monthHours)+' Std.',''],
+      ['Jahr '+d.year,empStatsFmt(d.yearHours)+' Std.','']
+    ];
+    const abs=[
+      ['Urlaubsanspruch',empStatsFmt(d.vacationEntitlement)+' Tage','good'],
+      ['Urlaub genommen',empStatsFmt(d.vacationUsed)+' Tage',''],
+      ['Resturlaub',empStatsFmt(d.vacationRemaining)+' Tage','good'],
+      ['Krankheitstage '+d.year,Number(d.sickDays||0)+' Tage',''],
+      ['Schulungstage '+d.year,Number(d.trainingDays||0)+' Tage',''],
+      ['Unerlaubte Fehlzeiten '+d.year,Number(d.unexcusedDays||0)+' Tage',Number(d.unexcusedDays||0)>0?'warn':'']
+    ];
+    const cards=a=>a.map(x=>'<div class="dg80-empstats-card '+esc(x[2]||'')+'"><span>'+esc(x[0])+'</span><strong>'+esc(x[1])+'</strong></div>').join('');
+    out.innerHTML='<div class="dg80-empstats-period"><strong>'+esc(employee)+'</strong> · aktuelle Woche '+esc(empStatsDate(d.weekStart))+' bis '+esc(empStatsDate(d.weekEnd))+'</div>'
+      +'<div class="dg80-empstats-section">Arbeitszeit</div><div class="dg80-empstats-grid">'+cards(work)+'</div>'
+      +'<div class="dg80-empstats-section">Urlaub &amp; Abwesenheiten</div><div class="dg80-empstats-grid">'+cards(abs)+'</div>';
+    if(st){st.className='status ok';st.textContent='Auswertung aktuell.';}
+  }catch(e){out.innerHTML='';if(st){st.className='status error';st.textContent='Auswertung konnte nicht geladen werden: '+(e&&e.message?e.message:e);}}
+}
+window.dg80EmployeeStatsLoad=dg80EmployeeStatsLoad;
 
 function css(){
   if(q('dg80FinalCss'))return;
@@ -588,7 +652,21 @@ function css(){
     +'.dg80-review-issue{border-radius:11px;background:#fff;border:1px solid #e5e7eb;padding:10px 11px}'
     +'.dg80-review-issue.error{border-left:6px solid #dc2626}.dg80-review-issue.warn{border-left:6px solid #f59e0b}.dg80-review-issue.reviewed{border-left:6px solid #16a34a;background:#f0fdf4}'
     +'.dg80-review-head{font-weight:900}.dg80-review-detail{font-size:13px;color:#64748b;margin-top:3px}.dg80-review-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}.dg80-review-actions .btn{width:auto!important;margin:0!important}'
-    +'@media(max-width:759px){#bossView .dg80-final-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}#bossView .dg80-final-tile{min-height:108px;border-radius:17px;padding:12px}#bossView .dg80-final-tile span{font-size:14px}#bossView .dg80-final-tile strong{font-size:27px}#bossView .dg80-final-top-btn{min-height:52px;padding:8px 12px}#bossView .dg80-final-top-btn span{font-size:16px}#bossView .dg80-final-top-btn strong{font-size:22px}.dg80-review-actions .btn{width:100%!important}}';
+    +'#d3EmployeeAdmin #dg10EmpOverview{display:none!important}'
+    +'#dg80EmployeeStats{padding:20px!important}'
+    +'.dg80-empstats-intro{color:#64748b;font-weight:700;margin:0 0 14px}'
+    +'.dg80-empstats-controls{display:grid;grid-template-columns:minmax(260px,1fr) auto;gap:12px;align-items:end;margin-bottom:16px}'
+    +'.dg80-empstats-controls label{font-weight:900;color:#1f2937}'
+    +'.dg80-empstats-controls select{width:100%}'
+    +'.dg80-empstats-period{font-size:14px;color:#64748b;font-weight:800;margin:4px 0 14px}'
+    +'.dg80-empstats-section{margin:16px 0 8px;color:#31589e;font-size:19px;font-weight:900}'
+    +'.dg80-empstats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}'
+    +'.dg80-empstats-card{border:1px solid #dbe3ec;border-radius:16px;background:#f8fafc;padding:14px;min-height:86px}'
+    +'.dg80-empstats-card span{display:block;color:#64748b;font-size:13px;font-weight:800;margin-bottom:7px}'
+    +'.dg80-empstats-card strong{display:block;color:#1f2937;font-size:25px;line-height:1.05}'
+    +'.dg80-empstats-card.warn{background:#fff7ed;border-color:#fed7aa}.dg80-empstats-card.warn strong{color:#9a3412}'
+    +'.dg80-empstats-card.good{background:#f0fdf4;border-color:#bbf7d0}.dg80-empstats-card.good strong{color:#166534}'
+    +'@media(max-width:759px){#bossView .dg80-final-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}#bossView .dg80-final-tile{min-height:108px;border-radius:17px;padding:12px}#bossView .dg80-final-tile span{font-size:14px}#bossView .dg80-final-tile strong{font-size:27px}#bossView .dg80-final-top-btn{min-height:52px;padding:8px 12px}#bossView .dg80-final-top-btn span{font-size:16px}#bossView .dg80-final-top-btn strong{font-size:22px}.dg80-review-actions .btn{width:100%!important}.dg80-empstats-controls{grid-template-columns:1fr}.dg80-empstats-controls .btn{width:100%!important}.dg80-empstats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}';
   document.head.appendChild(s);
   const fix=document.createElement('style');fix.id='dg80FinalLegacyAlign';fix.textContent='#bossView .d3-tile.sickness734{align-items:center!important;justify-content:space-between!important;text-align:center!important}#bossView .d3-tile.sickness734>span,#bossView .d3-tile.sickness734>strong{width:100%!important;text-align:center!important;align-self:center!important}';document.head.appendChild(fix);
 }
@@ -659,11 +737,12 @@ function markActive(main){
 }
 function mainForLeaf(key){
   if(['inquiries','aqon','inquiryArchive'].includes(key))return 'customers';
-  if(['employeeAdmin','absence','sickness'].includes(key))return 'admin';
+  if(['employeeAdmin','employeeStats','absence','sickness'].includes(key))return 'admin';
   return key;
 }
 function openLeaf(key,force){
   q('dg80GroupChooser')?.classList.remove('dg80-shell-active');S.group='';
+  if(key==='employeeStats')ensureEmployeeStatsPanel();
   const open=fn('dg80OfficeOpen');if(!open)return false;
   const same=S.active===key;
   open(key,{force:!!force});
@@ -2529,6 +2608,9 @@ async function runLoaderByTitle(title){
   }
   if(t==='mitarbeiterverwaltung'||t==='urlaub / abwesenheiten / feiertage'){
     if(typeof window.loadChefAdministration==='function'){await window.loadChefAdministration();return;}
+  }
+  if(t==='mitarbeiter auswertungen'){
+    if(typeof window.dg80EmployeeStatsLoad==='function'){await window.dg80EmployeeStatsLoad(true);return;}
   }
   if(t==='krank-fristen'){
     if(typeof window.loadSicknessAlerts734==='function'){await window.loadSicknessAlerts734();return;}
