@@ -180,6 +180,153 @@ function renameEmployeeClosures(){
   if(c){c.querySelectorAll('h2,h3').forEach(h=>{if(/^Mitarbeiterberichte$/i.test(String(h.textContent||'').trim()))h.textContent='Mitarbeiter-Abschlüsse';});}
 }
 
+/* Partnernetzwerk: self-contained office implementation.
+   It intentionally does not depend on the legacy core module load order. */
+const PARTNER_DEFAULTS80=['Elektriker','Fliesenleger','Trockenbauer','Estrichleger'];
+let partnerRows80=[],partnerActive80='';
+
+function partnerCss80(){
+  if(q('dg80PartnerCss'))return;
+  const s=document.createElement('style');s.id='dg80PartnerCss';
+  s.textContent=''
+    +'.dg80p-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:14px 0}'
+    +'.dg80p-trade{min-height:78px;border:1px solid #a9d9b4;border-radius:16px;background:#e8f7ea;color:#185c2c;padding:12px;font:inherit;font-weight:900;cursor:pointer;text-align:center}'
+    +'.dg80p-trade:hover{background:#d9f2de;border-color:#78c48a;box-shadow:0 0 0 3px rgba(47,133,90,.12)}'
+    +'.dg80p-add{font-size:34px;line-height:1;display:flex;align-items:center;justify-content:center}'
+    +'.dg80p-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:10px 0 14px}'
+    +'.dg80p-card{border:1px solid #e5e7eb;border-radius:14px;padding:13px;margin:10px 0;background:#fff}'
+    +'.dg80p-meta{display:grid;gap:4px;margin-top:7px;color:#64748b;font-size:13px}'
+    +'.dg80p-note{margin-top:8px;padding-top:8px;border-top:1px dashed #dbe3ec;color:#64748b;font-size:13px}'
+    +'.dg80p-empty{padding:16px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;background:#f8fafc}'
+    +'.dg80p-overlay{position:fixed;inset:0;z-index:100000;background:rgba(15,23,42,.48);display:flex;align-items:center;justify-content:center;padding:18px}'
+    +'.dg80p-modal{width:min(720px,96vw);max-height:92vh;overflow:auto;background:#fff;border-radius:18px;padding:18px;box-shadow:0 24px 70px rgba(15,23,42,.28)}'
+    +'.dg80p-modal h3{margin:0 0 14px;color:#31589e}.dg80p-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}'
+    +'.dg80p-field{display:flex;flex-direction:column;gap:5px}.dg80p-field.full{grid-column:1/-1}.dg80p-field label{font-weight:800;color:#334155}'
+    +'.dg80p-field input,.dg80p-field textarea{width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:10px;font:inherit}'
+    +'.dg80p-field textarea{min-height:90px;resize:vertical}.dg80p-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap}'
+    +'@media(max-width:650px){.dg80p-grid,.dg80p-fields{grid-template-columns:1fr}.dg80p-field.full{grid-column:1}.dg80p-trade{min-height:66px}}';
+  document.head.appendChild(s);
+}
+function partnerPayload80(extra){
+  const employee=String(localStorage.getItem('dg_employee')||'').trim();
+  const token=String(localStorage.getItem('dg_device_session')||sessionStorage.getItem('dg_employee_pin')||'').trim();
+  if(!employee||!token)throw new Error('Büro-Sitzung fehlt. Bitte einmal neu anmelden.');
+  return Object.assign({employee,employeePin:token,deviceSessionToken:token},extra||{});
+}
+async function partnerRequest80(extra){
+  const res=await fetch('https://dg-app-10-api-production.up.railway.app/',{
+    method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},cache:'no-store',
+    body:JSON.stringify(partnerPayload80(extra))
+  });
+  const txt=await res.text();let j=null;try{j=JSON.parse(txt);}catch(_e){}
+  if(!res.ok||!j||j.ok===false)throw new Error((j&&j.error)||('Serverfehler HTTP '+res.status));
+  return j.data!==undefined?j.data:j;
+}
+function partnerModal80(title,fields,onSave){
+  partnerCss80();
+  q('dg80PartnerModal')?.remove();
+  const ov=document.createElement('div');ov.id='dg80PartnerModal';ov.className='dg80p-overlay';
+  ov.innerHTML='<form class="dg80p-modal"><h3>'+esc(title)+'</h3><div class="dg80p-fields">'
+    +fields.map(f=>'<div class="dg80p-field '+(f.full?'full':'')+'"><label>'+esc(f.label)+(f.required?' *':'')+'</label>'
+      +(f.type==='textarea'?'<textarea name="'+esc(f.name)+'" '+(f.required?'required':'')+'></textarea>':'<input name="'+esc(f.name)+'" type="'+esc(f.type||'text')+'" '+(f.required?'required':'')+'>')
+      +'</div>').join('')
+    +'</div><div id="dg80PartnerModalStatus"></div><div class="dg80p-actions"><button type="button" class="btn secondary" data-cancel>Abbrechen</button><button type="submit" class="btn success">Speichern</button></div></form>';
+  document.body.appendChild(ov);
+  const form=ov.querySelector('form'),cancel=ov.querySelector('[data-cancel]');
+  cancel.addEventListener('click',()=>ov.remove());
+  ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
+  form.addEventListener('submit',async e=>{
+    e.preventDefault();
+    const save=form.querySelector('[type="submit"]'),st=q('dg80PartnerModalStatus'),data={};
+    fields.forEach(f=>data[f.name]=String(form.elements[f.name]?.value||'').trim());
+    save.disabled=true;if(st){st.className='status info';st.textContent='Wird gespeichert ...';}
+    try{await onSave(data);ov.remove();}catch(err){if(st){st.className='status error';st.textContent=err&&err.message?err.message:String(err);}save.disabled=false;}
+  });
+  setTimeout(()=>form.querySelector('input,textarea')?.focus(),0);
+}
+function partnerMeta80(label,value){
+  value=String(value||'').trim();return value?'<div><strong>'+esc(label)+':</strong> '+esc(value)+'</div>':'';
+}
+function partnerCard80(p){
+  return '<div class="dg80p-card"><strong>'+esc(p.company||p.contactName||'Partnerbetrieb')+'</strong><div class="dg80p-meta">'
+    +partnerMeta80('Ansprechpartner',p.contactName)+partnerMeta80('Telefon',p.phone)+partnerMeta80('Mobil',p.mobile)
+    +partnerMeta80('E-Mail',p.email)+partnerMeta80('Adresse',p.address)+partnerMeta80('Website',p.website)
+    +'</div>'+(p.notes?'<div class="dg80p-note">'+esc(p.notes)+'</div>':'')+'</div>';
+}
+function partnerOverview80(){
+  partnerCss80();
+  const out=q('dg10PartnerBody');if(!out)return;
+  partnerActive80='';
+  const total=partnerRows80.reduce((n,c)=>n+(Array.isArray(c.partners)?c.partners.length:0),0),counter=q('dg80c-partnerNetwork');
+  if(counter)counter.textContent=String(total);
+  out.innerHTML='<div class="dg80p-grid">'
+    +partnerRows80.map(c=>'<button type="button" class="dg80p-trade" data-dg80p-cat="'+esc(c.id)+'">'+esc(c.name)+'</button>').join('')
+    +'<button type="button" class="dg80p-trade dg80p-add" id="dg80PartnerAddTrade" title="Weiteres Gewerk hinzufügen" aria-label="Weiteres Gewerk hinzufügen">+</button></div>';
+  out.querySelectorAll('[data-dg80p-cat]').forEach(b=>b.addEventListener('click',()=>partnerTrade80(b.dataset.dg80pCat)));
+  q('dg80PartnerAddTrade')?.addEventListener('click',partnerAddTrade80);
+  setOfficePath('Partnernetzwerk','',false);
+}
+function partnerTrade80(id){
+  const cat=partnerRows80.find(x=>String(x.id)===String(id)),out=q('dg10PartnerBody');if(!cat||!out)return false;
+  partnerActive80=String(id);
+  const rows=Array.isArray(cat.partners)?cat.partners:[];
+  out.innerHTML='<div class="dg80p-head"><div><h3 style="margin:0">'+esc(cat.name)+'</h3><div class="muted small">'+rows.length+' Partnerbetrieb(e)</div></div>'
+    +'<button type="button" class="btn success" id="dg80PartnerAddCompany">+ Partner hinzufügen</button></div>'
+    +(rows.map(partnerCard80).join('')||'<div class="dg80p-empty">Noch kein Partnerbetrieb in diesem Gewerk hinterlegt.</div>');
+  q('dg80PartnerAddCompany')?.addEventListener('click',()=>partnerAddCompany80(cat.id));
+  setOfficePath('Partnernetzwerk',cat.name,true);return true;
+}
+function partnerAddTrade80(){
+  partnerModal80('Weiteres Gewerk hinzufügen',[{name:'name',label:'Gewerk',required:true,full:true}],async v=>{
+    if(!v.name)throw new Error('Bitte das Gewerk eintragen.');
+    await partnerRequest80({action:'savePartnerCategoryV10',name:v.name});
+    await loadPartnerNetwork80();
+  });
+}
+function partnerAddCompany80(categoryId){
+  const cat=partnerRows80.find(x=>String(x.id)===String(categoryId));
+  partnerModal80('Partner hinzufügen – '+(cat?cat.name:'Gewerk'),[
+    {name:'company',label:'Firmenname',required:true},{name:'contactName',label:'Ansprechpartner'},
+    {name:'address',label:'Anschrift',full:true},{name:'phone',label:'Telefon'},{name:'mobile',label:'Mobil'},
+    {name:'email',label:'E-Mail',type:'email'},{name:'website',label:'Website'},
+    {name:'notes',label:'Notizen',type:'textarea',full:true}
+  ],async v=>{
+    if(!v.company)throw new Error('Bitte den Firmennamen eintragen.');
+    await partnerRequest80({action:'savePartnerV10',item:Object.assign({},v,{categoryId:String(categoryId)})});
+    await loadPartnerNetwork80();
+    partnerTrade80(categoryId);
+  });
+}
+async function loadPartnerNetwork80(){
+  ensureDynamicPanel({key:'partnerNetwork'});
+  partnerCss80();
+  const out=q('dg10PartnerBody'),st=q('dg10PartnerStatus');if(!out)return [];
+  if(st){st.className='status info';st.textContent='Partnernetzwerk wird geladen ...';}
+  try{
+    const rows=await partnerRequest80({action:'getPartnerNetworkV10',force:true});
+    partnerRows80=Array.isArray(rows)?rows:[];
+    partnerRows80.sort((a,b)=>{
+      const ai=PARTNER_DEFAULTS80.indexOf(String(a.name||'')),bi=PARTNER_DEFAULTS80.indexOf(String(b.name||''));
+      const ax=ai<0?999:ai,bx=bi<0?999:bi;return ax-bx||Number(a.sortOrder||999)-Number(b.sortOrder||999)||String(a.name||'').localeCompare(String(b.name||''),'de');
+    });
+    partnerOverview80();
+    if(st){st.className='status ok';st.textContent='Partnernetzwerk geladen.';}
+    return partnerRows80;
+  }catch(err){
+    out.innerHTML='';
+    if(st){st.className='status error';st.textContent='Partnernetzwerk konnte nicht geladen werden: '+(err&&err.message?err.message:String(err));}
+    throw err;
+  }
+}
+function partnerBack80(){
+  if(!partnerActive80)return false;
+  partnerOverview80();return true;
+}
+window.loadPartner10=loadPartnerNetwork80;
+window.dg10PartnerBack=partnerBack80;
+window.dg10OpenTrade=partnerTrade80;
+window.dg10AddPartner=partnerAddCompany80;
+
 function ensureDynamicPanel(c){
   if(!c)return;
   if(c.key==='partnerNetwork'&&!q('dg10Partner')){
@@ -842,11 +989,7 @@ function openLeaf(key,force){
   const leafTitle=LEAF[key]?LEAF[key].title:key;
   setOfficePath(parent?GROUPS[parent].title:'',leafTitle,!!parent);
   markActive(parent||mainForLeaf(key));
-  if(key==='partnerNetwork')setTimeout(()=>{
-    const f=fn('loadPartner10'),st=q('dg10PartnerStatus');
-    if(f)Promise.resolve(f()).catch(e=>{if(st){st.className='status error';st.textContent=e&&e.message?e.message:String(e);}});
-    else if(st){st.className='status error';st.textContent='Partnernetzwerk-Modul wird neu geladen. Bitte die App einmal aktualisieren.';}
-  },0);
+  if(key==='partnerNetwork')setTimeout(()=>{loadPartnerNetwork80().catch(()=>{});},0);
   if(key==='days')setTimeout(()=>{installDayReviewWrap();const f=fn('loadBossDayClosuresV48');if(f)Promise.resolve(f()).catch(()=>{});},20);
   setTimeout(syncLabels,0);return true;
 }
