@@ -6089,6 +6089,8 @@ async function markInquiryViewFresh(key){
 }
 async function inquiryViewFresh(key,maxMinutes=70){
   if(!pool||!key)return false;
+  // Freshness markers belonged to the Google shadow phase only.
+  if(FINAL_CUTOVER)return true;
   const q=await pool.query(
     `SELECT updated_at FROM app_meta
       WHERE key=$1 AND updated_at>now()-($2::text||' minutes')::interval`,
@@ -6949,6 +6951,9 @@ function shadowComparableDateTime(value){
 
 async function shadowReadyForDirectRead(name,maxAgeHours=24){
   if(!pool)return false;
+  // PostgreSQL is authoritative after final cutover. Legacy Google comparison
+  // state must never gate a production read.
+  if(FINAL_CUTOVER)return true;
   const q=await pool.query(
     `SELECT mismatches,checked_at FROM shadow_verify_stats
       WHERE shadow_name=$1 AND checked_at>now()-($2::text||' hours')::interval`,
@@ -13144,12 +13149,13 @@ async function proxyLegacy(req, res, body) {
   if (action === 'getEmployees') {
     try {
       const dirty = await isEmployeeSnapshotDirty();
-      if (!dirty) {
+      if (FINAL_CUTOVER || !dirty) {
         const names = await getEmployeesFromSnapshot();
-        if (Array.isArray(names) && names.length) {
+        if (Array.isArray(names)) {
           return json(res, 200, {ok:true,data:names,source:'postgres'}, req);
         }
       }
+      if(FINAL_CUTOVER)return json(res,200,{ok:true,data:[],source:'postgres'},req);
     } catch (e) {
       console.error('Postgres employee read failed:', e.message);
       if(FINAL_CUTOVER)return json(res,500,{ok:false,error:'Mitarbeiterliste konnte nicht aus Railway geladen werden.'},req);
@@ -13173,8 +13179,10 @@ async function proxyLegacy(req, res, body) {
         return json(res,200,{ok:true,data:direct,source:'postgres'},req);
       }
     } catch(e) {
-      console.error('Direct Postgres read failed; falling back to Google:',action,e.message);
+      console.error('Direct Postgres read failed:',action,e.message);
+      if(FINAL_CUTOVER)return json(res,500,{ok:false,error:'Railway-Lesezugriff fehlgeschlagen ('+action+'). Bitte erneut versuchen.'},req);
     }
+    if(FINAL_CUTOVER)return json(res,400,{ok:false,error:'Railway-Anfrage konnte nicht ausgeführt werden ('+action+'). Sitzung oder Eingaben prüfen.'},req);
   }
   if (DIRECT_POSTGRES_WRITE_ACTIONS.has(action)) {
     try {
@@ -13185,13 +13193,17 @@ async function proxyLegacy(req, res, body) {
           legacySync:directWrite.outboxId?'queued':(FINAL_CUTOVER?'disabled-cutover':'already-synced')
         },req);
       }
+      if(FINAL_CUTOVER)return json(res,400,{ok:false,error:'Railway-Schreibzugriff konnte nicht ausgeführt werden ('+action+'). Sitzung oder Eingaben prüfen.'},req);
     } catch(e) {
       console.error('Direct Postgres write failed:',action,e.message);
       return json(res,400,{ok:false,error:e.message},req);
     }
   }
   if(FINAL_CUTOVER&&action==='syncCustomerInquiries')return json(res,409,{ok:false,error:'Der alte Gmail-zu-Google-Sheets-Abgleich ist nach dem finalen Umzug deaktiviert, damit keine Kundendaten mehr in Google Tabellen geschrieben werden.'},req);
-  if(FINAL_CUTOVER&&!googleRetainedActionV24(action))return json(res,501,{ok:false,error:'Diese Funktion ist nach dem finalen Umzug vollständig auf Railway gestellt; Google-Fallback ist deaktiviert.'},req);
+  if(FINAL_CUTOVER&&!googleRetainedActionV24(action)){
+    console.error('UNHANDLED_FINAL_CUTOVER_ACTION action='+action);
+    return json(res,404,{ok:false,error:'App-Funktion ist im Railway-Endstand nicht registriert ('+action+').' },req);
+  }
   if (!GOOGLE_BACKEND_URL) return json(res, 503, {ok:false,error:'Google backend not configured'}, req);
   const cached = await readCachedResponse(action, body);
   if (cached) {
