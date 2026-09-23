@@ -13174,6 +13174,21 @@ async function proxyLegacy(req, res, body) {
       return json(res,400,{ok:false,error:e.message},req);
     }
   }
+  if(FINAL_CUTOVER&&['saveExternalGoogleEvent','deleteExternalGoogleEvent'].includes(action)){
+    try{
+      if(await calendarDirect.authorized()){
+        const session=await localSessionForBody(body,true);
+        if(!session)return json(res,401,{ok:false,error:'Sitzung ist abgelaufen. Bitte erneut anmelden.'},req);
+        const data=action==='saveExternalGoogleEvent'?
+          await calendarDirect.saveExternal(body.item||{}):
+          await calendarDirect.deleteExternal(body.item||{});
+        return json(res,200,{ok:true,data,source:'google-calendar-direct'},req);
+      }
+    }catch(e){
+      console.error('Direct external calendar action failed action='+action+' error='+e.message);
+      return json(res,400,{ok:false,error:e.message},req);
+    }
+  }
   if(action==='getPlannerEvents'&&FINAL_CUTOVER){
     try{
       const directCalendarReady=await calendarDirect.authorized();
