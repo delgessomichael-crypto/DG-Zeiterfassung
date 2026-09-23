@@ -18,6 +18,7 @@ const FILES = new Map([
   ['/customerflow-9.0-final.js', 'customerflow-9.0-final.js'],
   ['/payroll-9.0-final.js', 'payroll-9.0-final.js'],
   ['/ui-9.0-final.js', 'ui-9.0-final.js'],
+  ['/railway-cutover-10.0.js', 'railway-cutover-10.0.js'],
   ['/manifest.json', 'manifest.json'],
   ['/sw-9.0-final.js', 'sw-9.0-final.js'],
   ['/dg_icon_192.png', 'dg_icon_192.png'],
@@ -83,9 +84,9 @@ const server = http.createServer((req, res) => {
     return send(res, 200, JSON.stringify({
       ok: true,
       app: 'DG-App-10',
-      phase: 'railway-mirror',
-      frontend: '9.0-final',
-      backend: 'Google-GS-9.0'
+      phase: 'final-cutover',
+      frontend: '10.0',
+      backend: 'Railway'
     }), {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store'
