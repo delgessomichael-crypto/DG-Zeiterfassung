@@ -10502,7 +10502,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry','inquiryToOffer',
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','syncHolidays','saveEmployeeAdmin','setEmployeeActive','savePlannerWorker','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','reserveMaintenanceDeviceId','saveMaintenanceCustomer','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','saveAbsence','deleteAbsence','endSicknessAbsence',
+  'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','syncHolidays','saveEmployeeAdmin','setEmployeeActive','savePlannerWorker','setPlannerWorkerActive','movePlannerWorker','planRequest3','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','reserveMaintenanceDeviceId','saveMaintenanceCustomer','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','saveAbsence','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue',
   'savePartnerCategoryV10','savePartnerV10','deactivatePartnerV10','setWhatsappThreadCategoryV10','transferWhatsappThreadV10','saveEmployeeLocationV10','mergeCustomerInquiriesV10','completeManualOrderV10','addRegieAttachments','deleteEmployeeAdmin'
 ]);
@@ -12607,6 +12607,67 @@ async function tryDirectPostgresWrite(action,body){
         'SELECT id,employee_name,display_name,provider,calendar_id,active,sort_order FROM planner_workers_shadow ORDER BY sort_order ASC,display_name ASC'
       );
       result=list.rows.map(r=>({id:String(r.id||''),employeeName:String(r.employee_name||''),displayName:String(r.display_name||r.employee_name||''),provider:String(r.provider||'google'),calendarId:String(r.calendar_id||''),active:Boolean(r.active),sortOrder:Number(r.sort_order||999)}));
+    }else if(action==='planRequest3'){
+      const kind=String(body.kind||'').trim(),sourceId=String(body.id||'').trim(),offer=Boolean(body.offer),item=body.item||{};
+      if(!['inquiry','order'].includes(kind))throw new Error('Ungültige Quelle.');
+      if(!sourceId)throw new Error('Anfrage/Auftrag fehlt.');
+      const eventId=String(item.id||'').trim();
+      if(!eventId)throw new Error('Termin-ID fehlt.');
+      if(kind==='inquiry'){
+        const src=await client.query('SELECT id FROM customer_inquiries_shadow WHERE id=$1 FOR UPDATE',[sourceId]);
+        if(!src.rowCount)throw new Error('Anfrage nicht mehr vorhanden.');
+      }else{
+        const src=await client.query('SELECT id FROM manual_orders_shadow WHERE id=$1 FOR UPDATE',[sourceId]);
+        if(!src.rowCount)throw new Error('Auftrag nicht mehr vorhanden.');
+      }
+      const customer=String(item.customer||'').trim(),address=String(item.address||'').trim(),rawTask=String(item.task||'').trim();
+      const type=(String(item.type||'')==='Wartung'||/^\[WARTUNG\]/i.test(rawTask))?'Wartung':'Auftrag';
+      const task=rawTask.replace(/^\[WARTUNG\]\s*/i,'').trim(),date=String(item.date||'').trim();
+      const start=String(item.start||'').trim(),end=String(item.end||'').trim();
+      const employeeIds=[...new Set((Array.isArray(item.employeeIds)?item.employeeIds:[]).map(x=>String(x||'').trim()).filter(Boolean))];
+      if(!customer||!address||!task)throw new Error('Kunde, Adresse und Tätigkeit sind Pflichtfelder.');
+      if(!validIsoDateText(date)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(start)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(end)||end<=start)
+        throw new Error('Ungültiges Datum oder Von/Bis.');
+      if(!employeeIds.length)throw new Error('Mindestens einen Mitarbeiter auswählen.');
+      const workers=await client.query(
+        'SELECT id,display_name,employee_name,active FROM planner_workers_shadow WHERE id=ANY($1::text[])',[employeeIds]
+      );
+      const wmap=new Map(workers.rows.map(r=>[String(r.id),r])),names=[];
+      for(const wid of employeeIds){
+        const w=wmap.get(wid);if(!w||w.active===false)throw new Error('Mitarbeiter nicht aktiv.');
+        names.push(String(w.display_name||w.employee_name||wid));
+      }
+      const existing=await client.query('SELECT google_event_ids_json,created_at_text FROM planner_events_shadow WHERE id=$1 FOR UPDATE',[eventId]);
+      const googleIds=existing.rowCount?String(existing.rows[0].google_event_ids_json||'{}'):'{}';
+      const createdAt=existing.rowCount?String(existing.rows[0].created_at_text||nowIso):nowIso;
+      await client.query(
+        `INSERT INTO planner_events_shadow(
+          id,customer,address,task,event_date,start_time,end_time,employee_ids_json,employee_names_json,
+          google_event_ids_json,created_at_text,updated_at_text,updated_by,event_type,
+          maintenance_customer_id,maintenance_object_id,maintenance_device_id,shadow_updated_at
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,now())
+        ON CONFLICT(id) DO UPDATE SET customer=EXCLUDED.customer,address=EXCLUDED.address,task=EXCLUDED.task,
+          event_date=EXCLUDED.event_date,start_time=EXCLUDED.start_time,end_time=EXCLUDED.end_time,
+          employee_ids_json=EXCLUDED.employee_ids_json,employee_names_json=EXCLUDED.employee_names_json,
+          updated_at_text=EXCLUDED.updated_at_text,updated_by=EXCLUDED.updated_by,event_type=EXCLUDED.event_type,
+          maintenance_customer_id=EXCLUDED.maintenance_customer_id,maintenance_object_id=EXCLUDED.maintenance_object_id,
+          maintenance_device_id=EXCLUDED.maintenance_device_id,shadow_updated_at=now()`,
+        [eventId,customer,address,task,date,start,end,JSON.stringify(employeeIds),JSON.stringify(names),googleIds,
+         createdAt,nowIso,by,type,String(item.maintenanceCustomerId||''),String(item.maintenanceObjectId||''),String(item.maintenanceDeviceId||'')]
+      );
+      if(kind==='inquiry'){
+        await client.query(
+          `UPDATE customer_inquiries_shadow SET status=$2,read_flag=true,changed_at_text=$3,changed_by=$4,shadow_updated_at=now()
+            WHERE id=$1`,
+          [sourceId,offer?'Besichtigung geplant':'Termin geplant',nowIso,by]
+        );
+      }else{
+        await client.query(
+          `UPDATE manual_orders_shadow SET status='Offen',changed_at_text=$2,changed_by=$3,shadow_updated_at=now() WHERE id=$1`,
+          [sourceId,nowIso,by]
+        );
+      }
+      result={ok:true,id:eventId,type,maintenanceDeviceId:String(item.maintenanceDeviceId||'')};
     }else if(action==='transferPlannerEvent'){
       const item=body.item||{},sourceId=String(item.sourceId||'').trim(),targetWorkerId=String(item.targetWorkerId||'').trim();
       if(!sourceId||!targetWorkerId)throw new Error('Quelltermin oder Zielmitarbeiter fehlt.');
