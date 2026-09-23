@@ -1,7 +1,7 @@
 /* DG 8.0 FINAL CLEAN - einheitlicher Produktionsstand */
 (function(){
 'use strict';
-const V='9.0';
+const V='10.0';
 function stamp(){
   if(document.title!=='DG Zeiterfassung 10.0')document.title='DG Zeiterfassung 10.0';
   document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test((x.textContent||'').trim())&&x.textContent!=='Version '+V)x.textContent='Version '+V;});
@@ -1799,7 +1799,7 @@ d3Import=async function(){
     setMessage('d3InquiryStatus','Gmail-Abgleich abgeschlossen: '+Number(r&&r.imported||0)+' neu, '+Number(r&&r.duplicates||0)+' bereits bekannt'+extra+'.','ok');
   }catch(e){setMessage('d3InquiryStatus','Gmail-Abgleich fehlgeschlagen: '+e.message,'error');}
 };
-window.addEventListener('message',e=>{if(e.origin===location.origin&&e.data&&e.data.type==='dg-gmail-connected')setTimeout(()=>d3Import(),800);});
+window.addEventListener('message',e=>{let apiOrigin='';try{apiOrigin=new URL('https://dg-app-10-api-production.up.railway.app/').origin;}catch(_e){}if(e.origin===apiOrigin&&e.data&&e.data.type==='dg-gmail-connected')setTimeout(()=>d3Import(),800);});
 
 
 function d35MandatoryDayClosure(day){if(!day||day.closed)return false;const raw=String(day.date||'').trim();if(raw){const dt=new Date(raw+'T12:00:00');if(!Number.isNaN(dt.getTime())){const w=dt.getDay();if(w===0||w===6)return false;}}const status=[day.status,day.dayStatus,day.absenceStatus,day.type,day.reason,day.note].filter(Boolean).join(' ').toLowerCase();if(status.includes('feiertag')||status.includes('holiday'))return false;return true;}
@@ -3616,7 +3616,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 /* DG Zeiterfassung 9.0 - konsolidierter Runtime-Layer */
 (function(){
 'use strict';
-const V='9.0',VIEW='dg60_view',STATE='dg60_office_state',BACK='dg60_backend',BACK_TTL=3600000,OFFER_TTL=3600000;
+const V='10.0',VIEW='dg60_view',STATE='dg60_office_state',BACK='dg60_backend',BACK_TTL=3600000,OFFER_TTL=3600000;
 const q=id=>document.getElementById(id),esc60=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let offerAt=0,offerPromise=null;
 const parts=v=>String(v||'').split('.').map(x=>Number(x)||0);
@@ -3668,15 +3668,15 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 /* DG Zeiterfassung 9.0 - strikte, einheitliche Backend-Anbindung */
 (function(){
 'use strict';
-const V='9.0',PREVIOUS=[],KEY='dg70_backend',TTL=60*60*1000;
+const V='10.0',PREVIOUS=[],KEY='dg70_backend',TTL=60*60*1000;
 const BACKEND_URL='https://dg-app-10-api-production.up.railway.app/';
 let backendCheckPromise=null;
 function byId(id){return document.getElementById(id);}
 function exact(v){return String(v||'').trim()===V;}
 function compatible(v){const s=String(v||'').trim();return exact(s)||PREVIOUS.includes(s);}
 function foundVersion(){return String(window.__DG_FOUND_BACKEND||'unbekannt');}
-function clearVersionNotices(){const n=byId('d3Notice');if(n&&/Google-GS|Google-Backend|Backend.*bereitgestellt|Bereitstellungs-Link|Versionsstand/i.test(n.textContent||''))n.remove();}
-function showMismatch(found){window.__DG_FOUND_BACKEND=String(found||'unbekannt');if(compatible(found)){clearVersionNotices();return true;}if(window.DG3)DG3.backend='';const msg='Versionsstand stimmt nicht: App '+V+' benötigt Google-GS '+V+'. Aktiv ist Google-GS '+foundVersion()+'.';if(typeof window.d3Notice==='function')window.d3Notice(msg,'warn');return false;}
+function clearVersionNotices(){const n=byId('d3Notice');if(n&&/Railway-Backend|Google-GS|Google-Backend|Backend.*bereitgestellt|Bereitstellungs-Link|Versionsstand/i.test(n.textContent||''))n.remove();}
+function showMismatch(found){window.__DG_FOUND_BACKEND=String(found||'unbekannt');if(compatible(found)){clearVersionNotices();return true;}if(window.DG3)DG3.backend='';const msg='Versionsstand stimmt nicht: App '+V+' benötigt Railway-Backend '+V+'. Aktiv ist Backend '+foundVersion()+'.';if(typeof window.d3Notice==='function')window.d3Notice(msg,'warn');return false;}
 window.d3CheckBackend=d3CheckBackend=async function(force){
   if(backendCheckPromise)return backendCheckPromise;
   if(!force){try{const c=JSON.parse(sessionStorage.getItem(KEY)||'null');if(c&&compatible(c.version)&&Date.now()-Number(c.ts||0)<TTL){window.__DG_FOUND_BACKEND=String(c.version);if(window.DG3)DG3.backend=String(c.version);clearVersionNotices();return true;}}catch(_e){}}
@@ -3692,7 +3692,7 @@ window.d3CheckBackend=d3CheckBackend=async function(force){
       return showMismatch(found);
     }catch(e){
       window.__DG_FOUND_BACKEND='nicht erreichbar';if(window.DG3)DG3.backend='';try{sessionStorage.removeItem(KEY);}catch(_e){}
-      if(typeof window.d3Notice==='function')window.d3Notice('Google-Backend ist nicht erreichbar: '+(e&&e.message?e.message:'Unbekannter Fehler')+'.','warn');
+      if(typeof window.d3Notice==='function')window.d3Notice('Railway-Backend ist nicht erreichbar: '+(e&&e.message?e.message:'Unbekannter Fehler')+'.','warn');
       return false;
     }
   })();
@@ -3702,7 +3702,7 @@ window.d3Api=d3Api=async function(payload){
   const action=String(payload&&payload.action||''),read=/^(get|check|search|find)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload||{});
   if(read&&window.DG3&&DG3.reads&&DG3.reads.has(key))return DG3.reads.get(key);
   const run=(async()=>{
-    if(!['ping','getEmployees'].includes(action)&&(!window.DG3||!compatible(DG3.backend))){const ok=await d3CheckBackend(true);if(!ok)throw dgError('App '+V+' kann nicht speichern/laden, weil Google-GS '+foundVersion()+' aktiv ist. Benötigt wird Google-GS '+V+'.','version');}
+    if(!['ping','getEmployees'].includes(action)&&(!window.DG3||!compatible(DG3.backend))){const ok=await d3CheckBackend(true);if(!ok)throw dgError('App '+V+' kann nicht speichern/laden, weil Backend '+foundVersion()+' aktiv ist. Benötigt wird Railway-Backend '+V+'.','version');}
     if(window.DG3&&!read)DG3.pending=(DG3.pending||0)+1;
     const controller=new AbortController(),timeoutMs=['getMonthPayrollAudit','createTaxAdvisorPdf','setPayrollMonthStatus','completePayrollCycle'].includes(action)?180000:65000,timer=setTimeout(()=>controller.abort(),timeoutMs);
     try{
@@ -3968,7 +3968,7 @@ setTimeout(install60,500);
 /* DG Zeiterfassung 9.0 - UI-Farben, Kalender-Refresh und zentraler Versionsstempel */
 (function(){
 'use strict';
-const V='9.0';
+const V='10.0';
 const q=id=>document.getElementById(id);
 let stamping=false;
 
@@ -4031,7 +4031,7 @@ setTimeout(stamp,750);
 /* DG Zeiterfassung 9.0 - Eigene Reminder mit Sprache, Bildern und Dateien */
 (function(){
 'use strict';
-const V='9.0';
+const V='10.0';
 const $2=id=>document.getElementById(id);
 let ownSpeech=null;
 
@@ -4145,7 +4145,7 @@ setTimeout(install,100);setTimeout(install,600);setTimeout(install,1600);
 /* DG Zeiterfassung 9.0 - finaler Produktions-Hardening-Layer */
 (function(){
 'use strict';
-const V='9.0';
+const V='10.0';
 const BACKEND_URL='https://dg-app-10-api-production.up.railway.app/';
 const TOKEN_KEY='dg_device_session';
 function $(id){return document.getElementById(id);}
@@ -5249,7 +5249,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 /* DG Zeiterfassung 9.0 - bereinigte aktuelle Laufzeit ohne 7.3.x-Overlaykette */
 (function(){
 'use strict';
-const V='9.0';
+const V='10.0';
 const $=id=>document.getElementById(id);
 let audit=null, payrollBusy=false;
 
