@@ -12747,7 +12747,7 @@ async function tryDirectPostgresWrite(action,body){
       );
       result={ok:true};
     }
-    if(!skipLegacySync)outboxId=await enqueueLegacyWriteWithClient(client,legacyAction,legacyPayload);
+    if(!skipLegacySync&&(!FINAL_CUTOVER||googleRetainedActionV24(legacyAction)))outboxId=await enqueueLegacyWriteWithClient(client,legacyAction,legacyPayload);
     await client.query('COMMIT');
   }catch(e){
     try{await client.query('ROLLBACK');}catch(_e){}
@@ -13017,9 +13017,19 @@ async function tryDirectPostgresWrite(action,body){
   return {result,outboxId};
 }
 
+const GOOGLE_RETAINED_ACTIONS_V24=new Set([
+  'syncCustomerInquiries',
+  'getEmployeeCalendarEvents','getPlannerEvents','saveExternalGoogleEvent','deleteExternalGoogleEvent',
+  'savePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','planRequest3',
+  'rejectCustomerInquiry','rejectInquiryReminder','sendMonthReport'
+]);
+function googleRetainedActionV24(action){return GOOGLE_RETAINED_ACTIONS_V24.has(String(action||''));}
+
 async function proxyLegacy(req, res, body) {
   const action = String(body && body.action || '');
-  if (action === 'ping') return json(res,200,{ok:true,data:{message:'DG Railway Backend erreichbar',version:'9.0',railway:true},source:'postgres'},req);
+  if (action === 'ping') return json(res,200,{ok:true,data:{message:'DG Railway Backend erreichbar',version:'10.0',railway:true,finalCutover:FINAL_CUTOVER},source:'postgres'},req);
+  if(action==='employeeLogin'){try{return json(res,200,{ok:true,data:await localEmployeeLoginV24(body),source:'postgres'},req);}catch(e){return json(res,400,{ok:false,error:e.message},req);}}
+  if(action==='chefLogin'){try{return json(res,200,{ok:true,data:await localChefLoginV24(body),source:'postgres'},req);}catch(e){return json(res,400,{ok:false,error:e.message},req);}}
   if (action === 'getMinimumWage') return json(res,200,{ok:true,data:directMinimumWageRead(body),source:'postgres-static'},req);
   if (action === 'getEmployees') {
     try {
@@ -13031,7 +13041,8 @@ async function proxyLegacy(req, res, body) {
         }
       }
     } catch (e) {
-      console.error('Postgres employee read failed; falling back to Google:', e.message);
+      console.error('Postgres employee read failed:', e.message);
+      if(FINAL_CUTOVER)return json(res,500,{ok:false,error:'Mitarbeiterliste konnte nicht aus Railway geladen werden.'},req);
     }
   }
   if(action==='employeeLogout'){
@@ -13069,6 +13080,7 @@ async function proxyLegacy(req, res, body) {
       return json(res,400,{ok:false,error:e.message},req);
     }
   }
+  if(FINAL_CUTOVER&&!googleRetainedActionV24(action))return json(res,501,{ok:false,error:'Diese Funktion ist nach dem finalen Umzug vollständig auf Railway gestellt; Google-Fallback ist deaktiviert.'},req);
   if (!GOOGLE_BACKEND_URL) return json(res, 503, {ok:false,error:'Google backend not configured'}, req);
   const cached = await readCachedResponse(action, body);
   if (cached) {
