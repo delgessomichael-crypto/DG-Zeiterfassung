@@ -72,7 +72,7 @@ function createGmailDirect(opts){
     const q=new URLSearchParams({
       client_id:clientId,redirect_uri:redirectUri,response_type:'code',access_type:'offline',
       prompt:'consent',include_granted_scopes:'true',
-      scope:'openid email https://www.googleapis.com/auth/gmail.readonly',state
+      scope:'openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar',state
     });
     return 'https://accounts.google.com/o/oauth2/v2/auth?'+q.toString();
   }
@@ -88,7 +88,7 @@ function createGmailDirect(opts){
     const b=new URLSearchParams({client_id:clientId,client_secret:clientSecret,refresh_token:dec(r),grant_type:'refresh_token'});
     const q=await fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b});
     const x=await q.json().catch(()=>({}));
-    if(!q.ok||!x.access_token) throw new Error(String(x.error_description||x.error||('Gmail Token HTTP '+q.status)));
+    if(!q.ok||!x.access_token) throw new Error(String(x.error_description||x.error||('Google Token HTTP '+q.status)));
     return String(x.access_token);
   }
   async function api(token,path){
@@ -96,6 +96,21 @@ function createGmailDirect(opts){
     const x=await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(String(x&&x.error&&x.error.message||('Gmail HTTP '+r.status)));
     return x;
+  }
+  async function calendarApi(method,path,body){
+    const token=await accessToken();
+    if(!token)throw new Error('Google ist noch nicht verbunden.');
+    const opt={method:String(method||'GET').toUpperCase(),headers:{Authorization:'Bearer '+token}};
+    if(body!==undefined){opt.headers['Content-Type']='application/json';opt.body=JSON.stringify(body);}
+    const r=await fetch('https://www.googleapis.com/calendar/v3/'+String(path||'').replace(/^\/+/,''),opt);
+    if(r.status===204)return {ok:true};
+    const x=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(String(x&&x.error&&x.error.message||('Google Calendar HTTP '+r.status)));
+    return x;
+  }
+  async function googleConnection(){
+    const r=await row();
+    return {configured:configured(),connected:Boolean(r),email:String(r&&r.account_email||''),scope:String(r&&r.scope||'')};
   }
   function b64(v){
     const s=String(v||'').replace(/-/g,'+').replace(/_/g,'/');
@@ -205,7 +220,7 @@ function createGmailDirect(opts){
     const r=await row(); let last=null;
     const q=await pool.query("SELECT value,updated_at FROM app_meta WHERE key='gmail_last_sync_v10' LIMIT 1");
     if(q.rowCount) last=Object.assign({},q.rows[0].value||{},{updatedAt:q.rows[0].updated_at});
-    return {configured:configured(),connected:Boolean(r),email:String(r&&r.account_email||''),redirectUri,lastSync:last};
+    return {configured:configured(),connected:Boolean(r),email:String(r&&r.account_email||''),scope:String(r&&r.scope||''),calendarAuthorized:Boolean(r&&String(r.scope||'').includes('https://www.googleapis.com/auth/calendar')),redirectUri,lastSync:last};
   }
 
   async function callback(code,state){
@@ -241,7 +256,7 @@ function createGmailDirect(opts){
     setTimeout(()=>sync().catch(e=>console.error('GMAIL startup sync failed',e.message)),15000);
   }
 
-  return {init,start,status,syncForUser,callback,authUrl,configured};
+  return {init,start,status,syncForUser,callback,authUrl,configured,calendarApi,googleConnection,accessToken};
 }
 
 module.exports={createGmailDirect};
