@@ -9401,6 +9401,65 @@ async function processWhatsappWebhookV10(payload,eventHash){
   }
 }
 
+
+async function directWhatsappReviewStatusV10(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  return {
+    provider:WHATSAPP_PROVIDER,
+    metaReady:Boolean(WHATSAPP_ACCESS_TOKEN&&WHATSAPP_PHONE_NUMBER_ID&&WHATSAPP_WABA_ID),
+    phoneNumberId:WHATSAPP_PHONE_NUMBER_ID?('…'+WHATSAPP_PHONE_NUMBER_ID.slice(-6)):'',
+    wabaId:WHATSAPP_WABA_ID?('…'+WHATSAPP_WABA_ID.slice(-6)):'',
+    canSend:Boolean(WHATSAPP_ACCESS_TOKEN&&WHATSAPP_PHONE_NUMBER_ID),
+    canManageTemplates:Boolean(WHATSAPP_ACCESS_TOKEN&&WHATSAPP_WABA_ID),
+    note:'Review-Werkzeuge führen nur nach ausdrücklichem Klick eine Meta-Aktion aus.'
+  };
+}
+async function directWhatsappTemplatesV10(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  if(WHATSAPP_PROVIDER!=='meta')throw new Error('Meta App-Review-Werkzeuge sind nur im direkten Meta-Modus verfügbar.');
+  if(!WHATSAPP_ACCESS_TOKEN||!WHATSAPP_WABA_ID)throw new Error('Für Vorlagen fehlen Meta Access Token und/oder WABA-ID.');
+  const data=await whatsappProviderJsonV10(encodeURIComponent(WHATSAPP_WABA_ID)+'/message_templates?limit=100');
+  const rows=Array.isArray(data&&data.data)?data.data:[];
+  return rows.map(x=>({id:String(x.id||''),name:String(x.name||''),language:String(x.language||''),category:String(x.category||''),status:String(x.status||'')}));
+}
+async function directWhatsappReviewSendTextV10(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  if(WHATSAPP_PROVIDER!=='meta')throw new Error('Der App-Review-Testversand ist nur im direkten Meta-Modus verfügbar.');
+  if(!WHATSAPP_ACCESS_TOKEN||!WHATSAPP_PHONE_NUMBER_ID)throw new Error('Für den Testversand fehlen Meta Access Token und/oder Phone Number ID.');
+  const to=whatsappDigitsV10(body&&body.to),text=String(body&&body.text||'').trim();
+  if(!to||to.length<8)throw new Error('Gültige Test-Empfängernummer fehlt.');
+  if(!text)throw new Error('Testnachricht fehlt.');
+  const data=await whatsappProviderJsonV10(encodeURIComponent(WHATSAPP_PHONE_NUMBER_ID)+'/messages',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({messaging_product:'whatsapp',recipient_type:'individual',to,type:'text',text:{preview_url:false,body:text.slice(0,3000)}})
+  });
+  return {ok:true,messageId:String(data&&data.messages&&data.messages[0]&&data.messages[0].id||''),to};
+}
+async function directWhatsappReviewCreateTemplateV10(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  if(WHATSAPP_PROVIDER!=='meta')throw new Error('Die App-Review-Vorlagenverwaltung ist nur im direkten Meta-Modus verfügbar.');
+  if(!WHATSAPP_ACCESS_TOKEN||!WHATSAPP_WABA_ID)throw new Error('Für Vorlagen fehlen Meta Access Token und/oder WABA-ID.');
+  let name=String(body&&body.name||'').trim().toLowerCase().replace(/[^a-z0-9_]+/g,'_').replace(/^_+|_+$/g,'').slice(0,80);
+  const text=String(body&&body.text||'').trim().slice(0,900);
+  const language=String(body&&body.language||'de').trim()||'de';
+  if(!name)throw new Error('Vorlagenname fehlt.');
+  if(!text)throw new Error('Vorlagentext fehlt.');
+  const data=await whatsappProviderJsonV10(encodeURIComponent(WHATSAPP_WABA_ID)+'/message_templates',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name,language,category:'UTILITY',components:[{type:'BODY',text}]})
+  });
+  return {ok:true,id:String(data&&data.id||''),status:String(data&&data.status||''),category:String(data&&data.category||'UTILITY'),name,language};
+}
+async function directWhatsappReviewDeleteTemplateV10(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  if(WHATSAPP_PROVIDER!=='meta')throw new Error('Die App-Review-Vorlagenverwaltung ist nur im direkten Meta-Modus verfügbar.');
+  if(!WHATSAPP_ACCESS_TOKEN||!WHATSAPP_WABA_ID)throw new Error('Für Vorlagen fehlen Meta Access Token und/oder WABA-ID.');
+  const name=String(body&&body.name||'').trim();if(!name)throw new Error('Vorlagenname fehlt.');
+  const data=await whatsappProviderJsonV10(encodeURIComponent(WHATSAPP_WABA_ID)+'/message_templates?name='+encodeURIComponent(name),{method:'DELETE'});
+  return {ok:true,success:Boolean(data&&data.success),name};
+}
+
+
 async function directEmployeeLocationsV10(body){
   const session=await localSessionForBody(body,true);if(!session)return null;
   const q=await pool.query("SELECT employee_name,latitude,longitude,accuracy_m,captured_at,context FROM employee_locations_v10 WHERE captured_at>now()-interval '14 hours' ORDER BY employee_name");
@@ -9534,6 +9593,11 @@ async function tryDirectPostgresRead(action,body){
   if(action==='getPartnerNetworkV10')return directPartnerNetworkV10(body);
   if(action==='getWhatsappInboxV10')return directWhatsappInboxV10(body);
   if(action==='getWhatsappMediaV10')return directWhatsappMediaV10(body);
+  if(action==='getWhatsappReviewStatusV10')return directWhatsappReviewStatusV10(body);
+  if(action==='getWhatsappTemplatesV10')return directWhatsappTemplatesV10(body);
+  if(action==='sendWhatsappReviewTextV10')return directWhatsappReviewSendTextV10(body);
+  if(action==='createWhatsappReviewTemplateV10')return directWhatsappReviewCreateTemplateV10(body);
+  if(action==='deleteWhatsappReviewTemplateV10')return directWhatsappReviewDeleteTemplateV10(body);
   if(action==='getEmployeeLocationsV10')return directEmployeeLocationsV10(body);
   if(action==='getAiAssistantV10')return directAiAssistantV10(body);
   if(action==='createRegieReportZip')return directRegieReportDownloadV10(body);
