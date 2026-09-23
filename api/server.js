@@ -10435,7 +10435,8 @@ async function tryDirectPostgresRead(action,body){
   if(action==='getAiAssistantV10')return directAiAssistantV10(body);
   if(action==='getGmailStatusV10'){
     const session=await localSessionForBody(body,true);if(!session)return null;
-    return gmailDirect.status();
+    const gmail=await gmailDirect.status(),calendar=await calendarDirect.status();
+    return Object.assign({},gmail,{calendar});
   }
   if(action==='syncGmailInquiriesV10'){
     const session=await localSessionForBody(body,true);if(!session)return null;
@@ -13270,6 +13271,22 @@ async function proxyLegacy(req, res, body) {
     }catch(e){
       console.error('Postgres logout failed:',e.message);
       return json(res,400,{ok:false,error:e.message},req);
+    }
+  }
+  if(action==='getPlannerEvents'&&FINAL_CUTOVER){
+    try{
+      const directCalendarReady=await calendarDirect.authorized();
+      if(directCalendarReady){
+        const session=await localSessionForBody(body,true);
+        if(!session)return json(res,401,{ok:false,error:'Sitzung ist abgelaufen. Bitte erneut anmelden.'},req);
+        const start=String(body.startDate||''),end=String(body.endDate||'');
+        if(!validIsoDateText(start)||!validIsoDateText(end)||end<start)
+          return json(res,400,{ok:false,error:'Kalenderzeitraum ist ungültig.'},req);
+        const data=await calendarDirect.getPlannerEvents(start,end);
+        return json(res,200,{ok:true,data,source:'postgres+google-calendar'},req);
+      }
+    }catch(e){
+      console.error('Direct planner calendar read failed; retaining legacy fallback:',e.message);
     }
   }
   if (['ping','systemHealthCheck','getDashboardSummary51','getCustomerInquiries','getInquiryReminders','getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getRegieAttachments','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts','getEmployeeWorkOverviewV10','getPartnerNetworkV10','getWhatsappInboxV10','getWhatsappMediaV10','getEmployeeLocationsV10','getAiAssistantV10','getGmailStatusV10','syncGmailInquiriesV10','getMaintenanceAttachment','getMapsBrowserConfig','createRegieReportZip','createRegiePhotoZip','createTaxAdvisorPdf','getBillingReviewTargetV10','sendBillingReviewRequestV10'].includes(action)) {
