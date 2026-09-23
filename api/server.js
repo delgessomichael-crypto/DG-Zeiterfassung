@@ -13858,6 +13858,50 @@ const server = http.createServer(async (req, res) => {
       return json(res,200,{ok:true},req);
     }
 
+
+    if (req.method === 'GET' && url.pathname.startsWith('/v1/files/')) {
+      const id=decodeURIComponent(url.pathname.slice('/v1/files/'.length));
+      if(!id)return json(res,404,{ok:false,error:'Datei nicht gefunden'},req);
+      const q=await pool.query('SELECT file_name,mime_type,file_size,file_data FROM binary_files_v10 WHERE id=$1 LIMIT 1',[id]);
+      if(!q.rowCount)return json(res,404,{ok:false,error:'Datei nicht gefunden'},req);
+      const f=q.rows[0],data=Buffer.from(f.file_data);
+      cors(req,res);
+      res.writeHead(200,{
+        'Content-Type':String(f.mime_type||'application/octet-stream'),
+        'Content-Length':data.length,
+        'Content-Disposition':'inline; filename="'+cleanFileNameV24(f.file_name||'Datei').replace(/"/g,'')+'"',
+        'Cache-Control':'private, max-age=3600',
+        'X-Content-Type-Options':'nosniff'
+      });
+      return res.end(data);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/migration/file') {
+      const key=String(req.headers['x-final-import-key']||'');
+      if(!FINAL_FILE_IMPORT_KEY||key.length!==FINAL_FILE_IMPORT_KEY.length||!crypto.timingSafeEqual(Buffer.from(key),Buffer.from(FINAL_FILE_IMPORT_KEY)))
+        return json(res,401,{ok:false,error:'Unauthorized'},req);
+      const id=String(url.searchParams.get('id')||'').trim(),name=String(url.searchParams.get('name')||'Datei'),kind=String(url.searchParams.get('kind')||'legacy-drive');
+      if(!id)return json(res,400,{ok:false,error:'Legacy file id missing'},req);
+      const data=await readBinary(req,20*1024*1024);
+      const stored=await storeBinaryFileV24(pool,{id,name,mime:String(req.headers['content-type']||'application/octet-stream'),data,kind,source:'google-drive-migration'});
+      return json(res,200,{ok:true,file:{id:stored.id,name:stored.name,mime:stored.mime,size:stored.size,sha256:stored.sha256}},req);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/migration/finalize-files') {
+      const key=String(req.headers['x-final-import-key']||'');
+      if(!FINAL_FILE_IMPORT_KEY||key.length!==FINAL_FILE_IMPORT_KEY.length||!crypto.timingSafeEqual(Buffer.from(key),Buffer.from(FINAL_FILE_IMPORT_KEY)))
+        return json(res,401,{ok:false,error:'Unauthorized'},req);
+      await finalizeLocalFileReferencesV24();
+      return json(res,200,{ok:true,audit:await finalCutoverAuditV24()},req);
+    }
+
+    if (req.method === 'GET' && url.pathname === '/v1/migration/final-audit') {
+      const key=String(req.headers['x-final-import-key']||'');
+      if(!FINAL_FILE_IMPORT_KEY||key.length!==FINAL_FILE_IMPORT_KEY.length||!crypto.timingSafeEqual(Buffer.from(key),Buffer.from(FINAL_FILE_IMPORT_KEY)))
+        return json(res,401,{ok:false,error:'Unauthorized'},req);
+      return json(res,200,{ok:true,audit:await finalCutoverAuditV24()},req);
+    }
+
     if (req.method === 'POST' && url.pathname === '/') {
       const body = await readBody(req);
       return proxyLegacy(req,res,body);
