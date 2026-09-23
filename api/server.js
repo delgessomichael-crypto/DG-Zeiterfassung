@@ -1143,6 +1143,42 @@ async function localChefLoginV24(body){
   const s=await localSessionForBody(body,true);if(!s)return null;
   return {ok:true,message:'Chef-Zugriff bestätigt'};
 }
+async function importDriveManifestsV25(){
+  if(!pool)return {files:0,batches:0};
+  let files=0,batches=0;
+  for(let i=1;i<=10;i++){
+    const raw=String(process.env['FINAL_DRIVE_IMPORT_MANIFEST_'+i]||'').trim();
+    if(!raw)continue;
+    let items;try{items=JSON.parse(raw);}catch(e){console.error('FINAL_DRIVE_IMPORT manifest '+i+' invalid JSON:',e.message);continue;}
+    if(!Array.isArray(items)||!items.length)continue;
+    batches++;
+    for(const item of items){
+      try{
+        const id=String(item&&item.id||'').trim(),sourceUrl=String(item&&item.sourceUrl||'').trim();
+        if(!id||!sourceUrl)throw new Error('Datei-ID oder Quell-URL fehlt.');
+        const exists=await pool.query('SELECT 1 FROM binary_files_v10 WHERE id=$1 LIMIT 1',[id]);
+        if(exists.rowCount){files++;continue;}
+        let u;try{u=new URL(sourceUrl);}catch(_e){throw new Error('Ungültige Quell-URL.');}
+        const host=String(u.hostname||'').toLowerCase();
+        if(u.protocol!=='https:'||!(host==='oaiusercontent.com'||host.endsWith('.oaiusercontent.com')))
+          throw new Error('Quell-Host nicht freigegeben.');
+        const upstream=await fetch(u.toString(),{redirect:'follow'});
+        if(!upstream.ok)throw new Error('HTTP '+upstream.status);
+        const data=Buffer.from(await upstream.arrayBuffer());
+        await storeBinaryFileV24(pool,{
+          id,name:String(item.name||'Datei'),mime:String(item.mime||upstream.headers.get('content-type')||'application/octet-stream'),
+          data,kind:String(item.kind||'legacy-drive'),source:'google-drive-migration'
+        });
+        files++;
+      }catch(e){
+        console.error('FINAL_DRIVE_IMPORT file failed batch='+i+' id='+String(item&&item.id||'')+' error='+e.message);
+      }
+    }
+  }
+  if(batches)console.log('FINAL_DRIVE_IMPORT batches='+batches+' files='+files);
+  return {files,batches};
+}
+
 async function finalizeLocalFileReferencesV24(){
   if(!pool)return;
   const q=await pool.query('SELECT id FROM binary_files_v10');const have=new Set(q.rows.map(r=>String(r.id)));
@@ -1230,6 +1266,7 @@ async function initDb() {
   await initRegieMetadataShadows();
   await bootstrapCompletedCustomerConsolidationV23();
   await initRegieAttachmentsShadow();
+  await importDriveManifestsV25();
   await finalizeLocalFileReferencesV24();
   await bootstrapTrustedShadowReadiness();
   await bootstrapEmployeeAdminReadiness();
