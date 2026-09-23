@@ -1396,7 +1396,7 @@ function d3Wire(c){const old=c.querySelector(':scope > .dg48-head');if(!old)retu
 function d3Group(id,title,items){const c=d3Section(id,title,'<div class="d3-menu"></div><div class="d3-content"></div>'),menu=c.querySelector('.d3-menu'),host=c.querySelector('.d3-content');items.forEach(([p,label])=>{if(!p)return;p.classList.add('d3-panel','hidden');p.querySelector(':scope > .dg48-head')?.remove();d3Body(p)?.classList.remove('hidden');const b=d3Element('button','',esc(label));b.type='button';b.dataset.panel=p.id;b.addEventListener('click',()=>{const y=menu.getBoundingClientRect().top;host.style.minHeight=Math.max(0,innerHeight-host.getBoundingClientRect().top)+'px';d3Open(id,p.id);const delta=menu.getBoundingClientRect().top-y;if(Math.abs(delta)>1)window.scrollBy({top:delta,behavior:'instant'});});menu.append(b);host.append(p);});return c;}
 function d3InstallOffice(){const root=$('bossView'),cards=[...root.children],find=t=>cards.find(c=>(c.querySelector(':scope > .dg48-head h2,:scope > h2')?.textContent||'').includes(t));const completed=find('Regieberichte');completed.id='d3Completed';completed.querySelector('h2').textContent='Abgeschlossene Auftr\u00e4ge';$('regieMergeToolbar')?.remove();
  const running=d3Section('d3Running','Laufende Auftr\u00e4ge','<div id="d3RunningStatus"></div><div id="d3OrderPlan"></div><div id="d3RunningList"></div>');
- const inquiry=d3Section('d3Inquiries','Offene Anfragen','<div class="report-actions">'+d3Button('Aktualisieren','d3Inquiries',[],'secondary')+'</div><div class="muted small" style="margin-top:8px">Gmail-Direktimport wird separat an Railway angebunden. Bis dahin werden keine Kundendaten mehr in Google-Tabellen geschrieben.</div><div id="d3InquiryStatus"></div><div id="d3InquiryList"></div>');
+ const inquiry=d3Section('d3Inquiries','Offene Anfragen','<div class="report-actions">'+d3Button('Gmail abgleichen','d3Import')+d3Button('Aktualisieren','d3Inquiries',[],'secondary')+'</div><div id="d3InquiryStatus"></div><div id="d3InquiryList"></div>');
  const offers=[['d3OfferOpen','Offene Angebote','Offen'],['d3OfferCreate','Angebote zu erstellen','Zu erstellen'],['d3OfferArchive','Angebotsarchiv','Archiv']].map(([id,title,stage])=>{const p=d3Section(id,title,'<h3>'+title+'</h3><div id="'+id+'Status"></div><div id="'+id+'List"></div>');DG3.loaders[id]=()=>loadOffers(stage);return [p,title];});const stat=d3Section('d3Stats','Angebotsstatistik','<div id="d3StatsStatus"></div><div id="d3StatsList"></div>');offers.push([stat,'Angebotsstatistik']);DG3.loaders.d3Stats=loadStats;const offerGroup=d3Group('d3Offers','Angebotsbereich',offers);
  const reminder=d3Section('d3Reminder','Reminder','<div id="d3ReminderStatus"></div><div id="d3ReminderList"></div>'),employee=find('Mitarbeiterverwaltung');employee.id='d3EmployeeAdmin';const admin=d3Group('d3Admin','Verwaltung',[[employee,'Mitarbeiterverwaltung'],[$('dg48AbsenceGroup'),'Urlaub / Abwesenheiten / Feiertage'],[$('dg48EmployeeClosures'),'Mitarbeiterberichte']]),health=d3Section('d3Health','Systemcheck','<div id="d3HealthList"></div>'),planner=$('dg62PlannerCard');
  [planner,completed,running,inquiry,offerGroup,reminder,admin,health].forEach((c,i)=>{root.append(c);c.classList.add('d3-main');c.classList.toggle('d3-alt',i%2===1);if(c!==planner)d3Wire(c);d3Collapse(c,true);});
@@ -1484,7 +1484,25 @@ function d3ReminderDate(id){const r=DG3.reminders.find(x=>x.id===id);d3Form('Rem
 function d3Inquiry(id){const r=DG3.inquiries.find(x=>x.id===id);if(!r)throw new Error('Anfrage nicht mehr aktuell. Bitte neu laden.');return r;}
 function d3Address(r){return r.address||[r.postalCode,r.city].filter(Boolean).join(' ');}
 async function d3Inquiries(){setMessage('d3InquiryStatus','Anfragen werden geladen ...','info');try{DG3.inquiries=await api(chefPayload({action:'getCustomerInquiries',status:'Offen'}));$('d3InquiryList').innerHTML=DG3.inquiries.map((r,i)=>'<div class="report-card'+(i%2?' d3-alt':'')+'"><div class="d3-head"><strong>'+esc(r.customer)+'</strong><span class="badge">'+esc(r.source)+'</span></div><div class="report-meta">'+esc(r.receivedAt)+' - '+esc(r.status)+'</div><div>'+esc(d3Address(r))+'</div><div><a href="tel:'+esc(r.phone)+'">'+esc(r.phone)+'</a> <a href="mailto:'+esc(r.email)+'">'+esc(r.email)+'</a></div><div>'+esc(r.description||r.subject)+'</div>'+(r.internalNote?'<div class="status info">Interne Notiz: '+esc(r.internalNote)+'</div>':'')+'<div class="report-actions">'+d3Button('Kontakt aufgenommen','d3Contact',[r.id])+d3Button('Termin erstellen','d3Appointment',['inquiry',r.id,false])+d3Button('Angebot / Besichtigung','d3Appointment',['inquiry',r.id,true])+d3Button('Als Angebot uebernehmen','d3InquiryOffer',[r.id])+d3Button('Als Auftrag uebernehmen','d3InquiryOrder',[r.id],'success')+d3Button('Interne Notiz','d3InquiryNote',[r.id])+d3Button('Erledigt','d3CompleteInquiry',[r.id],'success')+d3Button('Entfernen','d3DeleteInquiry',[r.id],'danger')+'</div></div>').join('')||'Keine offenen Anfragen.';setMessage('d3InquiryStatus',DG3.inquiries.length+' offene Anfragen.','ok');d3Count('inquiries',DG3.inquiries.length);}catch(e){setMessage('d3InquiryStatus',e.message,'error');}}
-async function d3Import(){await d3Inquiries();setMessage('d3InquiryStatus','Gmail-Direktimport ist im finalen Railway-Betrieb noch nicht aktiviert. Die aktuelle Liste wurde aus PostgreSQL geladen.','info');}
+async function d3Import(){
+  setMessage('d3InquiryStatus','Gmail wird direkt mit Railway abgeglichen ...','info');
+  try{
+    const r=await api(chefPayload({action:'syncGmailInquiriesV10'}));
+    if(r&&r.needsConfiguration){
+      setMessage('d3InquiryStatus','Gmail muss einmalig in Railway konfiguriert werden.','warn');
+      return;
+    }
+    if(r&&r.needsConnect&&r.authUrl){
+      const w=window.open(r.authUrl,'dgGmailConnect','width=720,height=820');
+      if(!w)location.href=r.authUrl;
+      setMessage('d3InquiryStatus','Bitte Gmail im geöffneten Fenster verbinden.','info');
+      return;
+    }
+    await d3Inquiries();
+    const extra=r&&r.failed?' · Fehler: '+Number(r.failed||0):'';
+    setMessage('d3InquiryStatus','Gmail-Abgleich: '+Number(r&&r.imported||0)+' neu, '+Number(r&&r.duplicates||0)+' bereits bekannt'+extra+'.','ok');
+  }catch(e){setMessage('d3InquiryStatus','Gmail-Abgleich fehlgeschlagen: '+e.message,'error');}
+}
 function d3InquiryNote(id){const r=d3Inquiry(id);d3Form('Interne Notiz',[{name:'note',label:'Notiz',type:'textarea'}],{note:r.internalNote||''},async v=>{await api(chefPayload({action:'saveCustomerInquiryNote',id,note:v.note}));await d3Inquiries();});}
 function d3Contact(id){const r=d3Inquiry(id);d3Form('Kontakt dokumentieren',[{name:'date',label:'Datum',type:'date',required:true},{name:'time',label:'Uhrzeit',type:'time',required:true},{name:'person',label:'Gespraechspartner'},{name:'note',label:'Notiz',type:'textarea'}],{date:localDate(),time:new Date().toTimeString().slice(0,5),person:r.customer,note:''},async v=>{await api(chefPayload({action:'saveCustomerInquiryContact',id,...v}));await d3Inquiries();});}
 function d3CompleteInquiry(id){const r=d3Inquiry(id);d3Form('Anfrage erledigen',[{name:'reason',label:'Grund',type:'select',options:['Kein Auftrag','Nicht zustaendig','Doppelte Anfrage','Telefonisch erledigt','Kunde meldet sich wieder','Sonstiges']},{name:'note',label:'Interne Notiz',type:'textarea'}],{reason:'Kein Auftrag',note:r.internalNote||''},async v=>{await api(chefPayload({action:'completeCustomerInquiry',id,...v}));await d3Inquiries();});}
@@ -1762,10 +1780,26 @@ async function d34AqonInquiries(){
 const d34BaseImport=d3Import;
 d3Import=async function(){
   try{if(window.DG51&&DG51.readCache&&typeof DG51.readCache.clear==='function')DG51.readCache.clear();}catch(_e){}
-  await d3Inquiries();await d3Dashboard();
-  if(DG3.open==='d34AqonInquiries')await d34AqonInquiries();
-  setMessage('d3InquiryStatus','Aktuelle Kundendaten wurden aus Railway/PostgreSQL geladen. Gmail-Direktimport ist bis zur direkten Railway-Anbindung bewusst deaktiviert.','info');
+  setMessage('d3InquiryStatus','Gmail wird direkt mit Railway abgeglichen ...','info');
+  try{
+    const r=await api(chefPayload({action:'syncGmailInquiriesV10'}));
+    if(r&&r.needsConfiguration){
+      setMessage('d3InquiryStatus','Gmail-Verbindung ist noch nicht vollständig konfiguriert.','warn');
+      return;
+    }
+    if(r&&r.needsConnect&&r.authUrl){
+      const w=window.open(r.authUrl,'dgGmailConnect','width=720,height=820');
+      if(!w)location.href=r.authUrl;
+      setMessage('d3InquiryStatus','Bitte Gmail einmalig im geöffneten Fenster verbinden.','info');
+      return;
+    }
+    await d3Inquiries();await d3Dashboard();
+    if(DG3.open==='d34AqonInquiries')await d34AqonInquiries();
+    const extra=r&&r.failed?' · Fehler: '+Number(r.failed||0):'';
+    setMessage('d3InquiryStatus','Gmail-Abgleich abgeschlossen: '+Number(r&&r.imported||0)+' neu, '+Number(r&&r.duplicates||0)+' bereits bekannt'+extra+'.','ok');
+  }catch(e){setMessage('d3InquiryStatus','Gmail-Abgleich fehlgeschlagen: '+e.message,'error');}
 };
+window.addEventListener('message',e=>{if(e.origin===location.origin&&e.data&&e.data.type==='dg-gmail-connected')setTimeout(()=>d3Import(),800);});
 
 
 function d35MandatoryDayClosure(day){if(!day||day.closed)return false;const raw=String(day.date||'').trim();if(raw){const dt=new Date(raw+'T12:00:00');if(!Number.isNaN(dt.getTime())){const w=dt.getDay();if(w===0||w===6)return false;}}const status=[day.status,day.dayStatus,day.absenceStatus,day.type,day.reason,day.note].filter(Boolean).join(' ').toLowerCase();if(status.includes('feiertag')||status.includes('holiday'))return false;return true;}
