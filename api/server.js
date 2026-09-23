@@ -5737,13 +5737,17 @@ async function mirrorPlannerEventWrite(action, body, parsed) {
   }
 }
 
-async function verifyPlannerEventsShadow(rows) {
+async function verifyPlannerEventsShadow(rows,body) {
   if (!pool || !Array.isArray(rows)) return;
-  const dgRows=rows.filter(r=>r&&r.source==='dg'&&!r.external);
+  const start=String(body&&body.startDate||''),end=String(body&&body.endDate||'');
+  const ranged=/^\d{4}-\d{2}-\d{2}$/.test(start)&&/^\d{4}-\d{2}-\d{2}$/.test(end)&&end>=start;
+  const dgRows=rows.filter(r=>r&&r.source==='dg'&&!r.external&&(!ranged||(String(r.date||'')>=start&&String(r.date||'')<=end)));
   const q=await pool.query(
     `SELECT id,customer,address,task,event_date,start_time,end_time,employee_ids_json,event_type,
             maintenance_customer_id,maintenance_object_id,maintenance_device_id
-       FROM planner_events_shadow`
+       FROM planner_events_shadow
+      ${ranged?'WHERE event_date>=$1 AND event_date<=$2':''}`,
+    ranged?[start,end]:[]
   );
   const pg=new Map(q.rows.map(r=>[String(r.id),r]));
   let mismatches=0;const seen=new Set();
@@ -13256,7 +13260,7 @@ async function proxyLegacy(req, res, body) {
         }
         if (action==='getPlannerWorkers') verifyPlannerWorkersShadow(verifyData).catch(e=>console.error('planner worker shadow verify failed',e.message));
         if (action==='getPlannerAvailability') verifyPlannerAvailabilityShadow(verifyData,body).catch(e=>console.error('planner availability shadow verify failed',e.message));
-        if (action==='getPlannerEvents') verifyPlannerEventsShadow(verifyData).catch(e=>console.error('planner event shadow verify failed',e.message));
+        if (action==='getPlannerEvents') verifyPlannerEventsShadow(verifyData,body).catch(e=>console.error('planner event shadow verify failed',e.message));
         if (action==='getMaintenanceCustomer') {
           mirrorMaintenanceAttachmentsFromCustomer(verifyData)
             .then(()=>verifyMaintenanceAttachmentsFromCustomer(verifyData))
