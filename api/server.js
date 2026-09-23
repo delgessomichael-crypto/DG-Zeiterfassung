@@ -11877,12 +11877,14 @@ async function tryDirectPostgresWrite(action,body){
       result={ok:true,id,hours:signed,balanceBefore:before,balanceAfter:Math.round((before+signed)*100)/100};
     }else if(action==='saveEmployeeAdmin'){
       const item=body.item||{},name=String(item.name||'').trim(),original=String(item.originalName||'').trim();
-      if(!name||!original||name!==original)throw new Error('Namensänderungen werden weiterhin über Google verarbeitet.');
+      if(!name||!original)throw new Error('Mitarbeitername fehlt.');
+      if(name!==original)throw new Error('Namensänderungen sind im finalen Railway-Betrieb gesperrt. Bitte Mitarbeiter neu anlegen, statt den Namen zu ändern.');
       const q=await client.query('SELECT payload,sort_order FROM employee_admin_shadow WHERE employee_name=$1 FOR UPDATE',[name]);
       if(!q.rowCount)throw new Error('Mitarbeiter nicht gefunden.');
       const oldPayload=q.rows[0].payload||{};
-      if(String(item.pin||'').trim())throw new Error('PIN-Änderungen werden weiterhin über Google verarbeitet.');
-      if(String(item.calendarId||'').trim()!==String(oldPayload.calendarId||''))throw new Error('Kalender-ID-Änderungen werden weiterhin über Google geprüft.');
+      const newPin=normalizeLocalPinV24(item.pin||'');
+      if(newPin&&!/^\d{4,10}$/.test(newPin))throw new Error('PIN muss aus 4 bis 10 Ziffern bestehen.');
+      const newCalendarId=item.calendarId!==undefined?String(item.calendarId||'').trim():String(oldPayload.calendarId||'');
       const type=String(item.employmentType||'Vollzeit').trim();
       if(!['Vollzeit','Teilzeit','Aushilfe','Minijob','Azubi'].includes(type))throw new Error('Ungültige Beschäftigungsart.');
       const nums=['monday','tuesday','wednesday','thursday','friday'].map(k=>Number(item[k]));
@@ -11909,7 +11911,7 @@ async function tryDirectPostgresWrite(action,body){
       if(paymentMethod==='Überweisung'&&iban&&!/^[A-Z]{2}[0-9A-Z]{13,32}$/.test(iban))throw new Error('IBAN ist ungültig.');
       const holidayCredit=(type==='Aushilfe'||type==='Minijob')?false:Boolean(item.holidayCredit!==false);
       const payload=Object.assign({},oldPayload,{
-        name,calendarId:String(oldPayload.calendarId||''),employmentType:type,weeklyHours:weekly,
+        name,calendarId:newCalendarId,employmentType:type,weeklyHours:weekly,
         monday:nums[0],tuesday:nums[1],wednesday:nums[2],thursday:nums[3],friday:nums[4],holidayCredit,
         active:item.active===false?false:true,chefAccess:Boolean(item.chefAccess),lastName:String(item.lastName||'').trim(),firstName:String(item.firstName||'').trim(),
         birthDate:berlinDateOnly(item.birthDate||''),personnelNumber:String(item.personnelNumber||'').trim(),street:String(item.street||'').trim(),
@@ -11920,6 +11922,8 @@ async function tryDirectPostgresWrite(action,body){
         notes:String(item.notes||'').trim(),hourlyWage,payrollType,monthlySalary,payrollRelevant,minimumWage
       });
       await client.query('UPDATE employee_admin_shadow SET payload=$2::jsonb,shadow_updated_at=now() WHERE employee_name=$1',[name,JSON.stringify(payload)]);
+      await client.query('UPDATE employee_credentials_v10 SET active=$2,chef_access=$3,updated_at=now() WHERE employee_name=$1',[name,payload.active!==false,Boolean(payload.chefAccess)]);
+      if(newPin){const salt=crypto.randomBytes(16).toString('base64'),hash=hashPinV24(newPin,salt);await client.query('UPDATE employee_credentials_v10 SET pin_salt=$2,pin_hash=$3,failed_attempts=0,locked_until=NULL,updated_at=now() WHERE employee_name=$1',[name,salt,hash]);}
       result={ok:true,employees:await postgresEmployeeAdminData()};
     }else if(action==='saveMonthlyAdjustment'){
       const employee=String(body.targetEmployee||'').trim(),year=Number(body.year)||0,month=Number(body.month)||0;
