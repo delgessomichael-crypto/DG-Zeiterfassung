@@ -1286,7 +1286,6 @@ async function initDb() {
   await bootstrapEmployeeCredentialsV24();
   await pool.query("INSERT INTO partner_categories_v10(id,name,sort_order,active,created_by) VALUES ('PC-ELEKTRIKER','Elektriker',10,true,'System'),('PC-FLIESENLEGER','Fliesenleger',20,true,'System'),('PC-TROCKENBAUER','Trockenbauer',30,true,'System') ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,sort_order=EXCLUDED.sort_order,active=true,updated_at=now()");
   await cleanupInternalData();
-  await loadGooglePingCache();
   await initManualOrdersShadow();
   await initOwnRemindersShadow();
   await initOfferRemindersShadow();
@@ -9387,24 +9386,21 @@ async function directSystemHealthCheck(body){
     (diagnostics.length?' · '+diagnostics.length+' Diagnoseabweichung(en) ohne Einfluss auf aktive Lesewege':''));
   if(diagnostics.length)push('Migrationsdiagnose',true,'ok',
     diagnostics.length+' bekannte Vergleichsabweichung(en) werden getrennt überwacht und blockieren den laufenden Betrieb nicht.');
-  let gp=googlePingCache,googleHasPing=Boolean(gp&&gp.raw),googleOk=Boolean(googleHasPing&&googlePingFresh());
-  if(!googleOk){
-    try{
-      gp=await refreshGooglePing();
-      googleHasPing=Boolean(gp&&gp.raw);
-      googleOk=Boolean(googleHasPing&&googlePingFresh());
-    }catch(e){
-      console.error('Systemcheck Google refresh failed:',e.message);
-    }
-  }
-  push('Google Backend',googleOk,googleOk?'ok':'warn',
-    googleOk
-      ?'letzter erfolgreicher Ping '+shadowGermanDateTime(gp&&gp.checkedAt||'')
-      :(googleHasPing
-        ?'letzter erfolgreicher Ping '+shadowGermanDateTime(gp&&gp.checkedAt||'')+' · erneute Prüfung fehlgeschlagen'
-        :'noch kein erfolgreicher Ping gespeichert'));
-  push('Kalender-Synchronisation',true,'ok','Google-Kalender bleibt absichtlich aktiv.');
-  push('Drive-Dateien',true,'ok','Anhänge/Exporte bleiben absichtlich über Google Drive.');
+  const googleStatus=await gmailDirect.status();
+  const calendarStatus=await calendarDirect.status();
+  const gmailReady=Boolean(googleStatus&&googleStatus.configured&&googleStatus.connected);
+  const calendarReady=Boolean(calendarStatus&&calendarStatus.authorized);
+  push('Gmail-Direktimport',gmailReady,gmailReady?'ok':'warn',
+    gmailReady
+      ?'Gmail ist direkt mit Railway verbunden'+(googleStatus.email?' · '+googleStatus.email:'')
+      :'OAuth-Verbindung zu Gmail ist noch nicht vollständig eingerichtet.');
+  push('Google-Kalender',calendarReady,calendarReady?'ok':'warn',
+    calendarReady
+      ?'Kalenderzugriff läuft direkt über die Google Calendar API; PostgreSQL bleibt Terminspeicher.'
+      :'Kalender nutzt bis zur einmaligen OAuth-Freigabe noch den bestehenden Übergangspfad.');
+  const fileQ=await pool.query('SELECT COUNT(*)::int AS n,COALESCE(SUM(file_size),0)::bigint AS bytes FROM binary_files_v10');
+  push('Railway-Dateispeicher',true,'ok',
+    Number(fileQ.rows[0]?.n||0)+' Dateien · '+Number(fileQ.rows[0]?.bytes||0)+' Bytes in PostgreSQL gespeichert.');
   return {ok:errors.length===0,version:'DG App 10 Railway',checks,warnings,errors,checkedAt:shadowGermanDateTime(new Date().toISOString())};
 }
 
@@ -13157,8 +13153,7 @@ async function tryDirectPostgresWrite(action,body){
 
 const GOOGLE_RETAINED_ACTIONS_V24=new Set([
   'getEmployeeCalendarEvents','getPlannerEvents','saveExternalGoogleEvent','deleteExternalGoogleEvent',
-  'savePlannerEvent','deletePlannerEvent','transferPlannerEvent','planRequest3',
-  'sendMonthReport'
+  'savePlannerEvent','deletePlannerEvent','transferPlannerEvent','planRequest3'
 ]);
 function googleRetainedActionV24(action){return GOOGLE_RETAINED_ACTIONS_V24.has(String(action||''));}
 
