@@ -224,6 +224,63 @@ function createCalendarDirect(opts){
       }
     }finally{flushing=false;}
   }
+  function customerKey(value){
+    let s=String(value||'').trim().toLowerCase().replace(/ß/g,'ss').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    s=s.replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
+    return s.replace(/\bstr\b/g,'strasse').replace(/([a-z0-9]+)str\b/g,'$1strasse');
+  }
+  function addDaysIso(date,days){
+    const p=String(date||'').split('-').map(Number),d=new Date(Date.UTC(p[0],p[1]-1,p[2]+Number(days||0),12));
+    return d.toISOString().slice(0,10);
+  }
+  async function getEmployeeCalendarEvents(employee,startDate,days){
+    if(!await authorized())throw new Error('Google Kalender ist noch nicht direkt mit Railway verbunden.');
+    employee=String(employee||'').trim();startDate=String(startDate||'').trim();days=Math.max(1,Math.min(3,Number(days)||3));
+    if(!employee||!/^\d{4}-\d{2}-\d{2}$/.test(startDate))throw new Error('Ungültige Mitarbeiter-/Kalenderdaten.');
+    let calendarId='';
+    const eq=await pool.query('SELECT payload FROM employee_admin_shadow WHERE employee_name=$1 LIMIT 1',[employee]);
+    if(eq.rowCount){
+      const p=eq.rows[0].payload||{};calendarId=String(p.calendarId||'').trim();
+    }
+    if(!calendarId){
+      const wq=await pool.query("SELECT calendar_id FROM planner_workers_shadow WHERE active=true AND provider='google' AND lower(employee_name)=lower($1) LIMIT 1",[employee]);
+      calendarId=String(wq.rows[0]&&wq.rows[0].calendar_id||'').trim();
+    }
+    if(!calendarId)throw new Error('Für '+employee+' ist keine Google Kalender-ID hinterlegt.');
+    const endDate=addDaysIso(startDate,days),timeMin=encodeURIComponent(startDate+'T00:00:00'+offsetFor(startDate,'12:00'));
+    const timeMax=encodeURIComponent(endDate+'T00:00:00'+offsetFor(endDate,'12:00'));
+    const [cal,done,offers]=await Promise.all([
+      google.calendarApi('GET','calendars/'+encodeURIComponent(calendarId)+'/events?singleEvents=true&orderBy=startTime&timeMin='+timeMin+'&timeMax='+timeMax+'&maxResults=100'),
+      pool.query('SELECT entry_date,customer,source_calendar_event_id FROM time_entries_shadow WHERE employee_name=$1 AND entry_date>=$2 AND entry_date<$3',[employee,startDate,endDate]),
+      pool.query("SELECT calendar_event_id,status FROM inquiry_offers_shadow WHERE COALESCE(calendar_event_id,'')<>''")
+    ]);
+    const completedIds=new Set(),fallback=new Set();
+    for(const r of done.rows){
+      const sid=String(r.source_calendar_event_id||'').trim();if(sid)completedIds.add(sid);
+      const d=String(r.entry_date||'').slice(0,10);if(d)fallback.add(d+'|'+customerKey(String(r.customer||'')));
+    }
+    for(const r of offers.rows){
+      if(String(r.status||'')==='Verworfen')continue;
+      const id=String(r.calendar_event_id||'').trim();if(id)completedIds.add(id);
+    }
+    const out=[];
+    for(const e of (cal.items||[])){
+      const sp=e.start||{},ep=e.end||{},st=sp.dateTime?fmtDateTime(sp.dateTime):{date:String(sp.date||''),time:'00:00'};
+      const en=ep.dateTime?fmtDateTime(ep.dateTime):{date:String(ep.date||st.date),time:'23:59'};
+      const titleText=String(e.summary||'').replace(/^🔧 WARTUNG ·\s*/i,''),loc=String(e.location||''),desc=String(e.description||'');
+      const dgMarker=marker(desc),eventId=String(e.id||''),ical=String(e.iCalUID||'');
+      const customerText=titleText+(loc?' - '+loc:'');
+      const completed=completedIds.has(eventId)||completedIds.has(ical)||(!dgMarker&&fallback.has(st.date+'|'+customerKey(customerText)));
+      if(completed)continue;
+      out.push({
+        id:eventId,title:titleText,location:loc,description:desc,
+        maintenance:typeFromDescription(desc)==='Wartung'||/^🔧 WARTUNG ·/i.test(String(e.summary||'')),
+        startDate:st.date,startTime:st.time,endTime:en.time,allDay:Boolean(sp.date&&!sp.dateTime)
+      });
+    }
+    return out.sort((a,b)=>(a.startDate+' '+a.startTime).localeCompare(b.startDate+' '+b.startTime));
+  }
+
   async function getPlannerEvents(startDate,endDate){
     const q=await pool.query(`
       SELECT * FROM planner_events_shadow WHERE event_date>=$1 AND event_date<=$2 ORDER BY event_date,start_time
@@ -272,7 +329,7 @@ function createCalendarDirect(opts){
     if(timer.unref)timer.unref();
     setTimeout(()=>flush().catch(e=>console.error('CALENDAR_SYNC startup',e.message)),20000);
   }
-  return {init,start,authorized,status,getPlannerEvents,enqueueSync,enqueueDelete,syncEventNow,deleteMappingsNow,saveExternal,deleteExternal,workerCalendar,resolveGoogleEventId};
+  return {init,start,authorized,status,getPlannerEvents,getEmployeeCalendarEvents,enqueueSync,enqueueDelete,syncEventNow,deleteMappingsNow,saveExternal,deleteExternal,workerCalendar,resolveGoogleEventId};
 }
 
 module.exports={createCalendarDirect};
