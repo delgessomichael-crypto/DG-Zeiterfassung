@@ -1217,19 +1217,51 @@ async function finalizeLocalFileReferencesV24(){
 }
 async function finalCutoverAuditV24(){
   if(!pool)return null;
-  const [files,creds,pending,refs]=await Promise.all([
+  const [files,creds,pending,refs,missing,counts,googleUrls]=await Promise.all([
     pool.query('SELECT COUNT(*)::int n,COALESCE(SUM(file_size),0)::bigint bytes FROM binary_files_v10'),
     pool.query('SELECT COUNT(*)::int n FROM employee_credentials_v10 WHERE active=true'),
     pool.query("SELECT status,COUNT(*)::int n FROM legacy_write_outbox WHERE status IN ('pending','failed','sending') GROUP BY status"),
     pool.query(`SELECT
       (SELECT COUNT(*) FROM time_entries_shadow WHERE COALESCE(customer_signature_id,'')<>'')::int sig_refs,
       (SELECT COALESCE(SUM(CASE WHEN COALESCE(photo_file_ids,'')='' THEN 0 ELSE array_length(string_to_array(photo_file_ids,','),1) END),0) FROM time_entries_shadow)::int photo_refs,
-      (SELECT COUNT(*) FROM day_closures_shadow WHERE COALESCE(legacy_col5,'')<>'')::int day_sig_refs`)
+      (SELECT COUNT(*) FROM day_closures_shadow WHERE COALESCE(legacy_col5,'')<>'')::int day_sig_refs,
+      (SELECT COUNT(*) FROM maintenance_attachments_shadow WHERE active=true AND COALESCE(file_id,'')<>'')::int maintenance_refs,
+      (SELECT COUNT(*) FROM regie_attachments_shadow WHERE COALESCE(file_id,'')<>'')::int regie_refs`),
+    pool.query(`SELECT
+      (SELECT COUNT(*) FROM time_entries_shadow t WHERE COALESCE(t.customer_signature_id,'')<>'' AND NOT EXISTS (SELECT 1 FROM binary_files_v10 b WHERE b.id=t.customer_signature_id))::int signatures,
+      (SELECT COUNT(*) FROM time_entries_shadow t CROSS JOIN LATERAL unnest(string_to_array(COALESCE(t.photo_file_ids,''),',')) p(id) WHERE btrim(p.id)<>'' AND NOT EXISTS (SELECT 1 FROM binary_files_v10 b WHERE b.id=btrim(p.id)))::int photos,
+      (SELECT COUNT(*) FROM day_closures_shadow d WHERE COALESCE(d.legacy_col5,'')<>'' AND NOT EXISTS (SELECT 1 FROM binary_files_v10 b WHERE b.id=d.legacy_col5))::int day_signatures,
+      (SELECT COUNT(*) FROM maintenance_attachments_shadow m WHERE m.active=true AND COALESCE(m.file_id,'')<>'' AND NOT EXISTS (SELECT 1 FROM binary_files_v10 b WHERE b.id=m.file_id))::int maintenance,
+      (SELECT COUNT(*) FROM regie_attachments_shadow r WHERE COALESCE(r.file_id,'')<>'' AND NOT EXISTS (SELECT 1 FROM binary_files_v10 b WHERE b.id=r.file_id))::int regie`),
+    pool.query(`SELECT
+      (SELECT COUNT(*) FROM customer_inquiries_shadow)::int inquiries,
+      (SELECT COUNT(*) FROM manual_orders_shadow)::int manual_orders,
+      (SELECT COUNT(*) FROM objects_shadow)::int objects,
+      (SELECT COUNT(*) FROM time_entries_shadow)::int time_entries,
+      (SELECT COUNT(*) FROM maintenance_customers_shadow WHERE active=true)::int maintenance_customers,
+      (SELECT COUNT(*) FROM maintenance_objects_shadow WHERE active=true)::int maintenance_objects,
+      (SELECT COUNT(*) FROM maintenance_devices_shadow WHERE active=true)::int maintenance_devices,
+      (SELECT COUNT(*) FROM maintenance_attachments_shadow WHERE active=true)::int maintenance_attachments,
+      (SELECT COUNT(*) FROM employee_admin_shadow)::int employees,
+      (SELECT COUNT(*) FROM planner_workers_shadow)::int planner_workers,
+      (SELECT COUNT(*) FROM planner_events_shadow)::int planner_events`),
+    pool.query(`SELECT
+      (SELECT COUNT(*) FROM time_entries_shadow WHERE COALESCE(customer_signature_url,'') ~* 'drive\\.google|googleusercontent')::int signatures,
+      (SELECT COUNT(*) FROM time_entries_shadow WHERE COALESCE(photo_urls,'') ~* 'drive\\.google|googleusercontent')::int photos,
+      (SELECT COUNT(*) FROM day_closures_shadow WHERE COALESCE(legacy_col6,'') ~* 'drive\\.google|googleusercontent')::int day_signatures,
+      (SELECT COUNT(*) FROM maintenance_attachments_shadow WHERE active=true AND COALESCE(url,'') ~* 'drive\\.google|googleusercontent')::int maintenance,
+      (SELECT COUNT(*) FROM regie_attachments_shadow WHERE COALESCE(url,'') ~* 'drive\\.google|googleusercontent')::int regie,
+      (SELECT COUNT(*) FROM own_reminders_shadow WHERE COALESCE(attachments_json::text,'') ~* 'drive\\.google|googleusercontent')::int reminders`)
   ]);
-  const r=refs.rows[0]||{};
-  return {files:Number(files.rows[0]?.n||0),bytes:Number(files.rows[0]?.bytes||0),
+  const r=refs.rows[0]||{},m=missing.rows[0]||{},c=counts.rows[0]||{},g=googleUrls.rows[0]||{};
+  return {
+    finalCutover:FINAL_CUTOVER,files:Number(files.rows[0]?.n||0),bytes:Number(files.rows[0]?.bytes||0),
     activeCredentials:Number(creds.rows[0]?.n||0),outbox:pending.rows,
-    references:{customerSignatures:Number(r.sig_refs||0),photos:Number(r.photo_refs||0),daySignatures:Number(r.day_sig_refs||0)}};
+    references:{customerSignatures:Number(r.sig_refs||0),photos:Number(r.photo_refs||0),daySignatures:Number(r.day_sig_refs||0),maintenance:Number(r.maintenance_refs||0),regie:Number(r.regie_refs||0)},
+    missingFiles:{customerSignatures:Number(m.signatures||0),photos:Number(m.photos||0),daySignatures:Number(m.day_signatures||0),maintenance:Number(m.maintenance||0),regie:Number(m.regie||0)},
+    datasets:{inquiries:Number(c.inquiries||0),manualOrders:Number(c.manual_orders||0),objects:Number(c.objects||0),timeEntries:Number(c.time_entries||0),maintenanceCustomers:Number(c.maintenance_customers||0),maintenanceObjects:Number(c.maintenance_objects||0),maintenanceDevices:Number(c.maintenance_devices||0),maintenanceAttachments:Number(c.maintenance_attachments||0),employees:Number(c.employees||0),plannerWorkers:Number(c.planner_workers||0),plannerEvents:Number(c.planner_events||0)},
+    googleFileUrls:{customerSignatures:Number(g.signatures||0),photos:Number(g.photos||0),daySignatures:Number(g.day_signatures||0),maintenance:Number(g.maintenance||0),regie:Number(g.regie||0),reminders:Number(g.reminders||0)}
+  };
 }
 
 async function initDb() {
@@ -1266,8 +1298,9 @@ async function initDb() {
   await initRegieMetadataShadows();
   await bootstrapCompletedCustomerConsolidationV23();
   await initRegieAttachmentsShadow();
-  await importDriveManifestsV25();
+  const finalDriveImport=await importDriveManifestsV25();
   await finalizeLocalFileReferencesV24();
+  if(finalDriveImport.batches)console.log('FINAL_CUTOVER_AUDIT '+JSON.stringify(await finalCutoverAuditV24()));
   await bootstrapTrustedShadowReadiness();
   await bootstrapEmployeeAdminReadiness();
   await bootstrapTrustedShadowReadinessV2();
