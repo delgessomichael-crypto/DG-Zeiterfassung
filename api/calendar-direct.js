@@ -89,6 +89,49 @@ function createCalendarDirect(opts){
     const x=(r.items||[]).find(e=>marker(e.description)===String(eventId));
     return x?String(x.id||''):'';
   }
+  async function workerCalendar(workerId){
+    const q=await pool.query(
+      "SELECT id,calendar_id,display_name,employee_name,active,provider FROM planner_workers_shadow WHERE id=$1 LIMIT 1",
+      [String(workerId||'')]
+    );
+    const w=q.rows[0];
+    if(!w||w.active===false||String(w.provider||'google')!=='google'||!String(w.calendar_id||''))
+      throw new Error('Google-Kalender-Mitarbeiter wurde nicht gefunden.');
+    return {id:String(w.id),calendarId:String(w.calendar_id),displayName:String(w.display_name||w.employee_name||w.id)};
+  }
+  async function resolveGoogleEventId(calendarId,ref){
+    ref=String(ref||'').trim();if(!ref)return '';
+    try{
+      const e=await google.calendarApi('GET','calendars/'+encodeURIComponent(calendarId)+'/events/'+encodeURIComponent(ref));
+      if(e&&e.id)return String(e.id);
+    }catch(_e){}
+    try{
+      const r=await google.calendarApi('GET','calendars/'+encodeURIComponent(calendarId)+'/events?iCalUID='+encodeURIComponent(ref)+'&maxResults=10');
+      const e=(r.items||[])[0];if(e&&e.id)return String(e.id);
+    }catch(_e){}
+    return '';
+  }
+  async function saveExternal(item){
+    if(!await authorized())throw new Error('Google Kalender ist noch nicht direkt mit Railway verbunden.');
+    item=item||{};
+    const w=await workerCalendar(item.workerId),customer=String(item.customer||'').trim(),address=String(item.address||'').trim();
+    const task=String(item.task||'').trim(),date=String(item.date||'').trim(),start=String(item.start||'').trim(),end=String(item.end||'').trim();
+    if(!customer||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!/^\d{2}:\d{2}$/.test(start)||!/^\d{2}:\d{2}$/.test(end)||end<=start)
+      throw new Error('Google-Termin enthält ungültige Pflichtdaten.');
+    const gid=await resolveGoogleEventId(w.calendarId,item.googleEventId);
+    if(!gid)throw new Error('Google-Termin wurde nicht gefunden. Bitte Kalender neu laden.');
+    const resource={summary:customer,location:address,description:task,start:{dateTime:dt(date,start),timeZone:'Europe/Berlin'},end:{dateTime:dt(date,end),timeZone:'Europe/Berlin'}};
+    const e=await google.calendarApi('PUT','calendars/'+encodeURIComponent(w.calendarId)+'/events/'+encodeURIComponent(gid),resource);
+    return {ok:true,external:true,workerId:w.id,googleEventId:String(e.id||gid)};
+  }
+  async function deleteExternal(item){
+    if(!await authorized())throw new Error('Google Kalender ist noch nicht direkt mit Railway verbunden.');
+    item=item||{};const w=await workerCalendar(item.workerId),gid=await resolveGoogleEventId(w.calendarId,item.googleEventId);
+    if(!gid)throw new Error('Google-Termin wurde nicht gefunden. Bitte Kalender neu laden.');
+    await google.calendarApi('DELETE','calendars/'+encodeURIComponent(w.calendarId)+'/events/'+encodeURIComponent(gid));
+    return {ok:true,external:true};
+  }
+
   async function syncEventNow(eventId){
     if(!await authorized())return {ok:false,skipped:'not-authorized'};
     const q=await pool.query('SELECT * FROM planner_events_shadow WHERE id=$1 LIMIT 1',[String(eventId||'')]);
@@ -229,7 +272,7 @@ function createCalendarDirect(opts){
     if(timer.unref)timer.unref();
     setTimeout(()=>flush().catch(e=>console.error('CALENDAR_SYNC startup',e.message)),20000);
   }
-  return {init,start,authorized,status,getPlannerEvents,enqueueSync,enqueueDelete,syncEventNow,deleteMappingsNow};
+  return {init,start,authorized,status,getPlannerEvents,enqueueSync,enqueueDelete,syncEventNow,deleteMappingsNow,saveExternal,deleteExternal,workerCalendar,resolveGoogleEventId};
 }
 
 module.exports={createCalendarDirect};
