@@ -230,7 +230,7 @@
   if(!('serviceWorker' in navigator))return;
   window.addEventListener('load',function(){
     var start=function(){
-      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260922-1015-whatsapp2',{updateViaCache:'none'})
+      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260923-2008-railway-cutover',{updateViaCache:'none'})
         .then(function(r){return r.update();})
         .catch(function(e){console.warn('DG Offline-Cache nicht bereit',e);});
     };
