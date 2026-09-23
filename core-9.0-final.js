@@ -1436,7 +1436,35 @@ function d3Merge(view){const root=d3ReportRoot(view);if(!d3Visible(root))return;
 async function d3ConfirmMerge(){if(DG3.merging||!DG3.merge)return;DG3.merging=true;const {view,ids}=DG3.merge;try{await api(chefPayload({action:'mergeRegieObjects',objectIds:ids}));closeRegieMergeConfirm();await d3Reports(view);setMessage(view==='Laufend'?'d3RunningStatus':'regieStatus','Ausgewaehlte Berichte zusammengefuehrt.','ok');}catch(e){alert('Zusammenfuehren fehlgeschlagen: '+e.message);}finally{DG3.merging=false;}}
 async function d3Export(view,index){const g=DG3.reports[view]?.[index];if(!g)throw new Error('Bitte Berichte neu laden.');const card=d3ReportRoot(view).querySelector('.report-card[data-index="'+index+'"]'),st=card.querySelector('.d3-export-status');st.className='status info';st.textContent='Export wird erstellt ...';try{const r=await api(chefPayload({action:'createRegieReportZip',objectIds:g.objectIds||[g.objectId],entryIds:g.reports.map(x=>x.id),fileIds:[...card.querySelectorAll('.d3-photo:checked')].map(x=>x.value),customer:g.customer}));d3Download(r,r.mime||'application/pdf');st.className='status ok';st.textContent=r.reportCount+' Berichte exportiert.';}catch(e){st.className='status error';st.textContent=e.message;}}
 async function d3JobStatus(ids,status){const msg=status==='Abgeschlossen'?'Diesen Auftrag an „Rechnung zu erstellen“ übergeben?':'Auftrag auf '+status+' setzen?';if(!confirm(msg))return;const view=DG3.active;for(const objectId of ids.split(',').filter(Boolean))await api(chefPayload({action:'setRegieObjectJobStatus',objectId,jobStatus:status}));await d3Reports(view);if(typeof d3Dashboard==='function')await d3Dashboard();}
-async function d3Bill(ids){const objectIds=ids.split(',').filter(Boolean),risk=await api(chefPayload({action:'checkRegieBillingRisk',objectIds})),matches=risk.matches||[];if(!confirm((matches.length?'Weitere offene Vorgaenge gefunden:\n'+matches.map(x=>x.customer).join('\n')+'\n\n':'')+'Diesen Auftrag als abgerechnet markieren?'))return;await api(chefPayload({action:'markRegieObjectsBilled',objectIds,force:!!matches.length}));await d3Reports(DG3.active);if(typeof d3Dashboard==='function')await d3Dashboard(true);}
+async function d3Bill(ids){
+  const objectIds=ids.split(',').filter(Boolean),
+    risk=await api(chefPayload({action:'checkRegieBillingRisk',objectIds})),
+    matches=risk.matches||[];
+  if(!confirm((matches.length?'Weitere offene Vorgaenge gefunden:\n'+matches.map(x=>x.customer).join('\n')+'\n\n':'')+'Diesen Auftrag als abgerechnet markieren?'))return;
+  await api(chefPayload({action:'markRegieObjectsBilled',objectIds,force:!!matches.length}));
+  await d3Reports(DG3.active);
+  if(typeof d3Dashboard==='function')await d3Dashboard(true);
+
+  try{
+    const review=await api(chefPayload({action:'getBillingReviewTargetV10',objectIds}));
+    if(review&&review.alreadySent){
+      alert('Für diesen Auftrag wurde bereits eine Bewertungsanfrage per WhatsApp gesendet.');
+      return;
+    }
+    const customer=review&&review.customer?String(review.customer):'den Kunden';
+    const phone=review&&review.phoneMasked?(' · '+review.phoneMasked):'';
+    if(review&&!review.canSend){
+      alert('Bewertungsanfrage kann derzeit nicht gesendet werden.\n\n'+String(review.reason||'Keine passende WhatsApp-Nummer gefunden.'));
+      return;
+    }
+    const send=confirm('Bewertungsanfrage senden?\n\nKunde: '+customer+phone+'\n\nBei „OK“ wird die WhatsApp-Nachricht mit dem Google-Bewertungslink gesendet.\nBei „Abbrechen“ wird nichts versendet.');
+    if(!send)return;
+    const sent=await api(chefPayload({action:'sendBillingReviewRequestV10',objectIds}));
+    alert('Bewertungsanfrage wurde per WhatsApp gesendet'+(sent&&sent.phoneMasked?' an '+sent.phoneMasked:'')+'.');
+  }catch(e){
+    alert('Der Auftrag wurde als abgerechnet markiert.\n\nDie Bewertungsanfrage konnte jedoch nicht versendet werden:\n'+(e&&e.message?e.message:'Unbekannter Fehler'));
+  }
+}
 async function d3MoveOffer(entryIds){if(!confirm('Nach Angebote zu erstellen verschieben?'))return;await api(chefPayload({action:'setRegieReportsOfferStatus',entryIds,offerStatus:'Angebot zu erstellen'}));await d3Reports(DG3.active);if(typeof d3Dashboard==='function')await d3Dashboard(true);}
 async function d3Note(objectId,customer){const r=await api(chefPayload({action:'getObjectInternalNote',objectId})),note=prompt('Interner Vermerk zu '+customer,r.note||'');if(note===null)return;await api(chefPayload({action:'saveObjectInternalNote',objectId,note}));}
 async function d3Health(){const out=$('d3HealthList');out.textContent='System wird geprueft ...';try{const r=await api(chefPayload({action:'systemHealthCheck'}));out.innerHTML='<div class="status '+(r.ok?'ok':'warn')+'">App 10.0 - Backend '+esc(r.version)+' - '+esc(r.checkedAt)+'</div>'+(r.checks||[]).map(x=>'<div class="status '+(x.level==='error'?'error':x.level==='warn'?'warn':'ok')+'"><strong>'+esc(x.name)+'</strong><br>'+esc(x.detail)+'</div>').join('');}catch(e){out.textContent='Systemcheck fehlgeschlagen: '+e.message;}}
