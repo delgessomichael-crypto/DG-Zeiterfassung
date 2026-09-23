@@ -10541,7 +10541,21 @@ async function tryDirectPostgresWrite(action,body){
   let result=null,outboxId=0,legacyAction=action,legacyPayload=body,skipLegacySync=false;
   try{
     await client.query('BEGIN');
-    if(action==='mergeCustomerInquiriesV10'){
+    if(action==='addRegieAttachments'){
+      result=await directAddRegieAttachmentsV24(body);
+      skipLegacySync=true;
+    }else if(action==='deleteEmployeeAdmin'){
+      const target=String(body.targetName||body.name||'').trim();
+      if(!target)throw new Error('Mitarbeiter fehlt.');
+      if(target===by)throw new Error('Der aktuell angemeldete Benutzer kann sich nicht selbst löschen.');
+      await client.query('UPDATE employee_credentials_v10 SET active=false,updated_at=now() WHERE employee_name=$1',[target]);
+      const q=await client.query('SELECT payload FROM employee_admin_shadow WHERE employee_name=$1 FOR UPDATE',[target]);
+      if(q.rowCount){
+        const p=Object.assign({},q.rows[0].payload||{},{active:false,exitDate:(q.rows[0].payload||{}).exitDate||berlinTodayIso()});
+        await client.query('UPDATE employee_admin_shadow SET payload=$2::jsonb,shadow_updated_at=now() WHERE employee_name=$1',[target,JSON.stringify(p)]);
+      }
+      result={ok:true,employees:await postgresEmployeeAdminData()};skipLegacySync=true;
+    }else if(action==='mergeCustomerInquiriesV10'){
       let ids=[...new Set((Array.isArray(body.ids)?body.ids:[]).map(x=>String(x||'').trim()).filter(Boolean))];
       if(ids.length<2)throw new Error('Bitte mindestens zwei Anfragen auswählen.');
       const q=await client.query('SELECT id FROM customer_inquiries_shadow WHERE id=ANY($1::text[])',[ids]);
