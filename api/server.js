@@ -6,6 +6,7 @@ const zlib = require('zlib');
 const { Pool } = require('pg');
 const XLSX = require('xlsx');
 const JSZip = require('jszip');
+const { createGmailDirect } = require('./gmail-direct');
 
 const PORT = Number(process.env.PORT || 3000);
 const DATABASE_URL = process.env.DATABASE_URL || '';
@@ -28,6 +29,7 @@ const WHATSAPP_REVIEW_TEMPLATE = String(process.env.WHATSAPP_REVIEW_TEMPLATE||''
 const WHATSAPP_REVIEW_TEMPLATE_LANG = String(process.env.WHATSAPP_REVIEW_TEMPLATE_LANG||'de').trim()||'de';
 const FINAL_CUTOVER = /^(1|true|yes|ja)$/i.test(String(process.env.FINAL_CUTOVER||'false'));
 const FINAL_FILE_IMPORT_KEY = String(process.env.FINAL_FILE_IMPORT_KEY||MIGRATION_UPLOAD_KEY||'');
+const API_ORIGIN = String(process.env.API_ORIGIN || 'https://dg-app-10-api-production.up.railway.app').replace(/\/$/,'');
 
 
 const pool = DATABASE_URL ? new Pool({
@@ -37,6 +39,13 @@ const pool = DATABASE_URL ? new Pool({
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000
 }) : null;
+
+const gmailDirect = createGmailDirect({
+  pool,
+  webOrigin:WEB_ORIGIN,
+  apiOrigin:API_ORIGIN,
+  secret:MIGRATION_TOKEN
+});
 
 const schema = `
 CREATE TABLE IF NOT EXISTS migration_runs (
@@ -1270,6 +1279,7 @@ async function finalCutoverAuditV24(){
 async function initDb() {
   if (!pool) return;
   await pool.query(schema);
+  await gmailDirect.init();
   await initFinalCutoverStorageV24();
   await bootstrapEmployeeCredentialsV24();
   await pool.query("INSERT INTO partner_categories_v10(id,name,sort_order,active,created_by) VALUES ('PC-ELEKTRIKER','Elektriker',10,true,'System'),('PC-FLIESENLEGER','Fliesenleger',20,true,'System'),('PC-TROCKENBAUER','Trockenbauer',30,true,'System') ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,sort_order=EXCLUDED.sort_order,active=true,updated_at=now()");
@@ -10417,6 +10427,14 @@ async function tryDirectPostgresRead(action,body){
   if(action==='deleteWhatsappReviewTemplateV10')return directWhatsappReviewDeleteTemplateV10(body);
   if(action==='getEmployeeLocationsV10')return directEmployeeLocationsV10(body);
   if(action==='getAiAssistantV10')return directAiAssistantV10(body);
+  if(action==='getGmailStatusV10'){
+    const session=await localSessionForBody(body,true);if(!session)return null;
+    return gmailDirect.status();
+  }
+  if(action==='syncGmailInquiriesV10'){
+    const session=await localSessionForBody(body,true);if(!session)return null;
+    return gmailDirect.syncForUser(session.employee);
+  }
   if(action==='createRegieReportZip')return directRegieReportZipV24(body);
   if(action==='createRegiePhotoZip')return directRegiePhotoZipV24(body);
   if(action==='createTaxAdvisorPdf')return directTaxAdvisorPdfV24(body);
@@ -13171,7 +13189,7 @@ async function proxyLegacy(req, res, body) {
       return json(res,400,{ok:false,error:e.message},req);
     }
   }
-  if (['ping','systemHealthCheck','getDashboardSummary51','getCustomerInquiries','getInquiryReminders','getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getRegieAttachments','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts','getEmployeeWorkOverviewV10','getPartnerNetworkV10','getWhatsappInboxV10','getWhatsappMediaV10','getEmployeeLocationsV10','getAiAssistantV10','getMaintenanceAttachment','getMapsBrowserConfig','createRegieReportZip','createRegiePhotoZip','createTaxAdvisorPdf','getBillingReviewTargetV10','sendBillingReviewRequestV10'].includes(action)) {
+  if (['ping','systemHealthCheck','getDashboardSummary51','getCustomerInquiries','getInquiryReminders','getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getRegieAttachments','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts','getEmployeeWorkOverviewV10','getPartnerNetworkV10','getWhatsappInboxV10','getWhatsappMediaV10','getEmployeeLocationsV10','getAiAssistantV10','getGmailStatusV10','syncGmailInquiriesV10','getMaintenanceAttachment','getMapsBrowserConfig','createRegieReportZip','createRegiePhotoZip','createTaxAdvisorPdf','getBillingReviewTargetV10','sendBillingReviewRequestV10'].includes(action)) {
     try {
       const direct=await tryDirectPostgresRead(action,body);
       if (direct!==null) {
@@ -13982,6 +14000,19 @@ const server = http.createServer(async (req, res) => {
     }
 
 
+    if (req.method === 'GET' && url.pathname === '/v1/google/oauth/callback') {
+      const code=String(url.searchParams.get('code')||''),state=String(url.searchParams.get('state')||'');
+      try{
+        if(!code||!state)throw new Error('Google OAuth Rueckgabe unvollstaendig.');
+        const result=await gmailDirect.callback(code,state);
+        res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});
+        return res.end('<!doctype html><html><meta charset="utf-8"><title>Gmail verbunden</title><body style="font-family:Arial;padding:32px"><h2>Gmail ist mit der DG-App verbunden.</h2><p>'+String(result.email||'')+' wird jetzt direkt nach Railway/PostgreSQL synchronisiert. Dieses Fenster kann geschlossen werden.</p><script>try{window.opener&&window.opener.postMessage({type:"dg-gmail-connected"},"'+WEB_ORIGIN.replace(/"/g,'')+'");setTimeout(function(){window.close()},1200)}catch(e){}</script></body></html>');
+      }catch(e){
+        res.writeHead(400,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});
+        return res.end('<!doctype html><meta charset="utf-8"><title>Gmail</title><h2>Gmail-Verbindung fehlgeschlagen.</h2><p>'+String(e&&e.message||e).replace(/[<>&]/g,'')+'</p>');
+      }
+    }
+
     if (req.method === 'GET' && url.pathname.startsWith('/v1/files/')) {
       const id=decodeURIComponent(url.pathname.slice('/v1/files/'.length));
       if(!id)return json(res,404,{ok:false,error:'Datei nicht gefunden'},req);
@@ -14113,6 +14144,7 @@ initDb()
     if(Array.isArray(h.shadowReadiness)&&h.shadowReadiness.length)console.log('SHADOW_READINESS '+h.shadowReadiness.map(x=>x.shadowName+'='+x.status+'('+x.mismatches+')').join(' | '));
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
+    gmailDirect.start();
   })
   .then(() => server.listen(PORT, '0.0.0.0', () => {
     console.log('DG-App-10 API listening on ' + PORT);
