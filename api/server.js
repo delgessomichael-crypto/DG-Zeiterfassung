@@ -10520,7 +10520,6 @@ async function tryDirectPostgresWrite(action,body){
     const customer=String(e.customer||'').trim();if(!customer)return null;
     const oq=await pool.query('SELECT id FROM objects_shadow WHERE object_key=$1 ORDER BY created_at_text ASC NULLS LAST,id ASC LIMIT 1',[shadowObjectKey(customer)]);
     if(!oq.rowCount&&!FINAL_CUTOVER)return null;
-    if(String(e.sourceCalendarEventId||'').trim()&&!Boolean(e.maintenance))return null;
   }
   if(action==='savePlannerEvent'){
     const item=body&&body.item||{};
@@ -10748,7 +10747,6 @@ async function tryDirectPostgresWrite(action,body){
       }
       const isMaintenance=Boolean(entry.maintenance),nextDue=String(entry.nextMaintenanceDue||'').trim();
       const maintenanceCustomerId=String(entry.maintenanceCustomerId||'').trim(),maintenanceObjectId=String(entry.maintenanceObjectId||'').trim(),maintenanceDeviceId=String(entry.maintenanceDeviceId||'').trim();
-      if(String(entry.sourceCalendarEventId||'').trim()&&!isMaintenance)throw new Error('Kalenderverknüpfte Einträge werden weiterhin über Google geprüft.');
       if(isMaintenance&&!/^\d{4}-(0[1-9]|1[0-2])$/.test(nextDue))throw new Error('Bei Wartungen ist „Nächste Wartung fällig“ mit Monat und Jahr Pflicht.');
       if(isMaintenance&&maintenanceDeviceId){
         const md=await client.query('SELECT active FROM maintenance_devices_shadow WHERE id=$1 LIMIT 1',[maintenanceDeviceId]);
