@@ -10581,7 +10581,12 @@ async function recalcClosedDayAfterDirectCorrection(client,employee,date,reason,
 
 async function tryDirectPostgresWrite(action,body){
   if(!DIRECT_POSTGRES_WRITE_ACTIONS.has(action)||!pool)return null;
-  const needsLegacySyncV24=!FINAL_CUTOVER||googleRetainedActionV24(action);
+  const directCalendarAction=FINAL_CUTOVER&&['planRequest3','savePlannerEvent','deletePlannerEvent','transferPlannerEvent'].includes(action);
+  let directCalendarReady=false;
+  if(directCalendarAction){
+    try{directCalendarReady=await calendarDirect.authorized();}catch(e){console.error('CALENDAR_DIRECT readiness failed',e.message);}
+  }
+  const needsLegacySyncV24=!FINAL_CUTOVER||(googleRetainedActionV24(action)&&!directCalendarReady);
   if(needsLegacySyncV24&&(!GOOGLE_BACKEND_URL||!legacyOutboxCryptoKey()))return null;
   if(action==='deleteAbsence'){
     const id=String(body&&body.id||'').trim();
@@ -10649,7 +10654,7 @@ async function tryDirectPostgresWrite(action,body){
   const session=await localSessionForBody(body,!employeeSelfAction);if(!session)return null;
   const by=String(session.employee||body.employee||'').trim(),nowIso=new Date().toISOString();
   const client=await pool.connect();
-  let result=null,outboxId=0,legacyAction=action,legacyPayload=body,skipLegacySync=false;
+  let result=null,outboxId=0,legacyAction=action,legacyPayload=body,skipLegacySync=Boolean(directCalendarReady),calendarAfterCommit=null;
   try{
     await client.query('BEGIN');
     if(action==='addRegieAttachments'){
@@ -12671,6 +12676,7 @@ async function tryDirectPostgresWrite(action,body){
         );
       }
       result={ok:true,id:eventId,type,maintenanceDeviceId:String(item.maintenanceDeviceId||'')};
+      if(directCalendarReady)calendarAfterCommit={operation:'sync',eventId};
     }else if(action==='transferPlannerEvent'){
       const item=body.item||{},sourceId=String(item.sourceId||'').trim(),targetWorkerId=String(item.targetWorkerId||'').trim();
       if(!sourceId||!targetWorkerId)throw new Error('Quelltermin oder Zielmitarbeiter fehlt.');
@@ -12690,6 +12696,7 @@ async function tryDirectPostgresWrite(action,body){
         [sourceId,JSON.stringify([targetWorkerId]),JSON.stringify([display]),nowIso,by]
       );
       result={ok:true,id:sourceId,type:String(ev.rows[0].event_type||'Auftrag'),maintenanceDeviceId:String(ev.rows[0].maintenance_device_id||'')};
+      if(directCalendarReady)calendarAfterCommit={operation:'sync',eventId:sourceId};
     }else if(action==='savePlannerEvent'){
       const item=body.item||{},id=String(item.id||'').trim();
       if(!id)throw new Error('Termin-ID fehlt.');
@@ -12730,12 +12737,15 @@ async function tryDirectPostgresWrite(action,body){
          maintenanceCustomerId,maintenanceObjectId,maintenanceDeviceId]
       );
       result={ok:true,id,type,maintenanceDeviceId};
+      if(directCalendarReady)calendarAfterCommit={operation:'sync',eventId:id};
     }else if(action==='deletePlannerEvent'){
       const id=String(body.id||'').trim();if(!id)throw new Error('Termin nicht gefunden.');
-      const q=await client.query('SELECT id FROM planner_events_shadow WHERE id=$1 FOR UPDATE',[id]);
+      const q=await client.query('SELECT id,google_event_ids_json FROM planner_events_shadow WHERE id=$1 FOR UPDATE',[id]);
       if(!q.rowCount)throw new Error('Termin nicht gefunden.');
+      let googleMap={};try{googleMap=JSON.parse(String(q.rows[0].google_event_ids_json||'{}'))||{};}catch(_e){}
       await client.query('DELETE FROM planner_events_shadow WHERE id=$1',[id]);
       result={ok:true,id};
+      if(directCalendarReady)calendarAfterCommit={operation:'delete',map:googleMap};
     }else if(action==='deleteMaintenanceAttachment'){
       const id=String(body.id||'').trim();if(!id)throw new Error('Wartungsunterlage nicht gefunden.');
       const q=await client.query(
@@ -12954,6 +12964,12 @@ async function tryDirectPostgresWrite(action,body){
     try{await client.query('ROLLBACK');}catch(_e){}
     throw e;
   }finally{client.release();}
+  if(calendarAfterCommit){
+    try{
+      if(calendarAfterCommit.operation==='sync')await calendarDirect.enqueueSync(calendarAfterCommit.eventId);
+      else if(calendarAfterCommit.operation==='delete')await calendarDirect.enqueueDelete(calendarAfterCommit.map||{});
+    }catch(e){console.error('CALENDAR_SYNC queue failed action='+action+' error='+e.message);}
+  }
 
   if(action==='saveTimeBankManual'){
     const employee=String(body.targetEmployee||'');
@@ -13278,7 +13294,7 @@ async function proxyLegacy(req, res, body) {
           legacySync:directWrite.outboxId?'queued':(FINAL_CUTOVER?'disabled-cutover':'already-synced')
         },req);
       }
-      if(FINAL_CUTOVER)return json(res,400,{ok:false,error:'Railway-Schreibzugriff konnte nicht ausgeführt werden ('+action+'). Sitzung oder Eingaben prüfen.'},req);
+      if(FINAL_CUTOVER&&!googleRetainedActionV24(action))return json(res,400,{ok:false,error:'Railway-Schreibzugriff konnte nicht ausgeführt werden ('+action+'). Sitzung oder Eingaben prüfen.'},req);
     } catch(e) {
       console.error('Direct Postgres write failed:',action,e.message);
       return json(res,400,{ok:false,error:e.message},req);
