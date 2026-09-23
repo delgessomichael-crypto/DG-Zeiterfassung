@@ -11633,7 +11633,16 @@ async function tryDirectPostgresWrite(action,body){
              String(d.sparePartSerialNumber||''),String(d.internalNotes||''),String(d.nextMaintenanceDue||''),
              nowIso,by,internalId]
           );
-          outObject.devices.push({...d,id:did,internalDeviceId:internalId});
+          // maintenance-local-upload
+          const localAttachments=[];
+          for(const a of (Array.isArray(d.attachments)?d.attachments:[])){if(a&&a.fileId&&!a.dataUrl)localAttachments.push(a);}
+          for(const a of (Array.isArray(d.newAttachments)?d.newAttachments:[])){
+            const stored=await storeBinaryFileV24(client,{dataUrl:a.dataUrl,name:a.name,mime:a.mime||a.type,kind:'maintenance-'+String(a.kind||'Datei'),source:'railway',metadata:{customerId:id,objectId:oid,deviceId:did}});
+            const aid='WAT-PG-'+crypto.randomUUID();
+            await client.query(`INSERT INTO maintenance_attachments_shadow(id,device_id,customer_id,object_id,kind,name,mime,file_size,file_id,url,active,created_at_text,created_by,shadow_updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,$11,$12,now())`,[aid,did,id,oid,String(a.kind||'Datei'),stored.name,stored.mime,stored.size,stored.id,stored.url,nowIso,by]);
+            localAttachments.push({id:aid,kind:String(a.kind||'Datei'),name:stored.name,mime:stored.mime,size:stored.size,fileId:stored.id,url:stored.url,createdAt:nowIso,createdBy:by});
+          }
+          outObject.devices.push({...d,id:did,internalDeviceId:internalId,attachments:localAttachments,newAttachments:[]});
         }
         outItem.objects.push(outObject);
       }
