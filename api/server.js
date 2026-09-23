@@ -7,6 +7,7 @@ const { Pool } = require('pg');
 const XLSX = require('xlsx');
 const JSZip = require('jszip');
 const { createGmailDirect } = require('./gmail-direct');
+const { createCalendarDirect } = require('./calendar-direct');
 
 const PORT = Number(process.env.PORT || 3000);
 const DATABASE_URL = process.env.DATABASE_URL || '';
@@ -46,6 +47,7 @@ const gmailDirect = createGmailDirect({
   apiOrigin:API_ORIGIN,
   secret:MIGRATION_TOKEN
 });
+const calendarDirect = createCalendarDirect({pool,google:gmailDirect});
 
 const schema = `
 CREATE TABLE IF NOT EXISTS migration_runs (
@@ -1280,6 +1282,7 @@ async function initDb() {
   if (!pool) return;
   await pool.query(schema);
   await gmailDirect.init();
+  await calendarDirect.init();
   await initFinalCutoverStorageV24();
   await bootstrapEmployeeCredentialsV24();
   await pool.query("INSERT INTO partner_categories_v10(id,name,sort_order,active,created_by) VALUES ('PC-ELEKTRIKER','Elektriker',10,true,'System'),('PC-FLIESENLEGER','Fliesenleger',20,true,'System'),('PC-TROCKENBAUER','Trockenbauer',30,true,'System') ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,sort_order=EXCLUDED.sort_order,active=true,updated_at=now()");
@@ -14209,6 +14212,7 @@ initDb()
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
     gmailDirect.start();
+    calendarDirect.start();
   })
   .then(() => server.listen(PORT, '0.0.0.0', () => {
     console.log('DG-App-10 API listening on ' + PORT);
