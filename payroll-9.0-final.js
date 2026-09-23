@@ -1,8 +1,8 @@
-/* DG Zeiterfassung 9.0 - Payroll UI Final
+/* DG Zeiterfassung 10.0 - Payroll UI Final
    Selected month status, force close button, correct top tile due date. */
 (function(){
 'use strict';
-const V='9.0';
+const V='10.0';
 const BACKEND='https://dg-app-10-api-production.up.railway.app/';
 const $=id=>document.getElementById(id);
 let resultObserver=null,installing=false;
