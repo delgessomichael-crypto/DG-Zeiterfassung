@@ -1500,7 +1500,7 @@ async function d3Import(){
     }
     await d3Inquiries();
     const extra=r&&r.failed?' · Fehler: '+Number(r.failed||0):'';
-    setMessage('d3InquiryStatus','Gmail-Abgleich: '+Number(r&&r.imported||0)+' neu, '+Number(r&&r.duplicates||0)+' bereits bekannt'+extra+'.','ok');
+    setMessage('d3InquiryStatus','Gmail-Abgleich: '+Number(r&&r.imported||0)+' neu, '+Number(r&&r.updated||0)+' aktualisiert, '+Number(r&&r.duplicates||0)+' bereits bekannt'+extra+'.','ok');
   }catch(e){setMessage('d3InquiryStatus','Gmail-Abgleich fehlgeschlagen: '+e.message,'error');}
 }
 function d3InquiryNote(id){const r=d3Inquiry(id);d3Form('Interne Notiz',[{name:'note',label:'Notiz',type:'textarea'}],{note:r.internalNote||''},async v=>{await api(chefPayload({action:'saveCustomerInquiryNote',id,note:v.note}));await d3Inquiries();});}
@@ -1796,7 +1796,7 @@ d3Import=async function(){
     await d3Inquiries();await d3Dashboard();
     if(DG3.open==='d34AqonInquiries')await d34AqonInquiries();
     const extra=r&&r.failed?' · Fehler: '+Number(r.failed||0):'';
-    setMessage('d3InquiryStatus','Gmail-Abgleich abgeschlossen: '+Number(r&&r.imported||0)+' neu, '+Number(r&&r.duplicates||0)+' bereits bekannt'+extra+'.','ok');
+    setMessage('d3InquiryStatus','Gmail-Abgleich abgeschlossen: '+Number(r&&r.imported||0)+' neu, '+Number(r&&r.updated||0)+' aktualisiert, '+Number(r&&r.duplicates||0)+' bereits bekannt'+extra+'.','ok');
   }catch(e){setMessage('d3InquiryStatus','Gmail-Abgleich fehlgeschlagen: '+e.message,'error');}
 };
 window.addEventListener('message',e=>{let apiOrigin='';try{apiOrigin=new URL('https://dg-app-10-api-production.up.railway.app/').origin;}catch(_e){}if(e.origin===apiOrigin&&e.data&&e.data.type==='dg-gmail-connected')setTimeout(()=>d3Import(),800);});
