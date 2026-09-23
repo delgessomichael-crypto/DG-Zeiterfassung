@@ -1049,6 +1049,7 @@ async function initDb() {
   await reconcileLegacyDayClosureDuplicatesV9();
   await initTimeEntriesShadow();
   await initRegieMetadataShadows();
+  await bootstrapCompletedCustomerConsolidationV23();
   await initRegieAttachmentsShadow();
   await bootstrapTrustedShadowReadiness();
   await bootstrapEmployeeAdminReadiness();
@@ -1977,6 +1978,180 @@ function shadowObjectKey(value){
     .replace(/\bstr\b/g,'strasse').replace(/([a-z0-9]+)str\b/g,'$1strasse');
 }
 
+async function consolidateCompletedCustomerV10(db,customer,triggerObjectId,by,nowIso,legacyBase,queueLegacy){
+  const key=shadowObjectKey(customer);if(!key)return {objectIds:[],merged:false,moved:0};
+  const ids=new Set();
+  if(triggerObjectId)ids.add(String(triggerObjectId));
+
+  // Clear matches only: same normalized customer/object key.
+  const oq=await db.query('SELECT id,object_key FROM objects_shadow');
+  for(const r of oq.rows)if(String(r.object_key||'')===key)ids.add(String(r.id||''));
+
+  const tq=await db.query(
+    `SELECT DISTINCT object_id,customer,job_status
+       FROM time_entries_shadow
+      WHERE COALESCE(billing_status,'Offen')='Offen'
+        AND COALESCE(object_id,'')<>''
+        AND COALESCE(job_status,'Abgeschlossen') IN ('Laufend','Abgeschlossen')`
+  );
+  for(const r of tq.rows){
+    if(shadowObjectKey(r.customer)===key)ids.add(String(r.object_id||''));
+  }
+
+  // Keep already merged members together even when the display text varies slightly.
+  if(ids.size){
+    const mq=await db.query(
+      'SELECT DISTINCT merge_id FROM regie_merges_shadow WHERE object_id=ANY($1::text[]) AND COALESCE(merge_id,\'\')<>\'\'',
+      [[...ids]]
+    );
+    const mergeIds=mq.rows.map(r=>String(r.merge_id||'')).filter(Boolean);
+    if(mergeIds.length){
+      const members=await db.query(
+        'SELECT object_id FROM regie_merges_shadow WHERE merge_id=ANY($1::text[])',
+        [mergeIds]
+      );
+      for(const r of members.rows)if(r.object_id)ids.add(String(r.object_id));
+    }
+  }
+
+  const objectIds=[...ids].filter(Boolean).sort();
+  if(!objectIds.length)return {objectIds:[],merged:false,moved:0};
+
+  const before=await db.query(
+    `SELECT object_id,job_status FROM time_entries_shadow
+      WHERE object_id=ANY($1::text[])
+        AND COALESCE(billing_status,'Offen')='Offen'
+        AND COALESCE(job_status,'Abgeschlossen') IN ('Laufend','Abgeschlossen')`,
+    [objectIds]
+  );
+  const runningObjects=[...new Set(before.rows
+    .filter(r=>String(r.job_status||'')==='Laufend')
+    .map(r=>String(r.object_id||'')).filter(Boolean))];
+
+  let mergeId='';
+  if(objectIds.length>1){
+    const existing=await db.query(
+      'SELECT merge_id FROM regie_merges_shadow WHERE object_id=ANY($1::text[]) AND COALESCE(merge_id,\'\')<>\'\' ORDER BY merged_at_text ASC NULLS LAST,merge_id LIMIT 1',
+      [objectIds]
+    );
+    mergeId=String(existing.rows[0]?.merge_id||('MERGE-'+crypto.randomUUID()));
+    for(const oid of objectIds){
+      await db.query(
+        `INSERT INTO regie_merges_shadow(object_id,merge_id,merged_at_text,merged_by,shadow_updated_at)
+         VALUES($1,$2,$3,$4,now())
+         ON CONFLICT(object_id) DO UPDATE SET
+           merge_id=EXCLUDED.merge_id,merged_at_text=EXCLUDED.merged_at_text,
+           merged_by=EXCLUDED.merged_by,shadow_updated_at=now()`,
+        [oid,mergeId,nowIso,String(by||'')]
+      );
+    }
+  }
+
+  const upd=await db.query(
+    `UPDATE time_entries_shadow
+        SET job_status='Abgeschlossen',shadow_updated_at=now()
+      WHERE object_id=ANY($1::text[])
+        AND COALESCE(billing_status,'Offen')='Offen'
+        AND COALESCE(job_status,'Abgeschlossen') IN ('Laufend','Abgeschlossen')
+      RETURNING id`,
+    [objectIds]
+  );
+
+  if(queueLegacy&&legacyBase){
+    if(objectIds.length>1){
+      await enqueueLegacyWriteWithClient(db,'mergeRegieObjects',
+        Object.assign({},legacyBase,{action:'mergeRegieObjects',objectIds}));
+    }
+    // Push status for every member so Google cannot keep an old "Laufend" tab behind.
+    for(const oid of objectIds){
+      await enqueueLegacyWriteWithClient(db,'setRegieObjectJobStatus',
+        Object.assign({},legacyBase,{action:'setRegieObjectJobStatus',objectId:oid,jobStatus:'Abgeschlossen'}));
+    }
+  }
+
+  return {objectIds,mergeId,merged:objectIds.length>1,moved:upd.rowCount,runningObjects};
+}
+
+async function consolidateCompletedCustomerAfterMirrorV10(body){
+  const entry=body&&body.entry||{};
+  if(String(entry.jobStatus||'').trim()!=='Abgeschlossen')return null;
+  const customer=String(entry.customer||'').trim();if(!customer)return null;
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const oq=await client.query(
+      'SELECT id FROM objects_shadow WHERE object_key=$1 ORDER BY created_at_text ASC NULLS LAST,id ASC LIMIT 1',
+      [shadowObjectKey(customer)]
+    );
+    const r=await consolidateCompletedCustomerV10(
+      client,customer,String(oq.rows[0]?.id||''),String(body.employee||''),new Date().toISOString(),body,true
+    );
+    await client.query('COMMIT');
+    return r;
+  }catch(e){
+    try{await client.query('ROLLBACK');}catch(_e){}
+    throw e;
+  }finally{client.release();}
+}
+
+async function bootstrapCompletedCustomerConsolidationV23(){
+  if(!pool)return;
+  const marker='completed_customer_consolidation_v23';
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);if(done.rowCount)return;
+
+  const q=await pool.query(
+    `SELECT object_id,customer,job_status,entry_date,start_time,transmitted_at_text,shadow_updated_at
+       FROM time_entries_shadow
+      WHERE COALESCE(billing_status,'Offen')='Offen'
+        AND COALESCE(object_id,'')<>''
+        AND COALESCE(job_status,'Abgeschlossen') IN ('Laufend','Abgeschlossen')`
+  );
+  const groups=new Map();
+  for(const r of q.rows){
+    const k=shadowObjectKey(r.customer);if(!k)continue;
+    if(!groups.has(k))groups.set(k,[]);
+    groups.get(k).push(r);
+  }
+
+  let repaired=0,objects=0;
+  for(const rows of groups.values()){
+    const statuses=new Set(rows.map(r=>String(r.job_status||'Abgeschlossen')));
+    if(!(statuses.has('Laufend')&&statuses.has('Abgeschlossen')))continue;
+    rows.sort((a,b)=>{
+      const sa=String(a.transmitted_at_text||'')+'|'+String(a.entry_date||'')+'|'+String(a.start_time||'')+'|'+String(a.shadow_updated_at||'');
+      const sb=String(b.transmitted_at_text||'')+'|'+String(b.entry_date||'')+'|'+String(b.start_time||'')+'|'+String(b.shadow_updated_at||'');
+      return sa.localeCompare(sb);
+    });
+    const newest=rows[rows.length-1];
+    // Conservative repair: only close old running tabs when the newest transferred report is explicitly completed.
+    if(String(newest.job_status||'')!=='Abgeschlossen')continue;
+    const client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      const res=await consolidateCompletedCustomerV10(
+        client,String(newest.customer||''),String(newest.object_id||''),'System',new Date().toISOString(),null,false
+      );
+      await client.query('COMMIT');
+      if(res.objectIds.length){repaired++;objects+=res.objectIds.length;}
+    }catch(e){
+      try{await client.query('ROLLBACK');}catch(_e){}
+      console.error('Completed customer consolidation repair failed:',e.message);
+    }finally{client.release();}
+  }
+
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+     ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
+    [marker,JSON.stringify({at:new Date().toISOString(),repaired,objects,
+      rule:'exact normalized customer only; newest open report must be Abgeschlossen'})]
+  );
+  if(repaired){
+    await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'regie_%' OR shadow_name LIKE 'object_reports_%'");
+    await pool.query("DELETE FROM exact_views_shadow WHERE action='getDashboardSummary51'");
+  }
+  console.log('COMPLETED_CUSTOMER_V23 repaired='+repaired+' objects='+objects);
+}
+
 async function upsertObjectShadow(id,customer){
   if(!pool||!id)return;
   const name=String(customer||'');
@@ -2617,6 +2792,9 @@ async function mirrorTimeEntryWrite(action,body,parsed){
 
   if(['saveEntry','deleteEntry','updateEmployeeEntry'].includes(action) && Array.isArray(data.entries)){
     await syncTimeEntriesFromDayRead(body,data);
+    if(action==='saveEntry'&&String(body&&body.entry&&body.entry.jobStatus||'').trim()==='Abgeschlossen'){
+      await consolidateCompletedCustomerAfterMirrorV10(body);
+    }
     return;
   }
 
@@ -10261,7 +10439,20 @@ async function tryDirectPostgresWrite(action,body){
         }
       }
       legacyPayload=Object.assign({},body,{entry:Object.assign({},entry,{employee:by,clientId:id,start,end,hours})});
+      let completedConsolidation=null;
+      if(String(entry.jobStatus||'').trim()==='Abgeschlossen'){
+        completedConsolidation=await consolidateCompletedCustomerV10(
+          client,customer,objectId,by,nowIso,body,true
+        );
+      }
       result=await postgresDayData({date},by);
+      if(result&&completedConsolidation&&completedConsolidation.objectIds.length){
+        result.completedCustomerConsolidation={
+          objectIds:completedConsolidation.objectIds,
+          merged:completedConsolidation.merged,
+          moved:completedConsolidation.moved
+        };
+      }
       if(dayWasClosed&&isSupplement){result.supplementSaved=true;result.supplementEntryId=id;}
     }else if(action==='createInspectionOffer'){
       const item=body.item||{},ev=item.event||{};
