@@ -1232,7 +1232,9 @@ async function finalCutoverAuditV24(){
       (SELECT COUNT(*) FROM time_entries_shadow t CROSS JOIN LATERAL unnest(string_to_array(COALESCE(t.photo_file_ids,''),',')) p(id) WHERE btrim(p.id)<>'' AND NOT EXISTS (SELECT 1 FROM binary_files_v10 b WHERE b.id=btrim(p.id)))::int photos,
       (SELECT COUNT(*) FROM day_closures_shadow d WHERE COALESCE(d.legacy_col5,'')<>'' AND NOT EXISTS (SELECT 1 FROM binary_files_v10 b WHERE b.id=d.legacy_col5))::int day_signatures,
       (SELECT COUNT(*) FROM maintenance_attachments_shadow m WHERE m.active=true AND COALESCE(m.file_id,'')<>'' AND NOT EXISTS (SELECT 1 FROM binary_files_v10 b WHERE b.id=m.file_id))::int maintenance,
-      (SELECT COUNT(*) FROM regie_attachments_shadow r WHERE COALESCE(r.file_id,'')<>'' AND NOT EXISTS (SELECT 1 FROM binary_files_v10 b WHERE b.id=r.file_id))::int regie`),
+      (SELECT COUNT(*) FROM regie_attachments_shadow r WHERE COALESCE(r.file_id,'')<>'' AND NOT EXISTS (SELECT 1 FROM binary_files_v10 b WHERE b.id=r.file_id))::int regie,
+      (SELECT COALESCE(json_agg(DISTINCT btrim(p.id)),'[]'::json) FROM time_entries_shadow t CROSS JOIN LATERAL unnest(string_to_array(COALESCE(t.photo_file_ids,''),',')) p(id) WHERE btrim(p.id)<>'' AND NOT EXISTS (SELECT 1 FROM binary_files_v10 b WHERE b.id=btrim(p.id))) AS photo_ids,
+      (SELECT COALESCE(json_agg(DISTINCT d.legacy_col5),'[]'::json) FROM day_closures_shadow d WHERE COALESCE(d.legacy_col5,'')<>'' AND NOT EXISTS (SELECT 1 FROM binary_files_v10 b WHERE b.id=d.legacy_col5)) AS day_signature_ids`),
     pool.query(`SELECT
       (SELECT COUNT(*) FROM customer_inquiries_shadow)::int inquiries,
       (SELECT COUNT(*) FROM manual_orders_shadow)::int manual_orders,
@@ -1259,6 +1261,7 @@ async function finalCutoverAuditV24(){
     activeCredentials:Number(creds.rows[0]?.n||0),outbox:pending.rows,
     references:{customerSignatures:Number(r.sig_refs||0),photos:Number(r.photo_refs||0),daySignatures:Number(r.day_sig_refs||0),maintenance:Number(r.maintenance_refs||0),regie:Number(r.regie_refs||0)},
     missingFiles:{customerSignatures:Number(m.signatures||0),photos:Number(m.photos||0),daySignatures:Number(m.day_signatures||0),maintenance:Number(m.maintenance||0),regie:Number(m.regie||0)},
+    missingFileIds:{photos:Array.isArray(m.photo_ids)?m.photo_ids:[],daySignatures:Array.isArray(m.day_signature_ids)?m.day_signature_ids:[]},
     datasets:{inquiries:Number(c.inquiries||0),manualOrders:Number(c.manual_orders||0),objects:Number(c.objects||0),timeEntries:Number(c.time_entries||0),maintenanceCustomers:Number(c.maintenance_customers||0),maintenanceObjects:Number(c.maintenance_objects||0),maintenanceDevices:Number(c.maintenance_devices||0),maintenanceAttachments:Number(c.maintenance_attachments||0),employees:Number(c.employees||0),plannerWorkers:Number(c.planner_workers||0),plannerEvents:Number(c.planner_events||0)},
     googleFileUrls:{customerSignatures:Number(g.signatures||0),photos:Number(g.photos||0),daySignatures:Number(g.day_signatures||0),maintenance:Number(g.maintenance||0),regie:Number(g.regie||0),reminders:Number(g.reminders||0)}
   };
