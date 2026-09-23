@@ -13894,6 +13894,30 @@ const server = http.createServer(async (req, res) => {
       return json(res,200,{ok:true,file:{id:stored.id,name:stored.name,mime:stored.mime,size:stored.size,sha256:stored.sha256}},req);
     }
 
+    if (req.method === 'POST' && url.pathname === '/v1/migration/files-from-urls') {
+      const key=String(req.headers['x-final-import-key']||'');
+      if(!FINAL_FILE_IMPORT_KEY||key.length!==FINAL_FILE_IMPORT_KEY.length||!crypto.timingSafeEqual(Buffer.from(key),Buffer.from(FINAL_FILE_IMPORT_KEY)))
+        return json(res,401,{ok:false,error:'Unauthorized'},req);
+      const body=await readBody(req),items=Array.isArray(body&&body.files)?body.files:[];
+      if(!items.length||items.length>20)return json(res,400,{ok:false,error:'Bitte 1 bis 20 Dateien übergeben.'},req);
+      const out=[];
+      for(const item of items){
+        const id=String(item&&item.id||'').trim(),sourceUrl=String(item&&item.sourceUrl||'').trim();
+        if(!id||!sourceUrl)throw new Error('Datei-ID oder Quell-URL fehlt.');
+        let u;try{u=new URL(sourceUrl);}catch(_e){throw new Error('Ungültige Quell-URL.');}
+        const host=String(u.hostname||'').toLowerCase();
+        if(u.protocol!=='https:'||!(host==='oaiusercontent.com'||host.endsWith('.oaiusercontent.com')))
+          throw new Error('Quell-Host ist nicht für die Migration freigegeben.');
+        const upstream=await fetch(u.toString(),{redirect:'follow'});
+        if(!upstream.ok)throw new Error('Quelldatei konnte nicht geladen werden: HTTP '+upstream.status);
+        const ab=await upstream.arrayBuffer(),data=Buffer.from(ab);
+        const mime=String(item.mime||upstream.headers.get('content-type')||'application/octet-stream');
+        const stored=await storeBinaryFileV24(pool,{id,name:String(item.name||'Datei'),mime,data,kind:String(item.kind||'legacy-drive'),source:'google-drive-migration'});
+        out.push({id:stored.id,name:stored.name,mime:stored.mime,size:stored.size,sha256:stored.sha256});
+      }
+      return json(res,200,{ok:true,files:out},req);
+    }
+
     if (req.method === 'POST' && url.pathname === '/v1/migration/finalize-files') {
       const key=String(req.headers['x-final-import-key']||'');
       if(!FINAL_FILE_IMPORT_KEY||key.length!==FINAL_FILE_IMPORT_KEY.length||!crypto.timingSafeEqual(Buffer.from(key),Buffer.from(FINAL_FILE_IMPORT_KEY)))
