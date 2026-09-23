@@ -10669,20 +10669,26 @@ async function tryDirectPostgresWrite(action,body){
       const item=body.item||{},reminderText=String(item.text||'').trim(),due=String(item.dueDate||'').trim();
       if(!reminderText)throw new Error('Bitte einen Reminder-Text eingeben.');
       if(reminderText.length>5000)throw new Error('Der Reminder-Text ist zu lang.');
-      if(Array.isArray(item.files)&&item.files.length)throw new Error('Reminder mit Dateianhang wird weiterhin über Google/Drive verarbeitet.');
+      const reminderFiles=Array.isArray(item.files)?item.files:[];
+      if(reminderFiles.length>5)throw new Error('Maximal 5 Anhänge pro Reminder.');
       if(!validIsoDateText(due))throw new Error('Bitte ein gültiges Fälligkeitsdatum wählen.');
       if(due<berlinTodayIso())throw new Error('Das Fälligkeitsdatum darf nicht in der Vergangenheit liegen.');
       const id=String(item.id||'').trim()||('EIGREM-'+crypto.randomUUID());
+      const storedReminderFiles=[];
+      for(const f of reminderFiles){
+        const stored=await storeBinaryFileV24(client,{dataUrl:f.dataUrl,name:f.name,mime:f.type||f.mime,kind:'reminder',source:'railway',metadata:{reminderId:id}});
+        storedReminderFiles.push({id:stored.id,fileId:stored.id,name:stored.name,mime:stored.mime,size:stored.size,url:stored.url});
+      }
       await client.query(
         `INSERT INTO own_reminders_shadow(
           id,reminder_text,due_date_text,status,result,created_at_text,created_by,
           changed_at_text,changed_by,attachments_json,internal_note,shadow_updated_at
-        ) VALUES($1,$2,$3,'Offen','',$4,$5,$4,$5,'[]','',now())
+        ) VALUES($1,$2,$3,'Offen','',$4,$5,$4,$5,$6::jsonb,'',now())
         ON CONFLICT(id) DO NOTHING`,
-        [id,reminderText,due,nowIso,by]
+        [id,reminderText,due,nowIso,by,JSON.stringify(storedReminderFiles)]
       );
-      legacyPayload=Object.assign({},body,{item:Object.assign({},item,{id})});
-      result={ok:true,id,dueDate:due,attachmentCount:0};
+      legacyPayload=Object.assign({},body,{item:Object.assign({},item,{id,files:[]})});
+      result={ok:true,id,dueDate:due,attachmentCount:storedReminderFiles.length,attachments:storedReminderFiles};
     }else if(action==='saveEntry'){
       const entry=Object.assign({},body.entry||{});
       const date=String(entry.date||'').trim(),customer=String(entry.customer||'').trim(),activity=String(entry.activity||'').trim();
