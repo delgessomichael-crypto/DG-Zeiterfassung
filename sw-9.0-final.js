@@ -1,9 +1,9 @@
 /* DG Zeiterfassung 10.0 - Railway migration cache */
-const CACHE='dg-zeiterfassung-10.0-title-final-20260923-1620';
+const CACHE='dg-zeiterfassung-10.0-review-request-20260923-1645';
 const STATIC=[
   './index.html',
   './app-5.0.css?v=20260918-800-prod1',
-  './core-9.0-final.js?v=20260923-1620-v10-title-final',
+  './core-9.0-final.js?v=20260923-1645-review-request',
   './customerflow-9.0-final.js?v=20260920-900-final1',
   './payroll-9.0-final.js?v=20260923-1610-v10-title',
   './ui-9.0-final.js?v=20260923-1620-v10-title-final',
