@@ -256,12 +256,12 @@ function observe(){
 function install(){
   if(installing)return;installing=true;
   try{
-    document.documentElement.dataset.dgVersion='9.0';
+    document.documentElement.dataset.dgVersion='10.0';
     ensureCss();ensurePayrollSectionUi();bind();wrap();observe();
     refreshPayrollSection();refreshBossMonthState();refreshTopTile();
-    document.title='DG Zeiterfassung 9.0';
-    document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version 9.0';});
-    document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - 9.0';});
+    document.title='DG Zeiterfassung 10.0';
+    document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version /.test((x.textContent||'').trim()))x.textContent='Version 10.0';});
+    document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/.test(x.textContent||''))x.textContent='Zeiterfassung - 10.0';});
   }finally{installing=false;}
 }
 window.dg80PayrollInstall=install;
