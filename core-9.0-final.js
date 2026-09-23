@@ -4872,7 +4872,7 @@ async function loadAvailability733(){
     decorate733();
   }catch(e){
     availability733=[];
-    const s=$733('dg62Status');if(s&&/Kalender synchronisiert/i.test(s.textContent||''))s.textContent='✓ Kalender synchronisiert. Abwesenheitsmarkierung benötigt Google-GS 9.0.';
+    const s=$733('dg62Status');if(s&&/Kalender synchronisiert/i.test(s.textContent||''))s.textContent='✓ Kalender synchronisiert. Abwesenheitsmarkierung verwendet weiterhin Google Kalender.';
   }
 }
 function statusForWorker733(date,id){
@@ -5821,3 +5821,55 @@ function install10(){addCss10();speech10(document);cleanup10();places10(document
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install10,{once:true});else setTimeout(install10,0);
 })();
 /* ===== END DG APP 10 FRONTEND ENHANCEMENTS ===== */
+
+/* ===== DG APP 10 FINAL RAILWAY HARDENING ===== */
+(function(){
+'use strict';
+const API='https://dg-app-10-api-production.up.railway.app/';
+const VERSION='10.0';
+function clearLegacyVersionNotices(){
+  const n=document.getElementById('d3Notice');
+  if(n&&/(Google-GS|Google-Backend|App 5\.|App 7\.|App 9\.|Versionsstand stimmt nicht)/i.test(String(n.textContent||'')))n.remove();
+}
+async function railwayBackendCheck10(force){
+  try{
+    if(!force){
+      const raw=sessionStorage.getItem('dg10_railway_backend');
+      if(raw){
+        const x=JSON.parse(raw);
+        if(x&&x.version===VERSION&&Date.now()-Number(x.ts||0)<3600000){
+          if(window.DG3)window.DG3.backend=VERSION;
+          clearLegacyVersionNotices();
+          return true;
+        }
+      }
+    }
+    const r=await fetch(API,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'ping',clientVersion:VERSION})});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const raw=await r.json(),d=raw&&raw.data!==undefined?raw.data:raw,v=String(d&&d.version||'');
+    const ok=Boolean(raw&&raw.ok&&d&&d.railway&&v===VERSION);
+    if(!ok)throw new Error('Backend-Version '+(v||'unbekannt'));
+    sessionStorage.setItem('dg10_railway_backend',JSON.stringify({ts:Date.now(),version:v}));
+    ['dg70_backend','dg60_backend','dg602_backend','dg51_backend'].forEach(k=>sessionStorage.removeItem(k));
+    if(window.DG3)window.DG3.backend=v;
+    window.__DG_FOUND_BACKEND=v;
+    clearLegacyVersionNotices();
+    return true;
+  }catch(e){
+    if(window.DG3)window.DG3.backend='';
+    if(typeof window.d3Notice==='function')window.d3Notice('Railway-Backend ist nicht erreichbar: '+(e&&e.message?e.message:'Unbekannter Fehler')+'.','warn');
+    return false;
+  }
+}
+window.d3CheckBackend=railwayBackendCheck10;
+try{d3CheckBackend=railwayBackendCheck10;}catch(_e){}
+window.DG_APP_VERSION=VERSION;
+window.DG_RELEASE=VERSION;
+document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test(String(x.textContent||'').trim()))x.textContent='Version '+VERSION;});
+clearLegacyVersionNotices();
+setTimeout(()=>railwayBackendCheck10(false),200);
+const mo=new MutationObserver(()=>clearLegacyVersionNotices());
+if(document.body)mo.observe(document.body,{childList:true,subtree:true});
+})();
+ /* ===== END DG APP 10 FINAL RAILWAY HARDENING ===== */
+
