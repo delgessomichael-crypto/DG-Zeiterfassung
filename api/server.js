@@ -12245,7 +12245,7 @@ async function tryDirectPostgresWrite(action,body){
                   changed_at_text=$2,changed_by=$3,shadow_updated_at=now()
             WHERE id=$1`,[id,nowIso,by]
         );
-        result={ok:true,gmailQueued:true};
+        result={ok:true,gmailMoved:false,gmailAction:'cutover-local-only'};
       }else if(action==='saveCustomerInquiryNote'){
         await client.query(
           `UPDATE customer_inquiries_shadow
@@ -13125,10 +13125,9 @@ async function tryDirectPostgresWrite(action,body){
 }
 
 const GOOGLE_RETAINED_ACTIONS_V24=new Set([
-  'syncCustomerInquiries',
   'getEmployeeCalendarEvents','getPlannerEvents','saveExternalGoogleEvent','deleteExternalGoogleEvent',
   'savePlannerEvent','deletePlannerEvent','transferPlannerEvent','planRequest3',
-  'rejectCustomerInquiry','rejectInquiryReminder','sendMonthReport'
+  'sendMonthReport'
 ]);
 function googleRetainedActionV24(action){return GOOGLE_RETAINED_ACTIONS_V24.has(String(action||''));}
 
@@ -13179,7 +13178,7 @@ async function proxyLegacy(req, res, body) {
       if(directWrite!==null) {
         return json(res,200,{
           ok:true,data:directWrite.result,source:'postgres-primary',
-          legacySync:directWrite.outboxId?'queued':'already-synced'
+          legacySync:directWrite.outboxId?'queued':(FINAL_CUTOVER?'disabled-cutover':'already-synced')
         },req);
       }
     } catch(e) {
@@ -13187,6 +13186,7 @@ async function proxyLegacy(req, res, body) {
       return json(res,400,{ok:false,error:e.message},req);
     }
   }
+  if(FINAL_CUTOVER&&action==='syncCustomerInquiries')return json(res,409,{ok:false,error:'Der alte Gmail-zu-Google-Sheets-Abgleich ist nach dem finalen Umzug deaktiviert, damit keine Kundendaten mehr in Google Tabellen geschrieben werden.'},req);
   if(FINAL_CUTOVER&&!googleRetainedActionV24(action))return json(res,501,{ok:false,error:'Diese Funktion ist nach dem finalen Umzug vollständig auf Railway gestellt; Google-Fallback ist deaktiviert.'},req);
   if (!GOOGLE_BACKEND_URL) return json(res, 503, {ok:false,error:'Google backend not configured'}, req);
   const cached = await readCachedResponse(action, body);
