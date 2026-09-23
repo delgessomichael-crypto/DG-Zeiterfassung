@@ -13174,6 +13174,20 @@ async function proxyLegacy(req, res, body) {
       return json(res,400,{ok:false,error:e.message},req);
     }
   }
+  if(action==='getEmployeeCalendarEvents'&&FINAL_CUTOVER){
+    try{
+      if(await calendarDirect.authorized()){
+        const session=await localSessionForBody(body,false);
+        if(!session)return json(res,401,{ok:false,error:'Sitzung ist abgelaufen. Bitte erneut anmelden.'},req);
+        const start=String(body.startDate||''),days=Math.max(1,Math.min(3,Number(body.days)||3));
+        if(!validIsoDateText(start))return json(res,400,{ok:false,error:'Kalenderstartdatum ist ungültig.'},req);
+        const data=await calendarDirect.getEmployeeCalendarEvents(session.employee,start,days);
+        return json(res,200,{ok:true,data,source:'google-calendar+postgres'},req);
+      }
+    }catch(e){
+      console.error('Direct employee calendar read failed; retaining legacy fallback:',e.message);
+    }
+  }
   if(FINAL_CUTOVER&&['saveExternalGoogleEvent','deleteExternalGoogleEvent'].includes(action)){
     try{
       if(await calendarDirect.authorized()){
