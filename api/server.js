@@ -1146,7 +1146,7 @@ async function localChefLoginV24(body){
 async function importDriveManifestsV25(){
   if(!pool)return {files:0,batches:0};
   let files=0,batches=0;
-  for(let i=1;i<=10;i++){
+  for(let i=1;i<=20;i++){
     const raw=String(process.env['FINAL_DRIVE_IMPORT_MANIFEST_'+i]||'').trim();
     if(!raw)continue;
     let items;try{items=JSON.parse(raw);}catch(e){console.error('FINAL_DRIVE_IMPORT manifest '+i+' invalid JSON:',e.message);continue;}
