@@ -874,7 +874,7 @@ CREATE TABLE IF NOT EXISTS app_meta (
 
 INSERT INTO app_meta(key,value)
 VALUES
-  ('release', '{"app":"DG-App-10","phase":"shadow-migration","production_source":"Google-GS-9.0"}'::jsonb)
+  ('release', '{"app":"DG-App-10","version":"10.0","phase":"final-cutover","production_source":"Railway-PostgreSQL","google_role":"Gmail+Calendar external integration only"}'::jsonb)
 ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=now();
 `;
 
