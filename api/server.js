@@ -10718,10 +10718,14 @@ async function tryDirectPostgresWrite(action,body){
       const closure=await client.query('SELECT 1 FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 LIMIT 1',[by,date]);
       const dayWasClosed=closure.rowCount>0,isSupplement=Boolean(entry.isSupplement);
       if(dayWasClosed&&!isSupplement)throw new Error('Dieser Tag wurde bereits abgeschlossen. Für weitere Einsätze bitte die Funktion „Nachtrag erfassen“ verwenden.');
-      if((Array.isArray(entry.photos)&&entry.photos.length)||String(entry.customerSignature||'').trim())throw new Error('Dateianhänge werden weiterhin über Google verarbeitet.');
-      const oq=await client.query('SELECT id FROM objects_shadow WHERE object_key=$1 ORDER BY created_at_text ASC NULLS LAST,id ASC LIMIT 1',[shadowObjectKey(customer)]);
-      if(!oq.rowCount)throw new Error('Neues Kundenobjekt wird weiterhin über Google verarbeitet.');
-      const objectId=String(oq.rows[0].id||'');
+      const entryPhotos=Array.isArray(entry.photos)?entry.photos:[];
+      if(entryPhotos.length>6)throw new Error('Maximal 6 Bilder pro Auftrag.');
+      let oq=await client.query('SELECT id FROM objects_shadow WHERE object_key=$1 ORDER BY created_at_text ASC NULLS LAST,id ASC LIMIT 1',[shadowObjectKey(customer)]);
+      let objectId=String(oq.rows[0]?.id||'');
+      if(!objectId){
+        objectId='OBJ-PG-'+crypto.randomUUID();
+        await client.query('INSERT INTO objects_shadow(id,object_key,display_name,created_at_text,shadow_updated_at) VALUES($1,$2,$3,$4,now())',[objectId,shadowObjectKey(customer),customer,nowIso]);
+      }
       const isMaintenance=Boolean(entry.maintenance),nextDue=String(entry.nextMaintenanceDue||'').trim();
       const maintenanceCustomerId=String(entry.maintenanceCustomerId||'').trim(),maintenanceObjectId=String(entry.maintenanceObjectId||'').trim(),maintenanceDeviceId=String(entry.maintenanceDeviceId||'').trim();
       if(String(entry.sourceCalendarEventId||'').trim()&&!isMaintenance)throw new Error('Kalenderverknüpfte Einträge werden weiterhin über Google geprüft.');
@@ -10731,6 +10735,9 @@ async function tryDirectPostgresWrite(action,body){
         if(!md.rowCount||md.rows[0].active===false)throw new Error('Das zugeordnete Wartungsgerät wurde nicht gefunden oder ist inaktiv.');
       }
       const id=String(entry.clientId||'').trim()||('ENTRY-'+crypto.randomUUID());
+      let signatureFile=null;const photoFiles=[];
+      if(String(entry.customerSignature||'').trim())signatureFile=await storeBinaryFileV24(client,{dataUrl:String(entry.customerSignature),name:'Kundenunterschrift_'+date+'.png',kind:'signature',source:'railway',metadata:{entryId:id,customer}});
+      for(let pi=0;pi<entryPhotos.length;pi++){const p=entryPhotos[pi]||{};if(!String(p.dataUrl||'').trim())continue;photoFiles.push(await storeBinaryFileV24(client,{dataUrl:p.dataUrl,name:'Auftragsbild_'+date+'_'+String(pi+1).padStart(2,'0')+'.jpg',kind:'photo',source:'railway',metadata:{entryId:id,customer}}));}
       const dup=await client.query('SELECT 1 FROM time_entries_shadow WHERE id=$1 LIMIT 1',[id]);
       if(!dup.rowCount){
         await client.query(
@@ -10741,9 +10748,11 @@ async function tryDirectPostgresWrite(action,body){
              billing_status,billed_at_text,billed_by,object_id,job_status,is_supplement,supplement_created_at_text,
              offer_id,offer_changed_at_text,offer_changed_by,maintenance,next_maintenance_due,maintenance_customer_id,
              maintenance_object_id,maintenance_device_id,shadow_updated_at
-           ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'',$9,false,$10,$11,'','',0,'','',false,'','',$12,
-                    'Offen','','',$13,$14,$15,$16,'','','','',$17,$18,$19,$20,$21,now())`,
-          [id,by,date,customer,start,end,hours,activity,nowIso,materialUsed,material,String(entry.sourceCalendarEventId||''),
+           ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'',$9,false,$10,$11,$12,$13,$14,$15,$16,false,'','',$17,
+                    'Offen','','',$18,$19,$20,$21,'','','','',$22,$23,$24,$25,$26,now())`,
+          [id,by,date,customer,start,end,hours,activity,nowIso,materialUsed,material,
+           signatureFile?signatureFile.id:'',signatureFile?signatureFile.url:'',photoFiles.length,
+           photoFiles.map(x=>x.id).join(','),photoFiles.map(x=>x.url).join(' | '),String(entry.sourceCalendarEventId||''),
            objectId,String(entry.jobStatus||'')==='Laufend'?'Laufend':'Abgeschlossen',dayWasClosed&&isSupplement,
            dayWasClosed&&isSupplement?nowIso:'',isMaintenance,nextDue,maintenanceCustomerId,maintenanceObjectId,maintenanceDeviceId]
         );
@@ -10751,7 +10760,8 @@ async function tryDirectPostgresWrite(action,body){
           await client.query('UPDATE maintenance_devices_shadow SET next_maintenance_due=$2,updated_at_text=$3,updated_by=$4,shadow_updated_at=now() WHERE id=$1',[maintenanceDeviceId,nextDue,nowIso,by]);
         }
       }
-      legacyPayload=Object.assign({},body,{entry:Object.assign({},entry,{employee:by,clientId:id,start,end,hours})});
+      legacyPayload=Object.assign({},body,{entry:Object.assign({},entry,{employee:by,clientId:id,start,end,hours,photos:[],customerSignature:''})});
+      if(FINAL_CUTOVER)skipLegacySync=true;
       let completedConsolidation=null;
       if(String(entry.jobStatus||'').trim()==='Abgeschlossen'){
         completedConsolidation=await consolidateCompletedCustomerV10(
