@@ -8947,9 +8947,13 @@ async function directSystemHealthCheck(body){
   const ready=h.shadowReadiness||[],bad=ready.filter(x=>x.status!=='ready');
   push('PostgreSQL-Lesewege',bad.length===0,bad.length===0?'ok':'warn',
     ready.length+' geprüft · '+bad.length+' nicht freigegeben/abweichend');
-  const gp=googlePingCache,googleOk=Boolean(gp&&gp.raw);
+  const gp=googlePingCache,googleHasPing=Boolean(gp&&gp.raw),googleOk=Boolean(googleHasPing&&googlePingFresh());
   push('Google Backend',googleOk,googleOk?'ok':'warn',
-    googleOk?'letzter erfolgreicher Ping '+shadowGermanDateTime(gp.checkedAt||''):'noch kein erfolgreicher Ping gespeichert');
+    googleOk
+      ?'letzter erfolgreicher Ping '+shadowGermanDateTime(gp.checkedAt||'')
+      :(googleHasPing
+        ?'letzter erfolgreicher Ping '+shadowGermanDateTime(gp.checkedAt||'')+' · Status veraltet, erneute Prüfung läuft'
+        :'noch kein erfolgreicher Ping gespeichert'));
   push('Kalender-Synchronisation',true,'ok','Google-Kalender bleibt absichtlich aktiv.');
   push('Drive-Dateien',true,'ok','Anhänge/Exporte bleiben absichtlich über Google Drive.');
   return {ok:errors.length===0,version:'DG App 10 Railway',checks,warnings,errors,checkedAt:shadowGermanDateTime(new Date().toISOString())};
