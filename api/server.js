@@ -10255,7 +10255,7 @@ async function directRegieReportZipV24(body){
     for(const id of sigIds){const r=fm.get(id);if(!r)throw new Error('Eine Kundenunterschrift wurde noch nicht nach Railway übertragen.');sn++;const ext=(String(r.file_name||'').match(/\.[A-Za-z0-9]{2,5}$/)||['.png'])[0];zip.file('Kundenunterschrift_'+String(sn).padStart(2,'0')+ext,Buffer.from(r.file_data));}
     for(const id of selectedPhotoIds){const r=fm.get(id);if(!r)throw new Error('Ein ausgewähltes Bild wurde noch nicht nach Railway übertragen.');pn++;const ext=(String(r.file_name||'').match(/\.[A-Za-z0-9]{2,5}$/)||['.jpg'])[0];zip.file('Bild_'+String(pn).padStart(2,'0')+ext,Buffer.from(r.file_data));}
   }
-  const aq=await pool.query('SELECT file_id,name FROM regie_attachments_shadow WHERE object_ids_text<>\\'\\' AND object_ids_text IS NOT NULL');
+  const aq=await pool.query("SELECT file_id,name FROM regie_attachments_shadow WHERE object_ids_text<>'' AND object_ids_text IS NOT NULL");
   let an=0;
   for(const a of aq.rows){
     const parts=String(a.object_ids_text||'').split(',').map(x=>x.trim());if(!parts.some(x=>objectIds.includes(x)))continue;
