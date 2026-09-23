@@ -10534,14 +10534,12 @@ async function tryDirectPostgresWrite(action,body){
     if(!entryId)return null;
     const q=await pool.query('SELECT customer FROM time_entries_shadow WHERE id=$1 LIMIT 1',[entryId]);
     if(!q.rowCount)return null;
-    if(shadowObjectKey(String(q.rows[0].customer||''))!==shadowObjectKey(String(item.customer||'')))return null;
   }
   if(action==='updateRegieReport'){
-    const entryId=String(body&&body.entryId||'').trim(),item=body&&body.item||{};
+    const entryId=String(body&&body.entryId||'').trim();
     if(!entryId)return null;
-    const q=await pool.query('SELECT customer FROM time_entries_shadow WHERE id=$1 LIMIT 1',[entryId]);
+    const q=await pool.query('SELECT 1 FROM time_entries_shadow WHERE id=$1 LIMIT 1',[entryId]);
     if(!q.rowCount)return null;
-    if(shadowObjectKey(String(q.rows[0].customer||''))!==shadowObjectKey(String(item.customer||'')))return null;
   }
   if(action==='saveManualOrder'){
     const item=body&&body.item||{};
@@ -11033,7 +11031,7 @@ async function tryDirectPostgresWrite(action,body){
       const entryId=String(body.entryId||'').trim(),item=body.item||{};
       if(!entryId)throw new Error('Eintrag-ID fehlt.');
       const q=await client.query(
-        `SELECT employee_name,entry_date,customer,billing_status FROM time_entries_shadow WHERE id=$1 FOR UPDATE`,[entryId]
+        `SELECT employee_name,entry_date,customer,billing_status,object_id FROM time_entries_shadow WHERE id=$1 FOR UPDATE`,[entryId]
       );
       if(!q.rowCount)throw new Error('Eintrag wurde nicht gefunden.');
       const row=q.rows[0],date=berlinDateOnly(row.entry_date);
@@ -11050,11 +11048,18 @@ async function tryDirectPostgresWrite(action,body){
       if(!customer)throw new Error('Bitte Kunde / Baustelle eintragen.');
       if(!activity)throw new Error('Bitte die ausgeführte Tätigkeit eintragen.');
       if(materialUsed&&!material)throw new Error('Bitte Material eintragen.');
-      if(shadowObjectKey(String(row.customer||''))!==shadowObjectKey(customer))
-        throw new Error('Kundenwechsel wird weiterhin über Google verarbeitet.');
+      let objectId=String(row.object_id||'');
+      if(shadowObjectKey(String(row.customer||''))!==shadowObjectKey(customer)){
+        const oq=await client.query('SELECT id FROM objects_shadow WHERE object_key=$1 ORDER BY created_at_text ASC NULLS LAST,id ASC LIMIT 1',[shadowObjectKey(customer)]);
+        objectId=String(oq.rows[0]?.id||'');
+        if(!objectId){
+          objectId='OBJ-PG-'+crypto.randomUUID();
+          await client.query('INSERT INTO objects_shadow(id,object_key,display_name,created_at_text,shadow_updated_at) VALUES($1,$2,$3,$4,now())',[objectId,shadowObjectKey(customer),customer,nowIso]);
+        }
+      }
       await client.query(
-        `UPDATE time_entries_shadow SET customer=$2,activity=$3,material_used=$4,material=$5,job_status=$6,shadow_updated_at=now() WHERE id=$1`,
-        [entryId,customer,activity,materialUsed,material,jobStatus]
+        `UPDATE time_entries_shadow SET customer=$2,activity=$3,material_used=$4,material=$5,job_status=$6,object_id=$7,shadow_updated_at=now() WHERE id=$1`,
+        [entryId,customer,activity,materialUsed,material,jobStatus,objectId]
       );
       result=await postgresDayData({date},by);
     }else if(action==='closeDay'){
@@ -11207,17 +11212,23 @@ async function tryDirectPostgresWrite(action,body){
       );
       if(!q.rowCount)throw new Error('Regiebericht wurde nicht gefunden.');
       const row=q.rows[0],sourceEmployee=String(row.employee_name||''),oldDate=berlinDateOnly(row.entry_date);
-      if(shadowObjectKey(String(row.customer||''))!==shadowObjectKey(customer))
-        throw new Error('Kundenwechsel wird weiterhin über Google verarbeitet.');
-      const objectId=String(row.object_id||'');
+      let objectId=String(row.object_id||'');
+      if(shadowObjectKey(String(row.customer||''))!==shadowObjectKey(customer)){
+        const oq=await client.query('SELECT id FROM objects_shadow WHERE object_key=$1 ORDER BY created_at_text ASC NULLS LAST,id ASC LIMIT 1',[shadowObjectKey(customer)]);
+        objectId=String(oq.rows[0]?.id||'');
+        if(!objectId){
+          objectId='OBJ-PG-'+crypto.randomUUID();
+          await client.query('INSERT INTO objects_shadow(id,object_key,display_name,created_at_text,shadow_updated_at) VALUES($1,$2,$3,$4,now())',[objectId,shadowObjectKey(customer),customer,nowIso]);
+        }
+      }
       const closedQ=await client.query(
         'SELECT 1 FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 LIMIT 1',[sourceEmployee,date]
       );
       await client.query(
         `UPDATE time_entries_shadow SET entry_date=$2,customer=$3,start_time=$4,end_time=$5,hours=$6,
-           activity=$7,closed=$8,material_used=$9,material=$10,job_status=$11,shadow_updated_at=now()
+           activity=$7,closed=$8,material_used=$9,material=$10,job_status=$11,object_id=$12,shadow_updated_at=now()
          WHERE id=$1`,
-        [entryId,date,customer,start,end,hours,activity,closedQ.rowCount>0,materialUsed,materialUsed?material:'',jobStatus]
+        [entryId,date,customer,start,end,hours,activity,closedQ.rowCount>0,materialUsed,materialUsed?material:'',jobStatus,objectId]
       );
       await recalcClosedDayAfterDirectCorrection(client,sourceEmployee,oldDate,'Büro: Regiebericht korrigiert',nowIso);
       if(date!==oldDate)await recalcClosedDayAfterDirectCorrection(client,sourceEmployee,date,'Büro: Regiebericht verschoben/korrigiert',nowIso);
