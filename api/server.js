@@ -10171,6 +10171,115 @@ async function directRegieReportDownloadV10(body){
   return {fileName:'Regiebericht_'+safe+'.pdf',mime:'application/pdf',reportCount:q.rowCount,base64:pdf.toString('base64'),railway:true};
 }
 
+
+async function directMaintenanceAttachmentV24(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const id=String(body&&body.id||'').trim();if(!id)throw new Error('Datei-ID fehlt.');
+  const q=await pool.query(
+    `SELECT b.file_name,b.mime_type,b.file_data
+       FROM maintenance_attachments_shadow a
+       JOIN binary_files_v10 b ON b.id=a.file_id
+      WHERE a.id=$1 AND a.active=true LIMIT 1`,[id]
+  );
+  if(!q.rowCount)throw new Error('Datei wurde nicht gefunden.');
+  const r=q.rows[0];return {name:String(r.file_name||'Datei'),mime:String(r.mime_type||'application/octet-stream'),base64:Buffer.from(r.file_data).toString('base64')};
+}
+async function directAddRegieAttachmentsV24(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const objectIds=[...new Set((Array.isArray(body.objectIds)?body.objectIds:[]).map(x=>String(x||'').trim()).filter(Boolean))];
+  const files=Array.isArray(body.files)?body.files:[];
+  if(!objectIds.length)throw new Error('Objekt-ID fehlt.');
+  if(!files.length)throw new Error('Keine Dateien ausgewählt.');
+  if(files.length>5)throw new Error('Bitte höchstens 5 Dateien auf einmal auswählen.');
+  const client=await pool.connect();const out=[];
+  try{
+    await client.query('BEGIN');
+    for(const f of files){
+      const stored=await storeBinaryFileV24(client,{dataUrl:f.dataUrl,name:f.name,mime:f.type||f.mime,kind:'regie-attachment',source:'railway'});
+      const id='RGA-PG-'+crypto.randomUUID();
+      await client.query(
+        `INSERT INTO regie_attachments_shadow(id,object_ids_text,customer,file_id,name,mime,file_size,url,uploaded_at_text,uploaded_by,shadow_updated_at)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now())`,
+        [id,objectIds.join(','),String(body.customer||''),stored.id,stored.name,stored.mime,stored.size,stored.url,new Date().toISOString(),String(session.employee||'')]
+      );
+      out.push({id,objectIds,customer:String(body.customer||''),fileId:stored.id,name:stored.name,mime:stored.mime,size:stored.size,url:stored.url,uploadedAt:shadowGermanDateTime(new Date().toISOString()),uploadedBy:String(session.employee||'')});
+    }
+    await client.query('COMMIT');
+  }catch(e){try{await client.query('ROLLBACK');}catch(_e){}throw e;}finally{client.release();}
+  return {ok:true,files:out};
+}
+async function directRegiePhotoZipV24(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const ids=[...new Set((Array.isArray(body.fileIds)?body.fileIds:[]).map(x=>String(x||'').trim()).filter(Boolean))];
+  if(!ids.length)throw new Error('Keine Bilder ausgewählt.');
+  if(ids.length>80)throw new Error('Bitte höchstens 80 Bilder auf einmal herunterladen.');
+  const q=await pool.query('SELECT id,file_name,mime_type,file_data FROM binary_files_v10 WHERE id=ANY($1::text[])',[ids]);
+  const map=new Map(q.rows.map(r=>[String(r.id),r]));if(map.size!==ids.length)throw new Error('Mindestens ein Bild wurde noch nicht nach Railway übertragen.');
+  const zip=new JSZip();let i=0;
+  for(const id of ids){const r=map.get(id);i++;const ext=(String(r.file_name||'').match(/\.[A-Za-z0-9]{2,5}$/)||['.jpg'])[0];zip.file(String(i).padStart(2,'0')+'_'+cleanFileNameV24(String(r.file_name||'Bild').replace(/\.[^.]+$/,''),'Bild')+ext,Buffer.from(r.file_data));}
+  const buf=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE'});
+  const safe=String(body.customer||'Objekt').replace(/[^A-Za-z0-9_-]+/g,'_').slice(0,80)||'Objekt';
+  return {fileName:'Regiebilder_'+safe+'_'+berlinTodayIso().replace(/-/g,'')+'.zip',count:ids.length,base64:buf.toString('base64')};
+}
+async function directRegieReportZipV24(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const objectIds=[...new Set((Array.isArray(body.objectIds)?body.objectIds:[]).map(x=>String(x||'').trim()).filter(Boolean))];
+  const entryIds=[...new Set((Array.isArray(body.entryIds)?body.entryIds:[]).map(x=>String(x||'').trim()).filter(Boolean))];
+  const selectedPhotoIds=[...new Set((Array.isArray(body.fileIds)?body.fileIds:[]).map(x=>String(x||'').trim()).filter(Boolean))];
+  if(!objectIds.length)throw new Error('Objekt-ID fehlt.');
+  const params=[objectIds];let sql="SELECT * FROM time_entries_shadow WHERE object_id=ANY($1::text[])";
+  if(entryIds.length){params.push(entryIds);sql+=" AND id=ANY($2::text[])";}
+  sql+=" ORDER BY entry_date,start_time,id";
+  const q=await pool.query(sql,params);if(!q.rowCount)throw new Error('Für dieses Objekt wurden keine Regieberichte gefunden.');
+  if(entryIds.length&&q.rowCount!==entryIds.length)throw new Error('Exportauswahl nicht mehr aktuell.');
+  const customer=String(body.customer||q.rows[0].customer||'Objekt').trim();
+  let total=0;const lines=['Del Gesso Gebaeudetechnik','Regiebericht','','Kunde / Baustelle: '+customer,'Anzahl Berichte: '+q.rowCount,''];
+  const sigIds=[];
+  q.rows.forEach((r,i)=>{
+    total+=Number(r.hours||0);const sig=String(r.customer_signature_id||'').trim();if(sig&&!sigIds.includes(sig))sigIds.push(sig);
+    lines.push('Bericht '+(i+1),'Datum: '+germanDateLabel(berlinDateOnly(r.entry_date)),'Mitarbeiter: '+String(r.employee_name||''),
+      'Zeit: '+String(r.start_time||'')+' bis '+String(r.end_time||''),'Stunden: '+pgRound2(r.hours).toFixed(2).replace('.',','),
+      'Taetigkeit: '+String(r.activity||''),'Material: '+(r.material_used?String(r.material||'Ja'):'Nein'),
+      'Auftragsstatus: '+String(r.job_status||'Abgeschlossen'),'Kundenunterschrift: '+(sig?'vorhanden':'nicht vorhanden'),
+      'Bilder im Bericht: '+Number(r.photo_count||0));
+    if(r.is_supplement)lines.push('Kennzeichnung: NACHTRAG');lines.push('');
+  });
+  lines.push('Gesamtstunden: '+pgRound2(total).toFixed(2).replace('.',','),'','Digitaler Regiebericht - Del Gesso Gebaeudetechnik');
+  const zip=new JSZip(),safe=customer.replace(/[^A-Za-z0-9_-]+/g,'_').slice(0,80)||'Objekt';
+  zip.file('Regiebericht_'+safe+'.pdf',simplePdfBufferV10(lines));
+  const fileIds=[...new Set(sigIds.concat(selectedPhotoIds))];
+  if(fileIds.length){
+    const fq=await pool.query('SELECT id,file_name,file_data FROM binary_files_v10 WHERE id=ANY($1::text[])',[fileIds]);
+    const fm=new Map(fq.rows.map(r=>[String(r.id),r]));
+    let sn=0,pn=0;
+    for(const id of sigIds){const r=fm.get(id);if(!r)throw new Error('Eine Kundenunterschrift wurde noch nicht nach Railway übertragen.');sn++;const ext=(String(r.file_name||'').match(/\.[A-Za-z0-9]{2,5}$/)||['.png'])[0];zip.file('Kundenunterschrift_'+String(sn).padStart(2,'0')+ext,Buffer.from(r.file_data));}
+    for(const id of selectedPhotoIds){const r=fm.get(id);if(!r)throw new Error('Ein ausgewähltes Bild wurde noch nicht nach Railway übertragen.');pn++;const ext=(String(r.file_name||'').match(/\.[A-Za-z0-9]{2,5}$/)||['.jpg'])[0];zip.file('Bild_'+String(pn).padStart(2,'0')+ext,Buffer.from(r.file_data));}
+  }
+  const aq=await pool.query('SELECT file_id,name FROM regie_attachments_shadow WHERE object_ids_text<>\\'\\' AND object_ids_text IS NOT NULL');
+  let an=0;
+  for(const a of aq.rows){
+    const parts=String(a.object_ids_text||'').split(',').map(x=>x.trim());if(!parts.some(x=>objectIds.includes(x)))continue;
+    const fq=await pool.query('SELECT file_name,file_data FROM binary_files_v10 WHERE id=$1 LIMIT 1',[String(a.file_id||'')]);if(!fq.rowCount)continue;
+    an++;zip.file('Zusatzdatei_'+String(an).padStart(2,'0')+'_'+cleanFileNameV24(a.name||fq.rows[0].file_name,'Datei'),Buffer.from(fq.rows[0].file_data));
+  }
+  const buf=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE'});
+  return {fileName:'Regiebericht_'+safe+'_'+berlinDateOnly(q.rows[0].entry_date).replace(/-/g,'')+'.zip',reportCount:q.rowCount,signatureCount:sigIds.length,photoCount:selectedPhotoIds.length,attachmentCount:an,base64:buf.toString('base64'),railway:true};
+}
+async function directTaxAdvisorPdfV24(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const year=Number(body.year)||0,month=Number(body.month)||0;if(!(year>0&&month>=1&&month<=12))throw new Error('Ungültiger Monat.');
+  const rows=await postgresBossMonthNative({year,month});
+  const lines=['Del Gesso Gebaeudetechnik','Monatsuebersicht Steuerberater',String(month).padStart(2,'0')+'/'+year,''];
+  for(const x of rows||[])lines.push(String(x.employee||'')+' | Soll '+pgRound2(x.targetTotal).toFixed(2)+' | Ist '+pgRound2(x.actualTotal).toFixed(2)+' | Saldo '+pgRound2(x.balance).toFixed(2));
+  const pdf=simplePdfBufferV10(lines);
+  return {fileName:'Monatsuebersicht_'+year+'_'+String(month).padStart(2,'0')+'.pdf',mime:'application/pdf',base64:pdf.toString('base64')};
+}
+async function directMapsBrowserConfigV24(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const key=String(process.env.GOOGLE_MAPS_BROWSER_KEY||'').trim();
+  return {configured:Boolean(key),key};
+}
+
 async function tryDirectPostgresRead(action,body){
   if(action==='ping')return {message:'DG Backend erreichbar',version:'5.2.5',railway:true};
   if(action==='systemHealthCheck')return directSystemHealthCheck(body);
@@ -10215,6 +10324,8 @@ async function tryDirectPostgresRead(action,body){
   if(action==='getPartnerNetworkV10')return directPartnerNetworkV10(body);
   if(action==='getWhatsappInboxV10')return directWhatsappInboxV10(body);
   if(action==='getWhatsappMediaV10')return directWhatsappMediaV10(body);
+  if(action==='getMaintenanceAttachment')return directMaintenanceAttachmentV24(body);
+  if(action==='getMapsBrowserConfig')return directMapsBrowserConfigV24(body);
   if(action==='getWhatsappReviewStatusV10')return directWhatsappReviewStatusV10(body);
   if(action==='getBillingReviewTargetV10')return directBillingReviewTargetV10(body);
   if(action==='sendBillingReviewRequestV10')return directSendBillingReviewRequestV10(body);
@@ -10224,7 +10335,9 @@ async function tryDirectPostgresRead(action,body){
   if(action==='deleteWhatsappReviewTemplateV10')return directWhatsappReviewDeleteTemplateV10(body);
   if(action==='getEmployeeLocationsV10')return directEmployeeLocationsV10(body);
   if(action==='getAiAssistantV10')return directAiAssistantV10(body);
-  if(action==='createRegieReportZip')return directRegieReportDownloadV10(body);
+  if(action==='createRegieReportZip')return directRegieReportZipV24(body);
+  if(action==='createRegiePhotoZip')return directRegiePhotoZipV24(body);
+  if(action==='createTaxAdvisorPdf')return directTaxAdvisorPdfV24(body);
   return null;
 }
 
@@ -12888,7 +13001,7 @@ async function proxyLegacy(req, res, body) {
       return json(res,400,{ok:false,error:e.message},req);
     }
   }
-  if (['ping','systemHealthCheck','getDashboardSummary51','getCustomerInquiries','getInquiryReminders','getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getRegieAttachments','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts','getEmployeeWorkOverviewV10','getPartnerNetworkV10','getWhatsappInboxV10','getWhatsappMediaV10','getEmployeeLocationsV10','getAiAssistantV10','createRegieReportZip'].includes(action)) {
+  if (['ping','systemHealthCheck','getDashboardSummary51','getCustomerInquiries','getInquiryReminders','getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getRegieAttachments','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts','getEmployeeWorkOverviewV10','getPartnerNetworkV10','getWhatsappInboxV10','getWhatsappMediaV10','getEmployeeLocationsV10','getAiAssistantV10','getMaintenanceAttachment','getMapsBrowserConfig','createRegieReportZip','createRegiePhotoZip','createTaxAdvisorPdf','getBillingReviewTargetV10','sendBillingReviewRequestV10'].includes(action)) {
     try {
       const direct=await tryDirectPostgresRead(action,body);
       if (direct!==null) {
