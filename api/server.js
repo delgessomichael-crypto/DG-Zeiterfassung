@@ -4,7 +4,6 @@ const http = require('http');
 const crypto = require('crypto');
 const zlib = require('zlib');
 const { Pool } = require('pg');
-const XLSX = require('xlsx');
 const JSZip = require('jszip');
 const { createGmailDirect } = require('./gmail-direct');
 const { createCalendarDirect } = require('./calendar-direct');
@@ -1434,105 +1433,7 @@ async function readBinary(req, limit) {
   return Buffer.concat(chunks);
 }
 
-function sheetRowsWithFormulas(ws) {
-  if (!ws || !ws['!ref']) return [];
-  const range = XLSX.utils.decode_range(ws['!ref']);
-  const rows = [];
-  for (let r = range.s.r; r <= range.e.r; r++) {
-    let last = -1;
-    const row = [];
-    for (let c = range.s.c; c <= range.e.c; c++) {
-      const cell = ws[XLSX.utils.encode_cell({r,c})];
-      if (!cell) { row.push(null); continue; }
-      const item = { v: cell.v === undefined ? null : cell.v, t: cell.t || null };
-      if (cell.f) item.f = cell.f;
-      if (cell.z) item.z = cell.z;
-      row.push(item);
-      if (cell.v !== undefined || cell.f) last = c;
-    }
-    if (last >= 0) rows.push({ sourceRow:r+1, cells:row.slice(0,last+1) });
-  }
-  return rows;
-}
-
-async function importWorkbook(buffer) {
-  if (!pool) throw new Error('Database not configured');
-  const wb = XLSX.read(buffer, { type:'buffer', cellDates:true, cellFormula:true, cellNF:true });
-  const client = await pool.connect();
-  const counts = {};
-  let runId = null;
-  try {
-    await client.query('BEGIN');
-    const rr = await client.query(
-      "INSERT INTO migration_runs(source_version,mode,status,notes) VALUES($1,'xlsx-shadow','running',$2) RETURNING id",
-      ['Google-Sheets-live','Direct XLSX snapshot from Del Gesso Zeiterfassung']
-    );
-    runId = rr.rows[0].id;
-    for (const name of wb.SheetNames) {
-      const ws = wb.Sheets[name];
-      const rows = sheetRowsWithFormulas(ws);
-      const nonHeader = rows.filter(x => x.sourceRow > 1);
-      counts[name] = nonHeader.length;
-      let cols = 0;
-      for (const r of rows) cols = Math.max(cols, r.cells.length);
-      const digest = crypto.createHash('sha256').update(JSON.stringify(rows)).digest('hex');
-      await client.query(
-        'INSERT INTO migration_sheets(migration_run_id,sheet_name,source_rows,source_columns,imported_rows,payload_sha256) VALUES($1,$2,$3,$4,$5,$6)',
-        [runId,name,nonHeader.length,cols,nonHeader.length,digest]
-      );
-      for (const row of rows) {
-        const payload = JSON.stringify({ sheet:name, sourceRow:row.sourceRow, cells:row.cells });
-        const sha = crypto.createHash('sha256').update(payload).digest('hex');
-        await client.query(
-          `INSERT INTO migration_objects(entity_type,source_key,payload,payload_sha256,migration_run_id)
-           VALUES($1,$2,$3::jsonb,$4,$5)
-           ON CONFLICT(entity_type,source_key)
-           DO UPDATE SET payload=EXCLUDED.payload,payload_sha256=EXCLUDED.payload_sha256,
-                         imported_at=now(),migration_run_id=EXCLUDED.migration_run_id`,
-          ['sheet:'+name,String(row.sourceRow),payload,sha,runId]
-        );
-      }
-    }
-    const total = Object.values(counts).reduce((a,b)=>a+b,0);
-    await client.query(
-      "UPDATE migration_runs SET finished_at=now(),status='success',source_counts=$2::jsonb,target_counts=$2::jsonb,notes=$3 WHERE id=$1",
-      [runId,JSON.stringify(counts),'XLSX import completed; row counts identical at import time']
-    );
-    await client.query(
-      `INSERT INTO app_meta(key,value) VALUES('latest_migration',$1::jsonb)
-       ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
-      [JSON.stringify({runId,totalRows:total,sheets:counts,importedAt:new Date().toISOString()})]
-    );
-    await client.query('COMMIT');
-    return {ok:true,runId,totalRows:total,sheets:counts};
-  } catch (e) {
-    await client.query('ROLLBACK');
-    throw e;
-  } finally {
-    client.release();
-  }
-}
-
-async function importWorkbookFromUrlOnce() {
-  if (!MIGRATION_XLSX_URL || !pool) return;
-  const existing = await pool.query("SELECT value FROM app_meta WHERE key='latest_migration'");
-  if (existing.rowCount) {
-    console.log('Migration snapshot already present; startup import skipped.');
-    return;
-  }
-  const u = new URL(MIGRATION_XLSX_URL);
-  if (!u.hostname.endsWith('oaiusercontent.com')) {
-    throw new Error('Migration snapshot host not allowed');
-  }
-  console.log('Downloading migration snapshot...');
-  const response = await fetch(MIGRATION_XLSX_URL, { redirect:'follow' });
-  if (!response.ok) throw new Error('Snapshot download failed: '+response.status);
-  const ab = await response.arrayBuffer();
-  const buf = Buffer.from(ab);
-  console.log('Migration snapshot downloaded: '+buf.length+' bytes');
-  const result = await importWorkbook(buf);
-  console.log('Migration snapshot imported: run '+result.runId+', '+result.totalRows+' rows');
-}
+// XLSX migration import was retired after the verified final cutover (884/884 rows).
 
 const CACHEABLE_ACTIONS = new Set([
   'getDashboardSummary',
@@ -14209,9 +14110,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && url.pathname === '/v1/migration/import-xlsx') {
-      if (!uploadAuthorized(req)) return json(res, 401, {ok:false,error:'Unauthorized'}, req);
-      const buffer = await readBinary(req, 10 * 1024 * 1024);
-      return json(res, 200, await importWorkbook(buffer), req);
+      return json(res,410,{ok:false,error:'Der XLSX-Migrationsimport ist nach dem verifizierten Final-Cutover dauerhaft geschlossen.'},req);
     }
 
     if (req.method === 'GET' && url.pathname === '/v1/migration/latest') {
@@ -14227,7 +14126,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 initDb()
-  .then(() => importWorkbookFromUrlOnce())
   .then(async () => {
     const s = await migrationStatusPublic();
     const sheets = Array.isArray(s.sheets) ? s.sheets : [];
