@@ -10401,7 +10401,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','syncHolidays','saveEmployeeAdmin','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','reserveMaintenanceDeviceId','saveMaintenanceCustomer','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','saveAbsence','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue',
-  'savePartnerCategoryV10','savePartnerV10','deactivatePartnerV10','setWhatsappThreadCategoryV10','transferWhatsappThreadV10','saveEmployeeLocationV10','mergeCustomerInquiriesV10','completeManualOrderV10'
+  'savePartnerCategoryV10','savePartnerV10','deactivatePartnerV10','setWhatsappThreadCategoryV10','transferWhatsappThreadV10','saveEmployeeLocationV10','mergeCustomerInquiriesV10','completeManualOrderV10','addRegieAttachments','deleteEmployeeAdmin'
 ]);
 
 function berlinTodayIso(){
@@ -10486,7 +10486,7 @@ async function tryDirectPostgresWrite(action,body){
   }
   if(action==='createOwnReminder'){
     const item=body&&body.item||{};
-    if(Array.isArray(item.files)&&item.files.length)return null;
+    if(!FINAL_CUTOVER&&Array.isArray(item.files)&&item.files.length)return null;
   }
   if(action==='saveEmployeeAdmin'){
     const item=body&&body.item||{},name=String(item.name||'').trim(),original=String(item.originalName||'').trim();
@@ -10498,10 +10498,10 @@ async function tryDirectPostgresWrite(action,body){
   }
   if(action==='saveEntry'){
     const e=body&&body.entry||{};
-    if((Array.isArray(e.photos)&&e.photos.length)||String(e.customerSignature||'').trim())return null;
+    if(!FINAL_CUTOVER&&((Array.isArray(e.photos)&&e.photos.length)||String(e.customerSignature||'').trim()))return null;
     const customer=String(e.customer||'').trim();if(!customer)return null;
     const oq=await pool.query('SELECT id FROM objects_shadow WHERE object_key=$1 ORDER BY created_at_text ASC NULLS LAST,id ASC LIMIT 1',[shadowObjectKey(customer)]);
-    if(!oq.rowCount)return null;
+    if(!oq.rowCount&&!FINAL_CUTOVER)return null;
     if(String(e.sourceCalendarEventId||'').trim()&&!Boolean(e.maintenance))return null;
   }
   if(action==='savePlannerEvent'){
