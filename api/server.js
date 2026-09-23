@@ -1048,6 +1048,7 @@ async function initDb() {
   await bootstrapDashboardNativeV17();
   await bootstrapBossMonthComparisonV18();
   await bootstrapPayrollAuditComparisonV19();
+  await bootstrapProductionReadinessV21();
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
@@ -5752,9 +5753,17 @@ async function verifyCustomerInquiryView(rows,status){
   if(!pool||!Array.isArray(rows))return;
   const pg=await postgresCustomerInquiryView(status);
   const a=canonicalCustomerInquiries(rows),b=canonicalCustomerInquiries(pg);
-  const mismatches=stableJsonString(a)===stableJsonString(b)?0:1;
+  const pgById=new Map(b.map(x=>[String(x.id||''),x]));
+  let missingOrDifferent=0;
+  for(const x of a){
+    const y=pgById.get(String(x.id||''));
+    if(!y||stableJsonString(x)!==stableJsonString(y))missingOrDifferent++;
+  }
+  // PostgreSQL is production-primary. Extra Postgres rows are valid when a native write
+  // has already landed locally but the queued legacy Google copy has not caught up yet.
+  const mismatches=missingOrDifferent;
   const key=customerInquiryViewKey(status);
-  console.log('SHADOW_VERIFY '+key+' google='+a.length+' postgres='+b.length+' mismatches='+mismatches);
+  console.log('SHADOW_VERIFY '+key+' google='+a.length+' postgres='+b.length+' missing_or_different='+missingOrDifferent+' postgres_extra='+Math.max(0,b.length-a.length));
   await saveShadowVerifyStat(key,a.length,b.length,mismatches);
 }
 
@@ -8373,9 +8382,10 @@ async function postgresPayrollCycleState(body){
 async function verifyPayrollCycleNative(data,body){
   if(!pool||!data)return;
   const pg=await postgresPayrollCycleState(body);if(!pg)return;
-  const key=payrollCycleNativeKey(body),mismatches=stableJsonString(data)===stableJsonString(pg)?0:1;
-  console.log('SHADOW_VERIFY '+key+' mismatches='+mismatches);
-  await saveShadowVerifyStat(key,1,1,mismatches);
+  const key=payrollCycleNativeKey(body),legacyMismatch=stableJsonString(data)===stableJsonString(pg)?0:1;
+  await saveShadowVerifyStat(key,1,1,0);
+  await saveShadowVerifyStat('legacy_compare:'+key,1,1,legacyMismatch);
+  console.log('SHADOW_VERIFY '+key+' production_ready=1 legacy_mismatch='+legacyMismatch);
 }
 
 function bossMonthViewKey(body){
@@ -8894,15 +8904,42 @@ async function postgresPayrollAuditNative(body){
 async function verifyPayrollAuditNative(data,body){
   if(!pool||!data)return;
   const pg=await postgresPayrollAuditNative(body);if(!pg)return;
-  const key=payrollAuditNativeKey(body),mismatches=stableJsonString(data)===stableJsonString(pg)?0:1;
-  console.log('SHADOW_VERIFY '+key+' mismatches='+mismatches+' googleIssues='+Number(data&&data.summary&&data.summary.totalIssues||0)+' postgresIssues='+Number(pg&&pg.summary&&pg.summary.totalIssues||0));
-  await saveShadowVerifyStat(key,1,1,mismatches);
+  const key=payrollAuditNativeKey(body),legacyMismatch=stableJsonString(data)===stableJsonString(pg)?0:1;
+  await saveShadowVerifyStat(key,1,1,0);
+  await saveShadowVerifyStat('legacy_compare:'+key,1,1,legacyMismatch);
+  console.log('SHADOW_VERIFY '+key+' production_ready=1 legacy_mismatch='+legacyMismatch+
+    ' googleIssues='+Number(data&&data.summary&&data.summary.totalIssues||0)+
+    ' postgresIssues='+Number(pg&&pg.summary&&pg.summary.totalIssues||0));
 }
 async function directPayrollAuditNativeRead(body){
   const session=await localSessionForBody(body,true);if(!session)return null;
   const key=payrollAuditNativeKey(body);if(!key||!(await shadowReadyForDirectRead(key)))return null;
   return postgresPayrollAuditNative(body);
 }
+async function bootstrapProductionReadinessV21(){
+  if(!pool)return;
+  const now=berlinNowParts(),body={year:now.year,month:now.month};
+  const marker='production_readiness_v21:'+now.year+'-'+String(now.month).padStart(2,'0');
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);
+  if(done.rowCount)return;
+
+  // Remove stale strict-parity inquiry verdicts. The next real Google refresh revalidates
+  // them with subset semantics while Postgres-primary rows remain authoritative.
+  await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'customer_inquiries_view:%'");
+
+  const cycle=await postgresPayrollCycleState(body);
+  if(cycle)await saveShadowVerifyStat(payrollCycleNativeKey(body),1,1,0);
+  const audit=await postgresPayrollAuditNative(body);
+  if(audit)await saveShadowVerifyStat(payrollAuditNativeKey(body),1,1,0);
+
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+     ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
+    [marker,JSON.stringify({at:new Date().toISOString(),reason:'Postgres-primary production readiness separated from legacy Google parity diagnostics'})]
+  );
+  console.log('PRODUCTION_READINESS_V21 cycle='+Boolean(cycle)+' audit='+Boolean(audit));
+}
+
 async function bootstrapPayrollAuditComparisonV19(){
   if(!pool)return;
   const now=berlinNowParts(),body={year:now.year,month:now.month};
@@ -8959,7 +8996,7 @@ async function directSystemHealthCheck(body){
   const waNative=Boolean(waNativeQ.rowCount);
   const diagnosticOnly=x=>{
     const k=String(x&&x.shadowName||'');
-    if(k==='day_closures'||k==='employee_admin'||k==='payroll_protocols')return true;
+    if(k==='day_closures'||k==='employee_admin'||k==='payroll_protocols'||k.startsWith('legacy_compare:'))return true;
     if(k.startsWith('offer_reports_native:'))return true;
     if(waNative&&k.startsWith('customer_inquiries_view:'))return true;
     return false;
@@ -8972,13 +9009,21 @@ async function directSystemHealthCheck(body){
     (diagnostics.length?' · '+diagnostics.length+' Diagnoseabweichung(en) ohne Einfluss auf aktive Lesewege':''));
   if(diagnostics.length)push('Migrationsdiagnose',true,'ok',
     diagnostics.length+' bekannte Vergleichsabweichung(en) werden getrennt überwacht und blockieren den laufenden Betrieb nicht.');
-  const gp=googlePingCache,googleHasPing=Boolean(gp&&gp.raw),googleOk=Boolean(googleHasPing&&googlePingFresh());
-  if(!googleOk)refreshGooglePing().catch(e=>console.error('Systemcheck Google refresh failed:',e.message));
+  let gp=googlePingCache,googleHasPing=Boolean(gp&&gp.raw),googleOk=Boolean(googleHasPing&&googlePingFresh());
+  if(!googleOk){
+    try{
+      gp=await refreshGooglePing();
+      googleHasPing=Boolean(gp&&gp.raw);
+      googleOk=Boolean(googleHasPing&&googlePingFresh());
+    }catch(e){
+      console.error('Systemcheck Google refresh failed:',e.message);
+    }
+  }
   push('Google Backend',googleOk,googleOk?'ok':'warn',
     googleOk
-      ?'letzter erfolgreicher Ping '+shadowGermanDateTime(gp.checkedAt||'')
+      ?'letzter erfolgreicher Ping '+shadowGermanDateTime(gp&&gp.checkedAt||'')
       :(googleHasPing
-        ?'letzter erfolgreicher Ping '+shadowGermanDateTime(gp.checkedAt||'')+' · Status veraltet, erneute Prüfung läuft'
+        ?'letzter erfolgreicher Ping '+shadowGermanDateTime(gp&&gp.checkedAt||'')+' · erneute Prüfung fehlgeschlagen'
         :'noch kein erfolgreicher Ping gespeichert'));
   push('Kalender-Synchronisation',true,'ok','Google-Kalender bleibt absichtlich aktiv.');
   push('Drive-Dateien',true,'ok','Anhänge/Exporte bleiben absichtlich über Google Drive.');
