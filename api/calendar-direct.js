@@ -233,6 +233,49 @@ function createCalendarDirect(opts){
     const p=String(date||'').split('-').map(Number),d=new Date(Date.UTC(p[0],p[1]-1,p[2]+Number(days||0),12));
     return d.toISOString().slice(0,10);
   }
+  async function findExternalSynthetic(sourceId,date){
+    sourceId=String(sourceId||'').trim();date=String(date||'').trim();
+    if(!sourceId.startsWith('GOOGLE-')||!/^\d{4}-\d{2}-\d{2}$/.test(date))return null;
+    const wq=await pool.query("SELECT id,display_name,employee_name,calendar_id FROM planner_workers_shadow WHERE active=true AND provider='google' AND COALESCE(calendar_id,'')<>'' ORDER BY sort_order");
+    const timeMin=encodeURIComponent(date+'T00:00:00'+offsetFor(date,'12:00')),timeMax=encodeURIComponent(date+'T23:59:59'+offsetFor(date,'12:00'));
+    for(const w of wq.rows){
+      const cal=String(w.calendar_id||''),r=await google.calendarApi('GET','calendars/'+encodeURIComponent(cal)+'/events?singleEvents=true&timeMin='+timeMin+'&timeMax='+timeMax+'&maxResults=250');
+      for(const e of (r.items||[])){
+        const a='GOOGLE-'+String(w.id)+'-'+String(e.id||''),b='GOOGLE-'+String(w.id)+'-'+String(e.iCalUID||'');
+        if(sourceId===a||sourceId===b)return {workerId:String(w.id),calendarId:cal,event:e};
+      }
+    }
+    return null;
+  }
+  async function transferExternalToPlanner(item,actor){
+    if(!await authorized())throw new Error('Google Kalender ist noch nicht direkt mit Railway verbunden.');
+    item=item||{};const sourceId=String(item.sourceId||'').trim(),targetWorkerId=String(item.targetWorkerId||'').trim(),date=String(item.date||'').trim();
+    if(!sourceId||!targetWorkerId||!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new Error('Quelltermin, Zielmitarbeiter oder Datum fehlt.');
+    const found=await findExternalSynthetic(sourceId,date);if(!found)throw new Error('Google-Termin wurde nicht gefunden. Bitte Kalender neu synchronisieren.');
+    const tq=await pool.query("SELECT id,display_name,employee_name,active FROM planner_workers_shadow WHERE id=$1 LIMIT 1",[targetWorkerId]);
+    const tw=tq.rows[0];if(!tw||tw.active===false)throw new Error('Zielmitarbeiter ist nicht aktiv.');
+    const e=found.event,sp=e.start||{},ep=e.end||{},st=sp.dateTime?fmtDateTime(sp.dateTime):{date:String(sp.date||date),time:'08:00'};
+    const en=ep.dateTime?fmtDateTime(ep.dateTime):{date:st.date,time:'09:00'};
+    const eventDate=st.date||date,start=st.time||'08:00',end=(en.date===eventDate&&en.time>start)?en.time:'09:00';
+    const customer=String(e.summary||'').replace(/^🔧 WARTUNG ·\s*/i,'').trim()||'Termin',address=String(e.location||'').trim()||'-';
+    const task=taskFromDescription(e.description)||'Termin',type=typeFromDescription(e.description),eventId='KT-'+crypto.randomUUID(),now=new Date().toISOString();
+    const client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      await client.query(`
+        INSERT INTO planner_events_shadow(
+          id,customer,address,task,event_date,start_time,end_time,employee_ids_json,employee_names_json,
+          google_event_ids_json,created_at_text,updated_at_text,updated_by,event_type,
+          maintenance_customer_id,maintenance_object_id,maintenance_device_id,shadow_updated_at
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'{}',$10,$10,$11,$12,'','','',now())
+      `,[eventId,customer,address,task,eventDate,start,end,JSON.stringify([targetWorkerId]),JSON.stringify([String(tw.display_name||tw.employee_name||targetWorkerId)]),now,String(actor||''),type]);
+      await client.query('COMMIT');
+    }catch(err){try{await client.query('ROLLBACK');}catch(_e){}throw err;}finally{client.release();}
+    await enqueueSync(eventId);
+    await enqueueDelete({[found.workerId]:String(e.id||'')});
+    return {ok:true,id:eventId,externalTransferred:true};
+  }
+
   async function getEmployeeCalendarEvents(employee,startDate,days){
     if(!await authorized())throw new Error('Google Kalender ist noch nicht direkt mit Railway verbunden.');
     employee=String(employee||'').trim();startDate=String(startDate||'').trim();days=Math.max(1,Math.min(3,Number(days)||3));
@@ -329,7 +372,7 @@ function createCalendarDirect(opts){
     if(timer.unref)timer.unref();
     setTimeout(()=>flush().catch(e=>console.error('CALENDAR_SYNC startup',e.message)),20000);
   }
-  return {init,start,authorized,status,getPlannerEvents,getEmployeeCalendarEvents,enqueueSync,enqueueDelete,syncEventNow,deleteMappingsNow,saveExternal,deleteExternal,workerCalendar,resolveGoogleEventId};
+  return {init,start,authorized,status,getPlannerEvents,getEmployeeCalendarEvents,findExternalSynthetic,transferExternalToPlanner,enqueueSync,enqueueDelete,syncEventNow,deleteMappingsNow,saveExternal,deleteExternal,workerCalendar,resolveGoogleEventId};
 }
 
 module.exports={createCalendarDirect};
