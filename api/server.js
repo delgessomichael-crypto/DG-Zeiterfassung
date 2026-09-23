@@ -13725,7 +13725,7 @@ function authorized(req) {
 async function health() {
   let database = 'not-configured';
   let postgresEmployeeSnapshotCount = null;
-  let employeeReadSource = 'google-fallback';
+  let employeeReadSource = FINAL_CUTOVER ? 'postgres' : 'google-fallback';
   let employeeSnapshotDirty = null;
   let shadowCounts = null;
   let shadowVerify = [];
@@ -13926,12 +13926,13 @@ async function health() {
       };
     } catch (e) {
       database = 'error';
+      if(FINAL_CUTOVER)employeeReadSource='railway-unavailable';
     }
   }
   return {
     ok: database === 'ok',
     app: 'DG-App-10-API',
-    phase: 'shadow-migration',
+    phase: FINAL_CUTOVER ? 'final-cutover' : 'migration',
     database,
     googleBackendConfigured: Boolean(GOOGLE_BACKEND_URL),
     productionWrites: 'PostgreSQL-primary',
