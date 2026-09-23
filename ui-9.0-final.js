@@ -3464,3 +3464,44 @@ function install(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
+
+
+/* DG Zeiterfassung 10.0 - UI Hotfix 17 - stable open days tile */
+(function(){
+'use strict';
+const TILE='[data-dg80-final="days"]';
+async function openDaysStable(){
+  const direct=window.DG80_UI12_openDays;
+  if(typeof direct==='function'){
+    await direct();
+  }else{
+    const open=window.dg80OfficeOpen;
+    if(typeof open==='function')open('days',{force:true});
+    const load=window.loadBossDayClosuresV48;
+    if(typeof load==='function')await load();
+  }
+  const card=document.getElementById('dg80ActionCenter')||document.getElementById('dg48EmployeeClosures');
+  if(card){
+    card.classList.add('dg80-shell-active');
+    card.classList.remove('hidden');
+    card.style.display='block';
+    setTimeout(function(){try{card.scrollIntoView({behavior:'smooth',block:'start'});}catch(_e){}},0);
+  }
+}
+function onClick(e){
+  const target=e.target&&e.target.closest?e.target.closest(TILE):null;
+  if(!target)return;
+  const boss=document.getElementById('bossView');
+  if(!boss||boss.classList.contains('hidden'))return;
+  e.preventDefault();
+  e.stopPropagation();
+  e.stopImmediatePropagation();
+  Promise.resolve(openDaysStable()).catch(function(err){
+    const msg=err&&err.message?err.message:String(err||'Unbekannter Fehler');
+    alert('Offene Tagesabschlüsse konnten nicht geöffnet werden: '+msg);
+  });
+}
+document.addEventListener('click',onClick,true);
+window.DG10_openDaysStable=openDaysStable;
+document.documentElement.dataset.dgUi17='10.0-ui17';
+})();
