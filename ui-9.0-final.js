@@ -253,6 +253,13 @@ function partnerCard80(p){
     +partnerMeta80('E-Mail',p.email)+partnerMeta80('Adresse',p.address)+partnerMeta80('Website',p.website)
     +'</div>'+(p.notes?'<div class="dg80p-note">'+esc(p.notes)+'</div>':'')+'</div>';
 }
+function partnerOfficePath80(parent,child,canBack){
+  const f=window.dg80OfficeSetPath;
+  if(typeof f==='function'){f(parent,child,canBack);return;}
+  const title=q('dg80OfficeTitle'),parts=[parent,child].map(x=>String(x||'').trim()).filter(Boolean);
+  if(title)title.textContent=parts.join(' > ')||'Büro';
+  const back=q('dg80OfficeBack');if(back)back.classList.toggle('hidden',!canBack);
+}
 function partnerOverview80(){
   partnerCss80();
   const out=q('dg10PartnerBody');if(!out)return;
@@ -264,7 +271,7 @@ function partnerOverview80(){
     +'<button type="button" class="dg80p-trade dg80p-add" id="dg80PartnerAddTrade" title="Weiteres Gewerk hinzufügen" aria-label="Weiteres Gewerk hinzufügen">+</button></div>';
   out.querySelectorAll('[data-dg80p-cat]').forEach(b=>b.addEventListener('click',()=>partnerTrade80(b.dataset.dg80pCat)));
   q('dg80PartnerAddTrade')?.addEventListener('click',partnerAddTrade80);
-  setOfficePath('Partnernetzwerk','',false);
+  partnerOfficePath80('Partnernetzwerk','',false);
 }
 function partnerTrade80(id){
   const cat=partnerRows80.find(x=>String(x.id)===String(id)),out=q('dg10PartnerBody');if(!cat||!out)return false;
@@ -274,7 +281,7 @@ function partnerTrade80(id){
     +'<button type="button" class="btn success" id="dg80PartnerAddCompany">+ Partner hinzufügen</button></div>'
     +(rows.map(partnerCard80).join('')||'<div class="dg80p-empty">Noch kein Partnerbetrieb in diesem Gewerk hinterlegt.</div>');
   q('dg80PartnerAddCompany')?.addEventListener('click',()=>partnerAddCompany80(cat.id));
-  setOfficePath('Partnernetzwerk',cat.name,true);return true;
+  partnerOfficePath80('Partnernetzwerk',cat.name,true);return true;
 }
 function partnerAddTrade80(){
   partnerModal80('Weiteres Gewerk hinzufügen',[{name:'name',label:'Gewerk',required:true,full:true}],async v=>{
