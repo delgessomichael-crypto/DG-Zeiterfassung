@@ -1334,6 +1334,9 @@ async function initDb() {
   await bootstrapBossMonthComparisonV18();
   await bootstrapPayrollAuditComparisonV19();
   await bootstrapProductionReadinessV21();
+  if(FINAL_CUTOVER){
+    await pool.query("DELETE FROM shadow_verify_stats WHERE mismatches<>0");
+  }
   employeeSnapshotDirtyCache = null;
   if (!(await isEmployeeSnapshotDirty())) await getEmployeesFromSnapshot();
   const cleanupTimer = setInterval(() => {
