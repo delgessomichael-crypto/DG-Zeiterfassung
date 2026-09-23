@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const zlib = require('zlib');
 const { Pool } = require('pg');
 const XLSX = require('xlsx');
+const JSZip = require('jszip');
 
 const PORT = Number(process.env.PORT || 3000);
 const DATABASE_URL = process.env.DATABASE_URL || '';
@@ -25,6 +26,8 @@ const WHATSAPP_GRAPH_VERSION = process.env.WHATSAPP_GRAPH_VERSION || 'v25.0';
 const WHATSAPP_MARK_READ_ON_IMPORT = !/^(0|false|no|nein)$/i.test(String(process.env.WHATSAPP_MARK_READ_ON_IMPORT||'true'));
 const WHATSAPP_REVIEW_TEMPLATE = String(process.env.WHATSAPP_REVIEW_TEMPLATE||'').trim();
 const WHATSAPP_REVIEW_TEMPLATE_LANG = String(process.env.WHATSAPP_REVIEW_TEMPLATE_LANG||'de').trim()||'de';
+const FINAL_CUTOVER = /^(1|true|yes|ja)$/i.test(String(process.env.FINAL_CUTOVER||'false'));
+const FINAL_FILE_IMPORT_KEY = String(process.env.FINAL_FILE_IMPORT_KEY||'');
 
 
 const pool = DATABASE_URL ? new Pool({
@@ -1019,9 +1022,185 @@ async function bootstrapTrustedShadowReadiness(){
   console.log('TRUSTED_BOOTSTRAP '+stamped.join(' '));
 }
 
+
+function normalizeLocalPinV24(v){
+  let p=String(v==null?'':v).trim();
+  if(/^\d{1,3}$/.test(p))p=p.padStart(4,'0');
+  return p;
+}
+function hashPinV24(pin,salt){
+  return crypto.scryptSync(String(pin||''),Buffer.from(salt,'base64'),32).toString('base64');
+}
+function safeEqV24(a,b){
+  a=Buffer.from(String(a||''));b=Buffer.from(String(b||''));
+  return a.length===b.length&&crypto.timingSafeEqual(a,b);
+}
+function localFileUrlV24(id){
+  id=String(id||'').trim();
+  return id?'https://dg-app-10-api-production.up.railway.app/v1/files/'+encodeURIComponent(id):'';
+}
+function parseDataUrlV24(dataUrl){
+  const m=String(dataUrl||'').match(/^data:([^;,]+)?(;base64)?,([\s\S]*)$/);
+  if(!m)throw new Error('Dateiinhalt ist ungültig.');
+  const mime=String(m[1]||'application/octet-stream'),is64=Boolean(m[2]);
+  const data=is64?Buffer.from(m[3],'base64'):Buffer.from(decodeURIComponent(m[3]),'utf8');
+  return {mime,data};
+}
+function cleanFileNameV24(v,fallback){
+  const s=String(v||fallback||'Datei').replace(/[\\/:*?"<>|\r\n]+/g,'_').trim();
+  return (s||'Datei').slice(0,180);
+}
+async function storeBinaryFileV24(db,item){
+  item=item||{};
+  const parsed=item.dataUrl?parseDataUrlV24(item.dataUrl):null;
+  const data=Buffer.isBuffer(item.data)?item.data:(parsed?parsed.data:Buffer.alloc(0));
+  if(!data.length)throw new Error('Datei ist leer.');
+  if(data.length>15*1024*1024)throw new Error('Datei ist größer als 15 MB.');
+  const id=String(item.id||item.fileId||'FILE-'+crypto.randomUUID()).trim();
+  const mime=String(item.mime||item.type||(parsed&&parsed.mime)||'application/octet-stream');
+  const name=cleanFileNameV24(item.name,item.kind==='signature'?'Unterschrift.png':'Datei');
+  const sha=crypto.createHash('sha256').update(data).digest('hex');
+  await db.query(
+    `INSERT INTO binary_files_v10(id,file_name,mime_type,file_size,sha256,file_data,source,kind,metadata,updated_at)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,now())
+     ON CONFLICT(id) DO UPDATE SET file_name=EXCLUDED.file_name,mime_type=EXCLUDED.mime_type,
+       file_size=EXCLUDED.file_size,sha256=EXCLUDED.sha256,file_data=EXCLUDED.file_data,
+       source=EXCLUDED.source,kind=EXCLUDED.kind,metadata=EXCLUDED.metadata,updated_at=now()`,
+    [id,name,mime,data.length,sha,data,String(item.source||'railway'),String(item.kind||'business'),
+     JSON.stringify(item.metadata||{})]
+  );
+  return {id,name,mime,size:data.length,sha256:sha,url:localFileUrlV24(id)};
+}
+async function initFinalCutoverStorageV24(){
+  if(!pool)return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS binary_files_v10(
+      id TEXT PRIMARY KEY,
+      file_name TEXT NOT NULL DEFAULT '',
+      mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+      file_size BIGINT NOT NULL DEFAULT 0,
+      sha256 TEXT NOT NULL DEFAULT '',
+      file_data BYTEA NOT NULL,
+      source TEXT NOT NULL DEFAULT 'railway',
+      kind TEXT NOT NULL DEFAULT 'business',
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS binary_files_v10_kind_idx ON binary_files_v10(kind,created_at DESC);
+    CREATE TABLE IF NOT EXISTS employee_credentials_v10(
+      employee_name TEXT PRIMARY KEY,
+      pin_salt TEXT NOT NULL,
+      pin_hash TEXT NOT NULL,
+      active BOOLEAN NOT NULL DEFAULT true,
+      chef_access BOOLEAN NOT NULL DEFAULT false,
+      failed_attempts INTEGER NOT NULL DEFAULT 0,
+      locked_until TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+}
+async function bootstrapEmployeeCredentialsV24(){
+  if(!pool)return;
+  const q=await pool.query("SELECT source_key,payload FROM migration_objects WHERE entity_type='sheet:Mitarbeiter' ORDER BY source_key::int");
+  for(const row of q.rows){
+    const p=row.payload||{};if(Number(p.sourceRow||row.source_key)<=1)continue;
+    const cells=Array.isArray(p.cells)?p.cells:[];
+    const name=textCell(cells,0).trim(),pin=normalizeLocalPinV24(textCell(cells,1));
+    if(!name||!pin)continue;
+    const active=String(textCell(cells,11)||'').trim().toLowerCase()!=='nein';
+    const chef=String(textCell(cells,12)||'').trim().toLowerCase()==='ja';
+    const exists=await pool.query('SELECT 1 FROM employee_credentials_v10 WHERE employee_name=$1',[name]);
+    if(exists.rowCount){
+      await pool.query('UPDATE employee_credentials_v10 SET active=$2,chef_access=$3,updated_at=now() WHERE employee_name=$1',[name,active,chef]);
+      continue;
+    }
+    const salt=crypto.randomBytes(16).toString('base64'),hash=hashPinV24(pin,salt);
+    await pool.query('INSERT INTO employee_credentials_v10(employee_name,pin_salt,pin_hash,active,chef_access) VALUES($1,$2,$3,$4,$5)',
+      [name,salt,hash,active,chef]);
+  }
+}
+async function localEmployeeLoginV24(body){
+  const employee=String(body&&body.employee||'').trim(),pin=normalizeLocalPinV24(body&&body.pin);
+  if(!employee||!pin)throw new Error('Mitarbeiter oder PIN fehlt.');
+  const q=await pool.query('SELECT * FROM employee_credentials_v10 WHERE employee_name=$1 LIMIT 1',[employee]);
+  const r=q.rows[0];
+  if(!r||r.active===false)throw new Error('Mitarbeiter oder PIN ungültig bzw. Mitarbeiter inaktiv.');
+  if(r.locked_until&&new Date(r.locked_until).getTime()>Date.now())throw new Error('Zu viele Fehlversuche. Bitte später erneut anmelden.');
+  const ok=safeEqV24(hashPinV24(pin,String(r.pin_salt||'')),String(r.pin_hash||''));
+  if(!ok){
+    const next=Number(r.failed_attempts||0)+1,lock=next>=8?new Date(Date.now()+15*60*1000):null;
+    await pool.query('UPDATE employee_credentials_v10 SET failed_attempts=$2,locked_until=$3,updated_at=now() WHERE employee_name=$1',
+      [employee,next>=8?0:next,lock]);
+    throw new Error('Mitarbeiter oder PIN ungültig bzw. Mitarbeiter inaktiv.');
+  }
+  await pool.query('UPDATE employee_credentials_v10 SET failed_attempts=0,locked_until=NULL,updated_at=now() WHERE employee_name=$1',[employee]);
+  const token='DGSESSION.'+crypto.randomBytes(24).toString('base64url');
+  await registerRailwaySession(employee,token,Boolean(r.chef_access));
+  return {employee,chefAccess:Boolean(r.chef_access),deviceSessionToken:token,message:'Anmeldung erfolgreich',backendVersion:'10.0',source:'railway'};
+}
+async function localChefLoginV24(body){
+  const s=await localSessionForBody(body,true);if(!s)return null;
+  return {ok:true,message:'Chef-Zugriff bestätigt'};
+}
+async function finalizeLocalFileReferencesV24(){
+  if(!pool)return;
+  const q=await pool.query('SELECT id FROM binary_files_v10');const have=new Set(q.rows.map(r=>String(r.id)));
+  const tq=await pool.query('SELECT id,customer_signature_id,photo_file_ids FROM time_entries_shadow');
+  for(const r of tq.rows){
+    const sig=String(r.customer_signature_id||'').trim();
+    const ids=String(r.photo_file_ids||'').split(',').map(x=>x.trim()).filter(Boolean);
+    const sigUrl=sig&&have.has(sig)?localFileUrlV24(sig):'';
+    const photoUrls=ids.filter(id=>have.has(id)).map(localFileUrlV24).join(' | ');
+    await pool.query(
+      `UPDATE time_entries_shadow SET
+        customer_signature_url=CASE WHEN $2<>'' THEN $2 ELSE customer_signature_url END,
+        photo_urls=CASE WHEN $3<>'' THEN $3 ELSE photo_urls END,shadow_updated_at=now()
+       WHERE id=$1`,[String(r.id),sigUrl,photoUrls]
+    );
+  }
+  const dq=await pool.query('SELECT employee_name,closure_date,legacy_col5 FROM day_closures_shadow');
+  for(const r of dq.rows){
+    const id=String(r.legacy_col5||'').trim();
+    if(id&&have.has(id))await pool.query('UPDATE day_closures_shadow SET legacy_col6=$3,shadow_updated_at=now() WHERE employee_name=$1 AND closure_date=$2',
+      [String(r.employee_name),String(r.closure_date),localFileUrlV24(id)]);
+  }
+  const rq=await pool.query('SELECT id,attachments_json FROM own_reminders_shadow');
+  for(const r of rq.rows){
+    let a=[];try{a=Array.isArray(r.attachments_json)?r.attachments_json:JSON.parse(r.attachments_json||'[]');}catch(_e){}
+    let changed=false;
+    a=a.map(x=>{x=Object.assign({},x);const fid=String(x.fileId||x.id||'').trim();if(fid&&have.has(fid)){x.url=localFileUrlV24(fid);x.fileId=fid;changed=true;}return x;});
+    if(changed)await pool.query('UPDATE own_reminders_shadow SET attachments_json=$2::jsonb,shadow_updated_at=now() WHERE id=$1',[String(r.id),JSON.stringify(a)]);
+  }
+  const ma=await pool.query("SELECT id,file_id FROM maintenance_attachments_shadow WHERE active=true AND COALESCE(file_id,'')<>''");
+  for(const r of ma.rows)if(have.has(String(r.file_id)))await pool.query('UPDATE maintenance_attachments_shadow SET url=$2,shadow_updated_at=now() WHERE id=$1',
+    [String(r.id),localFileUrlV24(String(r.file_id))]);
+  const ra=await pool.query("SELECT id,file_id FROM regie_attachments_shadow WHERE COALESCE(file_id,'')<>''");
+  for(const r of ra.rows)if(have.has(String(r.file_id)))await pool.query('UPDATE regie_attachments_shadow SET url=$2,shadow_updated_at=now() WHERE id=$1',
+    [String(r.id),localFileUrlV24(String(r.file_id))]);
+}
+async function finalCutoverAuditV24(){
+  if(!pool)return null;
+  const [files,creds,pending,refs]=await Promise.all([
+    pool.query('SELECT COUNT(*)::int n,COALESCE(SUM(file_size),0)::bigint bytes FROM binary_files_v10'),
+    pool.query('SELECT COUNT(*)::int n FROM employee_credentials_v10 WHERE active=true'),
+    pool.query("SELECT status,COUNT(*)::int n FROM legacy_write_outbox WHERE status IN ('pending','failed','sending') GROUP BY status"),
+    pool.query(`SELECT
+      (SELECT COUNT(*) FROM time_entries_shadow WHERE COALESCE(customer_signature_id,'')<>'')::int sig_refs,
+      (SELECT COALESCE(SUM(CASE WHEN COALESCE(photo_file_ids,'')='' THEN 0 ELSE array_length(string_to_array(photo_file_ids,','),1) END),0) FROM time_entries_shadow)::int photo_refs,
+      (SELECT COUNT(*) FROM day_closures_shadow WHERE COALESCE(legacy_col5,'')<>'')::int day_sig_refs`)
+  ]);
+  const r=refs.rows[0]||{};
+  return {files:Number(files.rows[0]?.n||0),bytes:Number(files.rows[0]?.bytes||0),
+    activeCredentials:Number(creds.rows[0]?.n||0),outbox:pending.rows,
+    references:{customerSignatures:Number(r.sig_refs||0),photos:Number(r.photo_refs||0),daySignatures:Number(r.day_sig_refs||0)}};
+}
+
 async function initDb() {
   if (!pool) return;
   await pool.query(schema);
+  await initFinalCutoverStorageV24();
+  await bootstrapEmployeeCredentialsV24();
   await pool.query("INSERT INTO partner_categories_v10(id,name,sort_order,active,created_by) VALUES ('PC-ELEKTRIKER','Elektriker',10,true,'System'),('PC-FLIESENLEGER','Fliesenleger',20,true,'System'),('PC-TROCKENBAUER','Trockenbauer',30,true,'System') ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,sort_order=EXCLUDED.sort_order,active=true,updated_at=now()");
   await cleanupInternalData();
   await loadGooglePingCache();
@@ -1051,6 +1230,7 @@ async function initDb() {
   await initRegieMetadataShadows();
   await bootstrapCompletedCustomerConsolidationV23();
   await initRegieAttachmentsShadow();
+  await finalizeLocalFileReferencesV24();
   await bootstrapTrustedShadowReadiness();
   await bootstrapEmployeeAdminReadiness();
   await bootstrapTrustedShadowReadinessV2();
@@ -1140,7 +1320,7 @@ async function readBody(req) {
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 2 * 1024 * 1024) throw new Error('Payload too large');
+    if (size > 30 * 1024 * 1024) throw new Error('Payload too large');
     chunks.push(chunk);
   }
   const raw = Buffer.concat(chunks).toString('utf8');
