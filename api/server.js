@@ -27,7 +27,7 @@ const WHATSAPP_MARK_READ_ON_IMPORT = !/^(0|false|no|nein)$/i.test(String(process
 const WHATSAPP_REVIEW_TEMPLATE = String(process.env.WHATSAPP_REVIEW_TEMPLATE||'').trim();
 const WHATSAPP_REVIEW_TEMPLATE_LANG = String(process.env.WHATSAPP_REVIEW_TEMPLATE_LANG||'de').trim()||'de';
 const FINAL_CUTOVER = /^(1|true|yes|ja)$/i.test(String(process.env.FINAL_CUTOVER||'false'));
-const FINAL_FILE_IMPORT_KEY = String(process.env.FINAL_FILE_IMPORT_KEY||'');
+const FINAL_FILE_IMPORT_KEY = String(process.env.FINAL_FILE_IMPORT_KEY||MIGRATION_UPLOAD_KEY||'');
 
 
 const pool = DATABASE_URL ? new Pool({
@@ -2237,7 +2237,7 @@ async function consolidateCompletedCustomerV10(db,customer,triggerObjectId,by,no
     [objectIds]
   );
 
-  if(queueLegacy&&legacyBase){
+  if(queueLegacy&&legacyBase&&!FINAL_CUTOVER){
     if(objectIds.length>1){
       await enqueueLegacyWriteWithClient(db,'mergeRegieObjects',
         Object.assign({},legacyBase,{action:'mergeRegieObjects',objectIds}));
@@ -10474,7 +10474,9 @@ async function recalcClosedDayAfterDirectCorrection(client,employee,date,reason,
 }
 
 async function tryDirectPostgresWrite(action,body){
-  if(!DIRECT_POSTGRES_WRITE_ACTIONS.has(action)||!pool||!GOOGLE_BACKEND_URL||!legacyOutboxCryptoKey())return null;
+  if(!DIRECT_POSTGRES_WRITE_ACTIONS.has(action)||!pool)return null;
+  const needsLegacySyncV24=!FINAL_CUTOVER||googleRetainedActionV24(action);
+  if(needsLegacySyncV24&&(!GOOGLE_BACKEND_URL||!legacyOutboxCryptoKey()))return null;
   if(action==='deleteAbsence'){
     const id=String(body&&body.id||'').trim();
     if(!id)return null;
@@ -10490,11 +10492,14 @@ async function tryDirectPostgresWrite(action,body){
   }
   if(action==='saveEmployeeAdmin'){
     const item=body&&body.item||{},name=String(item.name||'').trim(),original=String(item.originalName||'').trim();
-    if(!name||!original||name!==original||String(item.pin||'').trim())return null;
-    const q=await pool.query('SELECT payload FROM employee_admin_shadow WHERE employee_name=$1 LIMIT 1',[name]);
-    if(!q.rowCount)return null;
-    const current=q.rows[0].payload||{};
-    if(String(item.calendarId||'').trim()!==String(current.calendarId||''))return null;
+    if(!name||!original||name!==original)return null;
+    if(!FINAL_CUTOVER){
+      if(String(item.pin||'').trim())return null;
+      const q=await pool.query('SELECT payload FROM employee_admin_shadow WHERE employee_name=$1 LIMIT 1',[name]);
+      if(!q.rowCount)return null;
+      const current=q.rows[0].payload||{};
+      if(String(item.calendarId||'').trim()!==String(current.calendarId||''))return null;
+    }
   }
   if(action==='saveEntry'){
     const e=body&&body.entry||{};
@@ -10589,8 +10594,10 @@ async function tryDirectPostgresWrite(action,body){
       }
       if(objectIds.length)await client.query("UPDATE time_entries_shadow SET job_status='Abgeschlossen',shadow_updated_at=now() WHERE object_id=ANY($1::text[]) AND COALESCE(billing_status,'Offen')='Offen'",[objectIds]);
       await client.query("UPDATE manual_orders_shadow SET status='Abgeschlossen',completed_at_text=$2,changed_at_text=$2,changed_by=$3,shadow_updated_at=now() WHERE id=$1",[id,nowIso,by]);
-      if(objectIds.length>1)await enqueueLegacyWriteWithClient(client,'mergeRegieObjects',Object.assign({},body,{action:'mergeRegieObjects',objectIds}));
-      for(const oid of objectIds)await enqueueLegacyWriteWithClient(client,'setRegieObjectJobStatus',Object.assign({},body,{action:'setRegieObjectJobStatus',objectId:oid,jobStatus:'Abgeschlossen'}));
+      if(!FINAL_CUTOVER){
+        if(objectIds.length>1)await enqueueLegacyWriteWithClient(client,'mergeRegieObjects',Object.assign({},body,{action:'mergeRegieObjects',objectIds}));
+        for(const oid of objectIds)await enqueueLegacyWriteWithClient(client,'setRegieObjectJobStatus',Object.assign({},body,{action:'setRegieObjectJobStatus',objectId:oid,jobStatus:'Abgeschlossen'}));
+      }
       result={ok:true,id,objectIds,merged:objectIds.length>1,mergeId};skipLegacySync=true;
     }else if(action==='setWhatsappThreadCategoryV10'){
       const id=String(body.id||'').trim(),category=String(body.category||'').trim();
