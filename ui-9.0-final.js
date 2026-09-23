@@ -3512,3 +3512,33 @@ document.addEventListener('click',onClick,true);
 window.DG10_openDaysStable=openDaysStable;
 document.documentElement.dataset.dgUi17='10.0-ui17';
 })();
+
+
+/* DG Zeiterfassung 10.0 - final visible version guard */
+(function(){
+'use strict';
+const TITLE='DG Zeiterfassung 10.0';
+function applyVersion10(){
+  if(document.title!==TITLE)document.title=TITLE;
+  document.documentElement.dataset.dgVersion='10.0';
+  document.querySelectorAll('.login-card .muted.small,#loginScreen .center.muted.small').forEach(function(x){
+    if(/^Version\s+/i.test(String(x.textContent||'').trim())&&x.textContent!=='Version 10.0')x.textContent='Version 10.0';
+  });
+  document.querySelectorAll('.hero strong,#mainScreen .hero .head-row strong').forEach(function(x){
+    if(/Zeiterfassung/i.test(String(x.textContent||''))&&x.textContent!=='Zeiterfassung - 10.0')x.textContent='Zeiterfassung - 10.0';
+  });
+}
+function installGuard(){
+  applyVersion10();
+  const t=document.querySelector('title');
+  if(t&&!t.dataset.dg10Guard){
+    t.dataset.dg10Guard='1';
+    new MutationObserver(applyVersion10).observe(t,{childList:true,characterData:true,subtree:true});
+  }
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',installGuard,{once:true});else installGuard();
+window.addEventListener('pageshow',applyVersion10);
+setTimeout(applyVersion10,250);
+setTimeout(applyVersion10,1400);
+setTimeout(applyVersion10,3200);
+})();
