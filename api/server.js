@@ -23,6 +23,8 @@ const WHATSAPP_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || '';
 const WHATSAPP_APP_SECRET = process.env.WHATSAPP_APP_SECRET || '';
 const WHATSAPP_GRAPH_VERSION = process.env.WHATSAPP_GRAPH_VERSION || 'v25.0';
 const WHATSAPP_MARK_READ_ON_IMPORT = !/^(0|false|no|nein)$/i.test(String(process.env.WHATSAPP_MARK_READ_ON_IMPORT||'true'));
+const WHATSAPP_REVIEW_TEMPLATE = String(process.env.WHATSAPP_REVIEW_TEMPLATE||'').trim();
+const WHATSAPP_REVIEW_TEMPLATE_LANG = String(process.env.WHATSAPP_REVIEW_TEMPLATE_LANG||'de').trim()||'de';
 
 
 const pool = DATABASE_URL ? new Pool({
@@ -421,6 +423,25 @@ CREATE TABLE IF NOT EXISTS whatsapp_sync_state_v10 (
   details JSONB NOT NULL DEFAULT '{}'::jsonb,
   last_event_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS billing_review_requests_v10 (
+  billing_key TEXT PRIMARY KEY,
+  object_ids TEXT NOT NULL,
+  customer TEXT,
+  phone TEXT,
+  review_url TEXT,
+  message_text TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  provider_message_id TEXT,
+  sent_at TIMESTAMPTZ,
+  sent_by TEXT,
+  last_error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS billing_review_requests_v10_status_idx
+  ON billing_review_requests_v10(status,updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS employee_locations_v10 (
   employee_name TEXT PRIMARY KEY,
@@ -9477,6 +9498,174 @@ async function processWhatsappWebhookV10(payload,eventHash){
 }
 
 
+
+const BILLING_REVIEW_URL_V10='https://g.page/r/Cf8DPhsJCWf2EBM/review';
+const BILLING_REVIEW_TEXT_V10=
+  'Guten Tag,\n\n'+
+  'vielen Dank für Ihr Vertrauen und Ihren Auftrag bei Del Gesso Gebäudetechnik. Wir hoffen, Sie waren mit unserer Arbeit zufrieden.\n\n'+
+  'Wenn Sie einen Moment Zeit haben, würden wir uns sehr über eine kurze Google-Bewertung freuen. Ihre Rückmeldung hilft uns sehr und unterstützt auch andere Kunden bei der Wahl eines zuverlässigen Fachbetriebs.\n\n'+
+  'Hier können Sie uns direkt bewerten:\n'+BILLING_REVIEW_URL_V10+'\n\n'+
+  'Vielen Dank!\nIhr Team von Del Gesso Gebäudetechnik';
+
+function billingReviewObjectIdsV10(body){
+  return [...new Set((Array.isArray(body&&body.objectIds)?body.objectIds:[]).map(x=>String(x||'').trim()).filter(Boolean))].sort();
+}
+function billingReviewKeyV10(ids){
+  return ids.length?'BR-'+crypto.createHash('sha256').update(ids.join('|'),'utf8').digest('hex').slice(0,32):'';
+}
+function whatsappRecipientDigitsV10(v){
+  let d=whatsappDigitsV10(v);
+  if(d.startsWith('00'))d=d.slice(2);
+  if(d.startsWith('0'))d='49'+d.slice(1);
+  else if(!d.startsWith('49')&&d.length>=9&&d.length<=11)d='49'+d;
+  return d;
+}
+function maskedWhatsappV10(v){
+  const d=whatsappRecipientDigitsV10(v);return d?('+…'+d.slice(-4)):'';
+}
+async function billingReviewTargetV10(body){
+  const objectIds=billingReviewObjectIdsV10(body),billingKey=billingReviewKeyV10(objectIds);
+  if(!objectIds.length)throw new Error('Auftrag wurde nicht gefunden.');
+  const prior=await pool.query(
+    'SELECT status,provider_message_id,sent_at,phone,customer,last_error FROM billing_review_requests_v10 WHERE billing_key=$1 LIMIT 1',
+    [billingKey]
+  );
+  const already=prior.rows[0]||null;
+  const tq=await pool.query(
+    `SELECT object_id,customer,offer_id,entry_date
+       FROM time_entries_shadow
+      WHERE object_id=ANY($1::text[])
+      ORDER BY entry_date DESC NULLS LAST,id`,[objectIds]
+  );
+  if(!tq.rowCount)throw new Error('Auftrag wurde nicht gefunden.');
+  const customer=String(tq.rows.find(x=>String(x.customer||'').trim())?.customer||already?.customer||'').trim();
+  const offerIds=[...new Set(tq.rows.map(x=>String(x.offer_id||'').trim()).filter(Boolean))];
+  let phone='';
+  if(offerIds.length){
+    const oq=await pool.query(
+      `SELECT phone FROM inquiry_offers_shadow
+        WHERE offer_id=ANY($1::text[]) AND COALESCE(phone,'')<>''
+        ORDER BY changed_at_text DESC NULLS LAST LIMIT 1`,[offerIds]
+    );
+    phone=String(oq.rows[0]?.phone||'');
+    if(!phone){
+      const iq=await pool.query(
+        `SELECT phone FROM customer_inquiries_shadow
+          WHERE offer_id=ANY($1::text[]) AND COALESCE(phone,'')<>''
+          ORDER BY received_at_text DESC NULLS LAST LIMIT 1`,[offerIds]
+      );
+      phone=String(iq.rows[0]?.phone||'');
+    }
+  }
+  if(!phone&&customer){
+    const mq=await pool.query(
+      `SELECT phone FROM manual_orders_shadow
+        WHERE lower(trim(customer))=lower(trim($1)) AND COALESCE(phone,'')<>''
+        ORDER BY changed_at_text DESC NULLS LAST,created_at_text DESC NULLS LAST LIMIT 1`,[customer]
+    );
+    phone=String(mq.rows[0]?.phone||'');
+  }
+  if(!phone&&customer){
+    const iq=await pool.query(
+      `SELECT phone FROM customer_inquiries_shadow
+        WHERE lower(trim(customer))=lower(trim($1)) AND COALESCE(phone,'')<>''
+        ORDER BY received_at_text DESC NULLS LAST LIMIT 1`,[customer]
+    );
+    phone=String(iq.rows[0]?.phone||'');
+  }
+  if(!phone&&customer){
+    const wq=await pool.query(
+      `SELECT wa_id FROM whatsapp_contacts_v10
+        WHERE active=true AND (lower(trim(full_name))=lower(trim($1)) OR lower(trim(first_name))=lower(trim($1)))
+        ORDER BY updated_at DESC LIMIT 1`,[customer]
+    );
+    phone=String(wq.rows[0]?.wa_id||'');
+  }
+  if(!phone&&customer){
+    const wq=await pool.query(
+      `SELECT wa_id FROM whatsapp_threads_v10
+        WHERE lower(trim(contact_name))=lower(trim($1))
+        ORDER BY last_message_at DESC NULLS LAST,updated_at DESC LIMIT 1`,[customer]
+    );
+    phone=String(wq.rows[0]?.wa_id||'');
+  }
+  phone=whatsappRecipientDigitsV10(phone||already?.phone||'');
+  const alreadySent=String(already?.status||'')==='sent';
+  const whatsappReady=whatsappConfiguredV10();
+  let reason='';
+  if(alreadySent)reason='Für diesen Auftrag wurde bereits eine Bewertungsanfrage gesendet.';
+  else if(!phone)reason='Keine WhatsApp-/Mobilnummer zum Kunden gefunden.';
+  else if(!whatsappReady)reason='WhatsApp-Versand ist noch nicht vollständig eingerichtet.';
+  return {
+    billingKey,objectIds,customer:customer||'Kunde',phone,phoneMasked:maskedWhatsappV10(phone),
+    canSend:!alreadySent&&Boolean(phone)&&whatsappReady,alreadySent,
+    sentAt:already?.sent_at?new Date(already.sent_at).toISOString():'',
+    providerMessageId:String(already?.provider_message_id||''),reason,
+    reviewUrl:BILLING_REVIEW_URL_V10,preview:BILLING_REVIEW_TEXT_V10
+  };
+}
+async function directBillingReviewTargetV10(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  return billingReviewTargetV10(body);
+}
+async function sendBillingReviewWhatsappV10(to,text){
+  if(!whatsappConfiguredV10())throw new Error('WhatsApp-Versand ist noch nicht vollständig eingerichtet.');
+  const path=WHATSAPP_PROVIDER==='360dialog'?'messages':encodeURIComponent(WHATSAPP_PHONE_NUMBER_ID)+'/messages';
+  let payload,mode='text';
+  if(WHATSAPP_REVIEW_TEMPLATE){
+    mode='template';
+    payload={messaging_product:'whatsapp',recipient_type:'individual',to,type:'template',
+      template:{name:WHATSAPP_REVIEW_TEMPLATE,language:{code:WHATSAPP_REVIEW_TEMPLATE_LANG}}};
+  }else{
+    payload={messaging_product:'whatsapp',recipient_type:'individual',to,type:'text',
+      text:{preview_url:true,body:String(text||'').slice(0,3000)}};
+  }
+  const data=await whatsappProviderJsonV10(path,{
+    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)
+  });
+  return {messageId:String(data&&data.messages&&data.messages[0]&&data.messages[0].id||''),mode,raw:data};
+}
+async function directSendBillingReviewRequestV10(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const target=await billingReviewTargetV10(body);
+  if(target.alreadySent)return Object.assign({},target,{ok:true,alreadySent:true});
+  if(!target.canSend)throw new Error(target.reason||'Bewertungsanfrage kann nicht gesendet werden.');
+  try{
+    const sent=await sendBillingReviewWhatsappV10(target.phone,BILLING_REVIEW_TEXT_V10);
+    await pool.query(
+      `INSERT INTO billing_review_requests_v10(
+        billing_key,object_ids,customer,phone,review_url,message_text,status,provider_message_id,sent_at,sent_by,last_error,updated_at
+       ) VALUES($1,$2,$3,$4,$5,$6,'sent',$7,now(),$8,NULL,now())
+       ON CONFLICT(billing_key) DO UPDATE SET
+        object_ids=EXCLUDED.object_ids,customer=EXCLUDED.customer,phone=EXCLUDED.phone,
+        review_url=EXCLUDED.review_url,message_text=EXCLUDED.message_text,status='sent',
+        provider_message_id=EXCLUDED.provider_message_id,sent_at=now(),sent_by=EXCLUDED.sent_by,
+        last_error=NULL,updated_at=now()`,
+      [target.billingKey,target.objectIds.join(','),target.customer,target.phone,BILLING_REVIEW_URL_V10,
+       BILLING_REVIEW_TEXT_V10,sent.messageId,String(session.employee||'')]
+    );
+    const outboundId=sent.messageId||('WA-OUT-'+crypto.randomUUID());
+    await storeWhatsappMessageV10(
+      {id:outboundId,to:target.phone,type:'text',text:{body:BILLING_REVIEW_TEXT_V10},timestamp:String(Math.floor(Date.now()/1000))},
+      {direction:'outbound',waId:target.phone,contactName:target.customer,
+       phoneNumberId:WHATSAPP_PHONE_NUMBER_ID,initialStatus:'Kontext'}
+    ).catch(e=>console.error('Billing review WhatsApp history save failed:',e.message));
+    return {ok:true,billingKey:target.billingKey,customer:target.customer,phoneMasked:target.phoneMasked,
+      messageId:sent.messageId,mode:sent.mode,reviewUrl:BILLING_REVIEW_URL_V10};
+  }catch(e){
+    await pool.query(
+      `INSERT INTO billing_review_requests_v10(
+        billing_key,object_ids,customer,phone,review_url,message_text,status,last_error,updated_at
+       ) VALUES($1,$2,$3,$4,$5,$6,'failed',$7,now())
+       ON CONFLICT(billing_key) DO UPDATE SET status='failed',last_error=EXCLUDED.last_error,
+         customer=EXCLUDED.customer,phone=EXCLUDED.phone,updated_at=now()`,
+      [target.billingKey,target.objectIds.join(','),target.customer,target.phone,BILLING_REVIEW_URL_V10,
+       BILLING_REVIEW_TEXT_V10,String(e&&e.message?e.message:e).slice(0,1000)]
+    ).catch(()=>{});
+    throw e;
+  }
+}
+
 async function directWhatsappReviewStatusV10(body){
   const session=await localSessionForBody(body,true);if(!session)return null;
   return {
@@ -9669,6 +9858,8 @@ async function tryDirectPostgresRead(action,body){
   if(action==='getWhatsappInboxV10')return directWhatsappInboxV10(body);
   if(action==='getWhatsappMediaV10')return directWhatsappMediaV10(body);
   if(action==='getWhatsappReviewStatusV10')return directWhatsappReviewStatusV10(body);
+  if(action==='getBillingReviewTargetV10')return directBillingReviewTargetV10(body);
+  if(action==='sendBillingReviewRequestV10')return directSendBillingReviewRequestV10(body);
   if(action==='getWhatsappTemplatesV10')return directWhatsappTemplatesV10(body);
   if(action==='sendWhatsappReviewTextV10')return directWhatsappReviewSendTextV10(body);
   if(action==='createWhatsappReviewTemplateV10')return directWhatsappReviewCreateTemplateV10(body);
