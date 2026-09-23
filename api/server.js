@@ -13188,6 +13188,19 @@ async function proxyLegacy(req, res, body) {
       console.error('Direct employee calendar read failed; retaining legacy fallback:',e.message);
     }
   }
+  if(FINAL_CUTOVER&&action==='transferPlannerEvent'&&String(body&&body.item&&body.item.sourceId||'').startsWith('GOOGLE-')){
+    try{
+      if(await calendarDirect.authorized()){
+        const session=await localSessionForBody(body,true);
+        if(!session)return json(res,401,{ok:false,error:'Sitzung ist abgelaufen. Bitte erneut anmelden.'},req);
+        const data=await calendarDirect.transferExternalToPlanner(body.item||{},session.employee);
+        return json(res,200,{ok:true,data,source:'postgres+google-calendar'},req);
+      }
+    }catch(e){
+      console.error('Direct external calendar transfer failed:',e.message);
+      return json(res,400,{ok:false,error:e.message},req);
+    }
+  }
   if(FINAL_CUTOVER&&['saveExternalGoogleEvent','deleteExternalGoogleEvent'].includes(action)){
     try{
       if(await calendarDirect.authorized()){
