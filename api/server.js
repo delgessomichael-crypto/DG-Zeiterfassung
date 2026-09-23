@@ -10436,7 +10436,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry','inquiryToOffer',
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
-  'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','syncHolidays','saveEmployeeAdmin','setEmployeeActive','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','reserveMaintenanceDeviceId','saveMaintenanceCustomer','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','saveAbsence','deleteAbsence','endSicknessAbsence',
+  'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','syncHolidays','saveEmployeeAdmin','setEmployeeActive','savePlannerWorker','setPlannerWorkerActive','movePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','reserveMaintenanceDeviceId','saveMaintenanceCustomer','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','saveAbsence','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue',
   'savePartnerCategoryV10','savePartnerV10','deactivatePartnerV10','setWhatsappThreadCategoryV10','transferWhatsappThreadV10','saveEmployeeLocationV10','mergeCustomerInquiriesV10','completeManualOrderV10','addRegieAttachments','deleteEmployeeAdmin'
 ]);
@@ -11510,6 +11510,33 @@ async function tryDirectPostgresWrite(action,body){
         [objectIds,jobStatus]
       );
       result={ok:true,objectId,objectIds,jobStatus,count:changed,changedBy:by,changedAt:shadowGermanDateTime(nowIso)};
+    }else if(action==='savePlannerWorker'){
+      const item=body.item||{};
+      const displayName=String(item.displayName||item.employeeName||'').trim();
+      const employeeName=String(item.employeeName||displayName).trim();
+      const provider=String(item.provider||'google').trim()||'google';
+      const calendarId=String(item.calendarId||'').trim();
+      if(!displayName||!employeeName)throw new Error('Name des Kalender-Mitarbeiters fehlt.');
+      if(provider==='google'&&!calendarId)throw new Error('Google Kalender-ID fehlt.');
+      let id=String(item.id||'').trim();
+      if(!id){
+        const existing=await client.query(
+          'SELECT id FROM planner_workers_shadow WHERE lower(employee_name)=lower($1) OR (COALESCE(calendar_id,\'\')<>\'\' AND calendar_id=$2) ORDER BY sort_order ASC LIMIT 1',
+          [employeeName,calendarId]
+        );
+        id=String(existing.rows[0]?.id||'PW-'+crypto.randomUUID());
+      }
+      const maxQ=await client.query('SELECT COALESCE(MAX(sort_order),0)::int AS n FROM planner_workers_shadow');
+      const sortOrder=Number(item.sortOrder)||Number(maxQ.rows[0]?.n||0)+10;
+      await client.query(
+        `INSERT INTO planner_workers_shadow(id,employee_name,display_name,provider,calendar_id,active,sort_order,shadow_updated_at)
+         VALUES($1,$2,$3,$4,$5,$6,$7,now())
+         ON CONFLICT(id) DO UPDATE SET employee_name=EXCLUDED.employee_name,display_name=EXCLUDED.display_name,
+           provider=EXCLUDED.provider,calendar_id=EXCLUDED.calendar_id,active=EXCLUDED.active,sort_order=EXCLUDED.sort_order,shadow_updated_at=now()`,
+        [id,employeeName,displayName,provider,calendarId,item.active!==false,sortOrder]
+      );
+      if(FINAL_CUTOVER)skipLegacySync=true;
+      result={ok:true,id};
     }else if(action==='setPlannerWorkerActive'){
       const id=String(body.id||'').trim(),active=Boolean(body.active);
       if(!id)throw new Error('Kalender-Mitarbeiter nicht gefunden.');
@@ -13064,7 +13091,7 @@ async function tryDirectPostgresWrite(action,body){
 const GOOGLE_RETAINED_ACTIONS_V24=new Set([
   'syncCustomerInquiries',
   'getEmployeeCalendarEvents','getPlannerEvents','saveExternalGoogleEvent','deleteExternalGoogleEvent',
-  'savePlannerWorker','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','planRequest3',
+  'savePlannerEvent','deletePlannerEvent','transferPlannerEvent','planRequest3',
   'rejectCustomerInquiry','rejectInquiryReminder','sendMonthReport'
 ]);
 function googleRetainedActionV24(action){return GOOGLE_RETAINED_ACTIONS_V24.has(String(action||''));}
