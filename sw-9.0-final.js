@@ -1,5 +1,5 @@
-/* DG Zeiterfassung 9.0 FINAL - exact UI28 parity cache */
-const CACHE='dg-zeiterfassung-10.0-whatsapp-20260922-2';
+/* DG Zeiterfassung 10.0 - Railway migration cache */
+const CACHE='dg-zeiterfassung-10.0-version-labels-20260923-1';
 const STATIC=[
   './index.html',
   './app-5.0.css?v=20260918-800-prod1',
