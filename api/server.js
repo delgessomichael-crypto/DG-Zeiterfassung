@@ -10546,7 +10546,7 @@ async function tryDirectPostgresWrite(action,body){
   }
   if(action==='saveManualOrder'){
     const item=body&&body.item||{};
-    if(!String(item.id||'').trim()||String(item.inquiryId||'').trim())return null;
+    if(!String(item.id||'').trim())return null;
   }
   if(action==='setPayrollMonthStatus'){
     const payrollAction=String(body&&body.payrollAction||'').trim();
@@ -12691,10 +12691,13 @@ async function tryDirectPostgresWrite(action,body){
       result={ok:true,id};
     }else if(action==='saveManualOrder'){
       const item=body.item||{},id=String(item.id||'').trim();
-      const customer=String(item.customer||'').trim();
+      const customer=String(item.customer||'').trim(),inquiryId=String(item.inquiryId||'').trim();
       if(!id)throw new Error('Auftrag-ID fehlt.');
       if(!customer)throw new Error('Kundenname fehlt.');
-      if(String(item.inquiryId||'').trim())throw new Error('Anfrage-Aufträge werden weiterhin über Google verarbeitet.');
+      if(inquiryId&&!/^AQON:/.test(inquiryId)){
+        const iq=await client.query('SELECT id FROM customer_inquiries_shadow WHERE id=$1 FOR UPDATE',[inquiryId]);
+        if(!iq.rowCount)throw new Error('Zugehörige Anfrage wurde nicht gefunden.');
+      }
       const status=String(item.status||'Offen').trim()||'Offen';
       const allowed=['Ohne Termin','Termin zu vereinbaren','Offen','Laufend','Abgeschlossen','In Regiebericht uebernommen','Offenes Angebot','Angebot Abgelehnt','Angebot zu erstellen'];
       if(!allowed.includes(status))throw new Error('Ungültiger Auftragsstatus.');
@@ -12711,18 +12714,25 @@ async function tryDirectPostgresWrite(action,body){
         `INSERT INTO manual_orders_shadow(
           id,customer,address,phone,email,description,source,inquiry_id,status,
           created_at_text,started_at_text,completed_at_text,changed_at_text,changed_by,internal_note,shadow_updated_at
-        ) VALUES($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,now())
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now())
         ON CONFLICT(id) DO UPDATE SET
           customer=EXCLUDED.customer,address=EXCLUDED.address,phone=EXCLUDED.phone,email=EXCLUDED.email,
-          description=EXCLUDED.description,source=EXCLUDED.source,status=EXCLUDED.status,
+          description=EXCLUDED.description,source=EXCLUDED.source,inquiry_id=EXCLUDED.inquiry_id,status=EXCLUDED.status,
           started_at_text=EXCLUDED.started_at_text,completed_at_text=EXCLUDED.completed_at_text,
           changed_at_text=EXCLUDED.changed_at_text,changed_by=EXCLUDED.changed_by,
           internal_note=EXCLUDED.internal_note,shadow_updated_at=now()`,
         [id,customer,String(item.address||''),String(item.phone||''),String(item.email||''),
-         String(item.description||''),String(item.source||'Manuell'),status,createdAt,startedAt,completedAt,
+         String(item.description||''),String(item.source||'Manuell'),inquiryId,status,createdAt,startedAt,completedAt,
          nowIso,by,internalNote]
       );
-      result={ok:true,id};
+      if(inquiryId&&!/^AQON:/.test(inquiryId)){
+        await client.query(
+          `UPDATE customer_inquiries_shadow SET status='Übernommen',read_flag=true,
+             changed_at_text=$2,changed_by=$3,shadow_updated_at=now() WHERE id=$1`,
+          [inquiryId,nowIso,by]
+        );
+      }
+      result={ok:true,id,inquiryId};
     }else if(['saveManualOrderNote','setManualOrderStatus','deleteManualOrder'].includes(action)){
       const id=String(body.id||'').trim();if(!id)throw new Error('Auftrag-ID fehlt.');
       const q=await client.query(
