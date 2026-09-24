@@ -230,7 +230,7 @@
   if(!('serviceWorker' in navigator))return;
   window.addEventListener('load',function(){
     var start=function(){
-      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260924-1305-login-safe1',{updateViaCache:'none'})
+      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260924-1252-inspection-start-safe1',{updateViaCache:'none'})
         .then(function(r){return r.update();})
         .catch(function(e){console.warn('DG Offline-Cache nicht bereit',e);});
     };
@@ -374,6 +374,6 @@ function install(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else setTimeout(install,0);
 })();
-</script><script src="./inspection-quick-10.0.js?v=20260924-1235-inspection-all1"></script>
+</script><script src="./inspection-quick-10.0.js?v=20260924-1252-inspection-start-safe1"></script>
 </body>
 </html>
