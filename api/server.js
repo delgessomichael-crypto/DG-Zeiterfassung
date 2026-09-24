@@ -10482,7 +10482,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus','saveOfferCreatedWithReminder','createInspectionOffer','createEmployeeInspectionRequestV10',
   'mergeRegieObjects','saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed','setMonthClosureStatus','setPayrollMonthStatus','completePayrollCycle','forceCompletePayrollCycle',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
-  'markFinancePaidV10','markTaxMailAsInvoiceV10','archiveTaxAdvisorMailV10',
+  'markFinancePaidV10','markTaxMailAsInvoiceV10','archiveTaxAdvisorMailV10','deleteFinanceMailV10',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry','inquiryToOffer',
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','syncHolidays','saveEmployeeAdmin','setEmployeeActive','savePlannerWorker','setPlannerWorkerActive','movePlannerWorker','planRequest3','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','reserveMaintenanceDeviceId','saveMaintenanceCustomer','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','saveAbsence','deleteAbsence','endSicknessAbsence',
@@ -10640,6 +10640,10 @@ async function tryDirectPostgresWrite(action,body){
   }
   if(action==='archiveTaxAdvisorMailV10'){
     const result=await gmailDirect.archiveTax(body.messageId,by);
+    return {result,outboxId:0};
+  }
+  if(action==='deleteFinanceMailV10'){
+    const result=await gmailDirect.deleteFinanceMail(body.messageId,by);
     return {result,outboxId:0};
   }
   const client=await pool.connect();
