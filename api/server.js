@@ -280,6 +280,7 @@ CREATE INDEX IF NOT EXISTS inquiry_offers_shadow_status_idx
 ALTER TABLE inquiry_offers_shadow ADD COLUMN IF NOT EXISTS inspection_date TEXT;
 ALTER TABLE inquiry_offers_shadow ADD COLUMN IF NOT EXISTS inspection_hours NUMERIC(10,2) NOT NULL DEFAULT 0;
 ALTER TABLE inquiry_offers_shadow ADD COLUMN IF NOT EXISTS activity_note TEXT;
+ALTER TABLE inquiry_offers_shadow ADD COLUMN IF NOT EXISTS attachments_json TEXT;
 
 CREATE TABLE IF NOT EXISTS offer_reminders_shadow (
   id TEXT PRIMARY KEY,
@@ -6094,6 +6095,14 @@ async function mergeInquiryRowsV10(rows){
     const unique=field=>[...new Set(g.map(r=>String(r[field]||'').trim()).filter(Boolean))];
     c.email=pick('email');c.phone=pick('phone');c.postalCode=pick('postalCode');c.city=pick('city');c.customer=pick('customer');
     c.subject=pick('subject');c.description=unique('description').join('\n\n');c.internalNote=unique('internalNote').join('\n');
+    const attachmentMap=new Map();
+    for(const r of g){
+      for(const a of (Array.isArray(r.attachments)?r.attachments:[])){
+        const k=String(a&&a.fileId||'')+'|'+String(a&&a.messageId||'')+'|'+String(a&&a.attachmentId||'')+'|'+String(a&&a.name||'');
+        if(k&&k!=='|||')attachmentMap.set(k,a);
+      }
+    }
+    c.attachments=[...attachmentMap.values()];
     c.sources=unique('source');c.source=c.sources.join(' + ');c.mergedIds=g.map(r=>String(r.id||'')).filter(Boolean);c.mergedCount=c.mergedIds.length;
     delete c._receivedSort;out.push(c);
   }
@@ -12186,7 +12195,7 @@ async function tryDirectPostgresWrite(action,body){
       if(!customer)throw new Error('Kunde fehlt.');
       if(phone.replace(/\D/g,'').length<6)throw new Error('Gültige Telefonnummer erforderlich.');
       const iq=await client.query(
-        `SELECT id,customer,email,phone,description,subject,source,status,offer_id
+        `SELECT id,customer,email,phone,description,subject,source,status,offer_id,attachments_json
            FROM customer_inquiries_shadow WHERE id=$1 FOR UPDATE`,[inquiryId]
       );
       if(!iq.rowCount)throw new Error('Anfrage nicht gefunden.');
@@ -12214,12 +12223,13 @@ async function tryDirectPostgresWrite(action,body){
         await client.query(
           `INSERT INTO inquiry_offers_shadow(
              offer_id,inquiry_id,customer,phone,email,description,source,created_at_text,status,
-             changed_at_text,changed_by,calendar_event_id,shadow_updated_at
-           ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'Offen',$8,$9,'',now())
+             changed_at_text,changed_by,calendar_event_id,attachments_json,shadow_updated_at
+           ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'Offen',$8,$9,'',$10,now())
            ON CONFLICT(offer_id) DO UPDATE SET inquiry_id=EXCLUDED.inquiry_id,customer=EXCLUDED.customer,
              phone=EXCLUDED.phone,email=EXCLUDED.email,description=EXCLUDED.description,source=EXCLUDED.source,
+             attachments_json=CASE WHEN COALESCE(EXCLUDED.attachments_json,'')<>'' THEN EXCLUDED.attachments_json ELSE inquiry_offers_shadow.attachments_json END,
              status='Offen',changed_at_text=EXCLUDED.changed_at_text,changed_by=EXCLUDED.changed_by,shadow_updated_at=now()`,
-          [offerId,inquiryId,customer,phone,email,description,source,nowIso,by]
+          [offerId,inquiryId,customer,phone,email,description,source,nowIso,by,String(x.attachments_json||'')]
         );
         await client.query(
           `INSERT INTO offer_reminders_shadow(
@@ -12874,7 +12884,7 @@ async function tryDirectPostgresWrite(action,body){
       if(!id)throw new Error('Auftrag-ID fehlt.');
       if(!customer)throw new Error('Kundenname fehlt.');
       if(inquiryId&&!/^AQON:/.test(inquiryId)){
-        const iq=await client.query('SELECT id FROM customer_inquiries_shadow WHERE id=$1 FOR UPDATE',[inquiryId]);
+        const iq=await client.query('SELECT id,attachments_json FROM customer_inquiries_shadow WHERE id=$1 FOR UPDATE',[inquiryId]);
         if(!iq.rowCount)throw new Error('Zugehörige Anfrage wurde nicht gefunden.');
       }
       const status=String(item.status||'Offen').trim()||'Offen';
@@ -12892,17 +12902,20 @@ async function tryDirectPostgresWrite(action,body){
       await client.query(
         `INSERT INTO manual_orders_shadow(
           id,customer,address,phone,email,description,source,inquiry_id,status,
-          created_at_text,started_at_text,completed_at_text,changed_at_text,changed_by,internal_note,shadow_updated_at
-        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now())
+          created_at_text,started_at_text,completed_at_text,changed_at_text,changed_by,internal_note,attachments_json,shadow_updated_at
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,now())
         ON CONFLICT(id) DO UPDATE SET
           customer=EXCLUDED.customer,address=EXCLUDED.address,phone=EXCLUDED.phone,email=EXCLUDED.email,
           description=EXCLUDED.description,source=EXCLUDED.source,inquiry_id=EXCLUDED.inquiry_id,status=EXCLUDED.status,
           started_at_text=EXCLUDED.started_at_text,completed_at_text=EXCLUDED.completed_at_text,
           changed_at_text=EXCLUDED.changed_at_text,changed_by=EXCLUDED.changed_by,
-          internal_note=EXCLUDED.internal_note,shadow_updated_at=now()`,
+          internal_note=EXCLUDED.internal_note,
+          attachments_json=CASE WHEN COALESCE(EXCLUDED.attachments_json,'')<>'' THEN EXCLUDED.attachments_json ELSE manual_orders_shadow.attachments_json END,
+          shadow_updated_at=now()`,
         [id,customer,String(item.address||''),String(item.phone||''),String(item.email||''),
          String(item.description||''),String(item.source||'Manuell'),inquiryId,status,createdAt,startedAt,completedAt,
-         nowIso,by,internalNote]
+         nowIso,by,internalNote,
+         String(item.attachmentsJson||((inquiryId&&!/^AQON:/.test(inquiryId))?(await client.query('SELECT COALESCE(attachments_json,\'\') AS a FROM customer_inquiries_shadow WHERE id=$1',[inquiryId])).rows[0]?.a||'':'')||'')]
       );
       if(inquiryId&&!/^AQON:/.test(inquiryId)){
         await client.query(
