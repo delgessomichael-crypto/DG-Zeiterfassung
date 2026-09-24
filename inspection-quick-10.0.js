@@ -11,7 +11,7 @@ function chefAllowed(){
 }
 function apiPayload(extra){
   const employee=localStorage.getItem('dg_employee')||'';
-  const pin=sessionStorage.getItem('dg_employee_pin')||localStorage.getItem('dg_device_session')||'';
+  const pin=localStorage.getItem('dg_device_session')||sessionStorage.getItem('dg_employee_pin')||'';
   return Object.assign({employee,employeePin:pin},extra||{});
 }
 function notice(msg,type){
