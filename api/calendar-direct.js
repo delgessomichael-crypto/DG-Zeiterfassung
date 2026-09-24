@@ -276,6 +276,32 @@ function createCalendarDirect(opts){
     return {ok:true,id:eventId,externalTransferred:true};
   }
 
+  async function deleteEmployeeCalendarEvent(employee,eventId){
+    if(!await authorized())throw new Error('Google Kalender ist noch nicht direkt mit Railway verbunden.');
+    employee=String(employee||'').trim();eventId=String(eventId||'').trim();
+    if(!employee||!eventId)return {ok:true,skipped:true};
+    let calendarId='';
+    const eq=await pool.query('SELECT payload FROM employee_admin_shadow WHERE employee_name=$1 LIMIT 1',[employee]);
+    if(eq.rowCount){
+      const p=eq.rows[0].payload||{};calendarId=String(p.calendarId||'').trim();
+    }
+    if(!calendarId){
+      const wq=await pool.query("SELECT calendar_id FROM planner_workers_shadow WHERE active=true AND provider='google' AND lower(employee_name)=lower($1) LIMIT 1",[employee]);
+      calendarId=String(wq.rows[0]&&wq.rows[0].calendar_id||'').trim();
+    }
+    if(!calendarId)throw new Error('Für '+employee+' ist keine Google Kalender-ID hinterlegt.');
+    let gid=await resolveGoogleEventId(calendarId,eventId);
+    if(!gid)gid=eventId;
+    try{
+      await google.calendarApi('DELETE','calendars/'+encodeURIComponent(calendarId)+'/events/'+encodeURIComponent(gid));
+      return {ok:true,deleted:true,eventId:gid};
+    }catch(e){
+      const msg=String(e&&e.message||e);
+      if(/404|not found|nicht gefunden/i.test(msg))return {ok:true,deleted:false,missing:true,eventId:gid};
+      throw e;
+    }
+  }
+
   async function getEmployeeCalendarEvents(employee,startDate,days){
     if(!await authorized())throw new Error('Google Kalender ist noch nicht direkt mit Railway verbunden.');
     employee=String(employee||'').trim();startDate=String(startDate||'').trim();days=Math.max(1,Math.min(3,Number(days)||3));
@@ -372,7 +398,7 @@ function createCalendarDirect(opts){
     if(timer.unref)timer.unref();
     setTimeout(()=>flush().catch(e=>console.error('CALENDAR_SYNC startup',e.message)),20000);
   }
-  return {init,start,authorized,status,getPlannerEvents,getEmployeeCalendarEvents,findExternalSynthetic,transferExternalToPlanner,enqueueSync,enqueueDelete,syncEventNow,deleteMappingsNow,saveExternal,deleteExternal,workerCalendar,resolveGoogleEventId};
+  return {init,start,authorized,status,getPlannerEvents,getEmployeeCalendarEvents,deleteEmployeeCalendarEvent,findExternalSynthetic,transferExternalToPlanner,enqueueSync,enqueueDelete,syncEventNow,deleteMappingsNow,saveExternal,deleteExternal,workerCalendar,resolveGoogleEventId};
 }
 
 module.exports={createCalendarDirect};
