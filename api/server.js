@@ -1472,7 +1472,6 @@ const CACHEABLE_ACTIONS = new Set([
   'getVacationAccount',
   'getVacationAccounts',
   'getTimeBankAccount',
-  'getEmployeeCalendarEvents',
   'getRegieReports',
   'getOfferStatistics',
   'getOwnReminders',
@@ -10417,6 +10416,26 @@ async function getEmployeesFromSnapshot() {
 }
 
 
+async function filterTransferredEmployeeCalendarEventsV28(employee,rows){
+  rows=Array.isArray(rows)?rows:[];
+  if(!pool||!rows.length)return rows;
+  const ids=[...new Set(rows.map(e=>String(e&&e.id||'').trim()).filter(Boolean))];
+  if(!ids.length)return rows;
+  const q=await pool.query(
+    `SELECT source_calendar_event_id AS event_id
+       FROM time_entries_shadow
+      WHERE employee_name=$1 AND source_calendar_event_id = ANY($2::text[])
+      UNION
+     SELECT calendar_event_id AS event_id
+       FROM inquiry_offers_shadow
+      WHERE changed_by=$1 AND calendar_event_id = ANY($2::text[])
+        AND COALESCE(status,'')<>'Verworfen'`,
+    [String(employee||''),ids]
+  );
+  const used=new Set(q.rows.map(r=>String(r.event_id||'').trim()).filter(Boolean));
+  return used.size?rows.filter(e=>!used.has(String(e&&e.id||'').trim())):rows;
+}
+
 function directMinimumWageRead(body){
   const date=berlinDateOnly(body&&body.date||new Date());
   const table=[
@@ -10578,7 +10597,7 @@ async function tryDirectPostgresWrite(action,body){
     const payrollAction=String(body&&body.payrollAction||'').trim();
     if(!['Freigegeben','Uebergeben','Wieder geoeffnet'].includes(payrollAction))return null;
   }
-  const employeeSelfAction=['confirmEmployeeAssignment','reportEmployeeAssignmentIssue','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','saveEmployeeLocationV10'].includes(action);
+  const employeeSelfAction=['confirmEmployeeAssignment','reportEmployeeAssignmentIssue','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','saveEmployeeLocationV10','createEmployeeInspectionRequestV10'].includes(action);
   const session=await localSessionForBody(body,!employeeSelfAction);if(!session)return null;
   const by=String(session.employee||body.employee||'').trim(),nowIso=new Date().toISOString();
   const client=await pool.connect();
@@ -10868,6 +10887,7 @@ async function tryDirectPostgresWrite(action,body){
         ok:true,offerId,status:'Zu erstellen',customer,firstName,lastName,street,postalCode,city,
         email,mobile,landline,description,calendarEventId,createdAt:nowIso,createdBy:by
       };
+      if(calendarEventId)calendarAfterCommit={operation:'employee-delete',employee:by,eventId:calendarEventId};
       skipLegacySync=true;
     }else if(action==='createInspectionOffer'){
       const item=body.item||{},ev=item.event||{};
@@ -13279,7 +13299,8 @@ async function proxyLegacy(req, res, body) {
         const start=String(body.startDate||''),days=Math.max(1,Math.min(3,Number(body.days)||3));
         if(!validIsoDateText(start))return json(res,400,{ok:false,error:'Kalenderstartdatum ist ungültig.'},req);
         const data=await calendarDirect.getEmployeeCalendarEvents(session.employee,start,days);
-        return json(res,200,{ok:true,data,source:'google-calendar+postgres'},req);
+        const filtered=await filterTransferredEmployeeCalendarEventsV28(session.employee,data);
+        return json(res,200,{ok:true,data:filtered,source:'google-calendar+postgres'},req);
       }
     }catch(e){
       console.error('Direct employee calendar read failed; retaining legacy fallback:',e.message);
@@ -13390,6 +13411,15 @@ async function proxyLegacy(req, res, body) {
     });
     raw = await upstream.text();
     try { parsed = JSON.parse(raw); } catch (_e) {}
+    if(action==='getEmployeeCalendarEvents'&&upstream.status===200&&parsed&&parsed.ok!==false&&Array.isArray(parsed.data)){
+      try{
+        const session=await localSessionForBody(body,false);
+        if(session){
+          parsed.data=await filterTransferredEmployeeCalendarEventsV28(session.employee,parsed.data);
+          raw=JSON.stringify(parsed);
+        }
+      }catch(e){console.error('Employee calendar transfer filter failed:',e.message);}
+    }
     if (pool) {
       if (upstream.status === 200 && parsed && parsed.ok !== false) {
         refreshSessionFromSuccessfulRequest(action,body,parsed).catch(e=>console.error('railway session bridge failed',e.message));
