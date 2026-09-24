@@ -95,6 +95,12 @@ async function handleSync(area){
  if(target)target.innerHTML='<div class="status info">Gmail wird synchronisiert …</div>';
  try{
    const r=await req({action:'syncFinanceGmailV10'});
+   if(r&&r.needsConfiguration){
+     throw new Error('Google-OAuth ist auf Railway noch nicht vollständig konfiguriert. Client-ID und Client-Secret fehlen in der Produktionsumgebung.');
+   }
+   if(r&&r.needsConnect&&!r.authUrl){
+     throw new Error('Gmail ist noch nicht mit Railway verbunden. Die Google-Freigabe kann derzeit nicht gestartet werden.');
+   }
    state.reconnectUrl=(r&&(r.needsReconnect||r.needsConnect)&&r.authUrl)?String(r.authUrl):'';
    if(target){
      target.innerHTML='<div class="status ok">Synchronisierung abgeschlossen: '+
