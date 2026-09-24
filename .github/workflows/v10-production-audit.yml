@@ -36,6 +36,14 @@ jobs:
           ])
 
           assets=sorted(set(re.findall(r'(?:src|href)="\./([^"?]+\.(?:js|css|png|json))(?:\?[^"]*)?"',html)))
+          required={'core-9.0-final.js','customerflow-9.0-final.js','payroll-9.0-final.js','ui-9.0-final.js','employee-controls-10.0.js','inspection-quick-10.0.js','day-total-display-10.0.js','app-5.0.css'}
+          missing_required=sorted(required-set(assets))
+          if missing_required:
+              raise SystemExit('Required production assets missing from index: '+repr(missing_required))
+          if "navigator.serviceWorker.register('./sw-9.0-final.js',{updateViaCache:'none'})" not in html:
+              raise SystemExit('Stable service worker registration missing or corrupted')
+          if html.count('<script') != html.count('</script>'):
+              raise SystemExit('Unbalanced script tags in index.html')
           missing_routes=[p for p in assets if ("'/"+p+"'") not in server]
           if missing_routes:
               raise SystemExit('Assets loaded by index but not served: '+repr(missing_routes))
