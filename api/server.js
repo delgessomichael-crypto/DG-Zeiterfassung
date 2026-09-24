@@ -13265,7 +13265,7 @@ async function proxyLegacy(req, res, body) {
       console.error('Direct Postgres read failed:',action,e.message);
       if(FINAL_CUTOVER)return json(res,500,{ok:false,error:'Railway-Lesezugriff fehlgeschlagen ('+action+'). Bitte erneut versuchen.'},req);
     }
-    if(FINAL_CUTOVER)return json(res,400,{ok:false,error:'Railway-Anfrage konnte nicht ausgeführt werden ('+action+'). Sitzung oder Eingaben prüfen.'},req);
+    if(FINAL_CUTOVER){console.warn('FINAL_CUTOVER_READ_REJECT action='+action);return json(res,400,{ok:false,error:'Railway-Anfrage konnte nicht ausgeführt werden ('+action+'). Sitzung oder Eingaben prüfen.'},req);}
   }
   if (DIRECT_POSTGRES_WRITE_ACTIONS.has(action)) {
     try {
@@ -13276,7 +13276,7 @@ async function proxyLegacy(req, res, body) {
           legacySync:directWrite.outboxId?'queued':(FINAL_CUTOVER?'disabled-cutover':'already-synced')
         },req);
       }
-      if(FINAL_CUTOVER&&!googleRetainedActionV24(action))return json(res,400,{ok:false,error:'Railway-Schreibzugriff konnte nicht ausgeführt werden ('+action+'). Sitzung oder Eingaben prüfen.'},req);
+      if(FINAL_CUTOVER&&!googleRetainedActionV24(action)){console.warn('FINAL_CUTOVER_WRITE_REJECT action='+action);return json(res,400,{ok:false,error:'Railway-Schreibzugriff konnte nicht ausgeführt werden ('+action+'). Sitzung oder Eingaben prüfen.'},req);}
     } catch(e) {
       console.error('Direct Postgres write failed:',action,e.message);
       return json(res,400,{ok:false,error:e.message},req);
