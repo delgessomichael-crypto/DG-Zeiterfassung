@@ -10418,7 +10418,7 @@ function directMinimumWageRead(body){
 
 const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'createOwnReminder','saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder',
-  'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus','saveOfferCreatedWithReminder','createInspectionOffer',
+  'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus','saveOfferCreatedWithReminder','createInspectionOffer','createEmployeeInspectionRequestV10',
   'mergeRegieObjects','saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed','setMonthClosureStatus','setPayrollMonthStatus','completePayrollCycle','forceCompletePayrollCycle',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry','inquiryToOffer',
@@ -10811,6 +10811,51 @@ async function tryDirectPostgresWrite(action,body){
         };
       }
       if(dayWasClosed&&isSupplement){result.supplementSaved=true;result.supplementEntryId=id;}
+    }else if(action==='createEmployeeInspectionRequestV10'){
+      const item=body.item||{};
+      const lastName=String(item.lastName||item.name||'').trim();
+      const firstName=String(item.firstName||'').trim();
+      const street=String(item.street||'').trim();
+      const postalCode=String(item.postalCode||item.zip||'').trim();
+      const city=String(item.city||'').trim();
+      const email=String(item.email||'').trim();
+      const mobile=String(item.mobile||'').trim();
+      const landline=String(item.landline||item.phone||'').trim();
+      const description=String(item.description||'').trim();
+      const calendarEventId=String(item.calendarEventId||item.sourceCalendarEventId||'').trim();
+      if(!lastName&&!firstName)throw new Error('Bitte Name oder Vorname eintragen.');
+      if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new Error('E-Mail-Adresse ist ungültig.');
+      if(postalCode&&!/^\d{5}$/.test(postalCode))throw new Error('PLZ muss fünfstellig sein.');
+      if(!description)throw new Error('Bitte eine Auftragsbeschreibung eintragen.');
+      const customer=[firstName,lastName].filter(Boolean).join(' ').trim()||lastName||firstName;
+      const address=[street,[postalCode,city].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+      const phone=mobile||landline;
+      const details=[
+        description,
+        address?'Adresse: '+address:'',
+        mobile?'Mobil: '+mobile:'',
+        landline?'Festnetz: '+landline:'',
+        email?'E-Mail: '+email:''
+      ].filter(Boolean).join('\n');
+      const offerId=String(body.offerId||'').trim()||('BES-MA-'+crypto.randomUUID());
+      await client.query(
+        `INSERT INTO inquiry_offers_shadow(
+           offer_id,inquiry_id,customer,phone,email,description,source,created_at_text,status,
+           changed_at_text,changed_by,calendar_event_id,inspection_date,inspection_hours,activity_note,shadow_updated_at
+         ) VALUES($1,'',$2,$3,$4,$5,'Besichtigung Mitarbeiter',$6,'Zu erstellen',$6,$7,$8,$9,0,$10,now())
+         ON CONFLICT(offer_id) DO UPDATE SET
+           customer=EXCLUDED.customer,phone=EXCLUDED.phone,email=EXCLUDED.email,
+           description=EXCLUDED.description,source=EXCLUDED.source,status='Zu erstellen',
+           changed_at_text=EXCLUDED.changed_at_text,changed_by=EXCLUDED.changed_by,
+           calendar_event_id=EXCLUDED.calendar_event_id,inspection_date=EXCLUDED.inspection_date,
+           activity_note=EXCLUDED.activity_note,shadow_updated_at=now()`,
+        [offerId,customer,phone,email,details,nowIso,by,calendarEventId,berlinTodayIso(),description]
+      );
+      result={
+        ok:true,offerId,status:'Zu erstellen',customer,firstName,lastName,street,postalCode,city,
+        email,mobile,landline,description,calendarEventId,createdAt:nowIso,createdBy:by
+      };
+      skipLegacySync=true;
     }else if(action==='createInspectionOffer'){
       const item=body.item||{},ev=item.event||{};
       const customer=String(item.customer||'').trim(),date=berlinDateOnly(item.date||berlinTodayIso());
