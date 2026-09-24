@@ -285,7 +285,7 @@ function createGmailDirect(opts){
   async function backfillInquiryAttachments(token){
     const q=await pool.query(
       `SELECT id,gmail_ids,attachments_json FROM customer_inquiries_shadow
-        WHERE COALESCE(gmail_ids,'')<>'' ORDER BY shadow_updated_at DESC LIMIT 500`
+        WHERE COALESCE(gmail_ids,'')<>'' ORDER BY shadow_updated_at DESC LIMIT 20`
     );
     let updated=0,failed=0;
     for(const row of q.rows){
@@ -314,7 +314,7 @@ function createGmailDirect(opts){
   async function backfillFinanceAttachments(token){
     const q=await pool.query(
       `SELECT message_id,attachments_json FROM finance_mail_v10
-        WHERE COALESCE(attachments_json,'')<>'' ORDER BY updated_at DESC LIMIT 300`
+        WHERE COALESCE(attachments_json,'')<>'' ORDER BY updated_at DESC LIMIT 20`
     );
     let updated=0,failed=0;
     for(const row of q.rows){
@@ -762,7 +762,10 @@ function createGmailDirect(opts){
     try{
       const token=await accessToken(),query='in:inbox newer_than:30d -category:promotions -category:social';
       let pageToken='',ids=[];
-      for(let page=0;page<5;page++){
+      // Maximal die 200 neuesten Inbox-Mails pro Lauf betrachten. Weitere Mails
+      // werden in den naechsten 20-Minuten-Laeufen nachgezogen, statt Googles
+      // Minutenquota mit einem Vollscan zu ueberfahren.
+      for(let page=0;page<2;page++){
         const q=new URLSearchParams({q:query,maxResults:'100'});if(pageToken)q.set('pageToken',pageToken);
         const list=await api(token,'messages?'+q.toString());
         ids.push(...(list.messages||[]).map(x=>String(x.id||'')).filter(Boolean));
@@ -774,7 +777,10 @@ function createGmailDirect(opts){
         const kq=await pool.query('SELECT message_id FROM gmail_import_messages_v10 WHERE message_id=ANY($1::text[])',[ids]);
         known=new Set(kq.rows.map(x=>String(x.message_id||'')));
       }
-      const pending=ids.filter(id=>!known.has(id));
+      const pendingAll=ids.filter(id=>!known.has(id));
+      // Pro Lauf hoechstens 50 neue Mails voll laden (inkl. Anhaengen).
+      // So bleiben manuelle und automatische Synchronisation reaktionsschnell.
+      const pending=pendingAll.slice(0,50);
       let imported=0,updated=0,ignored=0,duplicates=known.size,failed=0;const sources={};
       for(const id of pending){
         try{
@@ -785,7 +791,7 @@ function createGmailDirect(opts){
         }catch(e){failed++;console.error('GMAIL_IMPORT message='+id+' error='+e.message);}
       }
       const inquiryAttachmentBackfill=await backfillInquiryAttachments(token);
-      const summary={at:new Date().toISOString(),scanned:ids.length,pending:pending.length,imported,updated,ignored,duplicates,failed,sources,
+      const summary={at:new Date().toISOString(),scanned:ids.length,pending:pending.length,deferred:Math.max(0,pendingAll.length-pending.length),imported,updated,ignored,duplicates,failed,sources,
         attachmentBackfillUpdated:Number(inquiryAttachmentBackfill.updated||0),
         attachmentBackfillFailed:Number(inquiryAttachmentBackfill.failed||0)};
       await pool.query(`INSERT INTO app_meta(key,value) VALUES('gmail_last_sync_v10',$1::jsonb) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,[JSON.stringify(summary)]);
@@ -816,7 +822,11 @@ function createGmailDirect(opts){
       [account,e.ct,e.iv,e.tag,String(t.scope||'')]
     );
     await pool.query('DELETE FROM app_meta WHERE key=$1',['gmail_oauth_state:'+String(state||'')]);
-    setImmediate(()=>Promise.allSettled([sync(),syncFinance()]).then(rows=>rows.forEach(x=>{if(x.status==='rejected')console.error('GMAIL first sync failed',x.reason&&x.reason.message||x.reason);})));
+    setImmediate(async()=>{
+      for(const job of [sync,syncFinance]){
+        try{await job();}catch(e){console.error('GMAIL first sync failed',e&&e.message||e);}
+      }
+    });
     return {ok:true,email:account};
   }
 
@@ -827,8 +837,11 @@ function createGmailDirect(opts){
   }
 
   async function scheduledSync(){
-    const results=await Promise.allSettled([sync(),syncFinance()]);
-    for(const x of results)if(x.status==='rejected')console.error('GMAIL scheduled sync failed',x.reason&&x.reason.message||x.reason);
+    // Gmail-Pfade bewusst nacheinander ausfuehren, damit Anfrage- und
+    // Rechnungssynchronisation nicht gleichzeitig dieselbe User-Quota belasten.
+    for(const job of [sync,syncFinance]){
+      try{await job();}catch(e){console.error('GMAIL scheduled sync failed',e&&e.message||e);}
+    }
   }
   function start(){
     if(timer||!pool) return;
