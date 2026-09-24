@@ -28,26 +28,30 @@ function notice(msg,type){
 }
 function parseContactText(text){
   text=String(text||'');
-  const email=(text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+.[A-Z]{2,}/i)||[''])[0];
-  const phones=[...text.matchAll(/(?:+49|0)[0-9][0-9 -/()]{5,}/g)].map(m=>m[0].trim());
+  const emailMatch=text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  const email=emailMatch?emailMatch[0]:'';
+  const phoneRe=/(?:\+49|0)[0-9][0-9 \-/()]{5,}/g;
+  const phones=[];
+  let m;
+  while((m=phoneRe.exec(text))&&phones.length<2)phones.push(String(m[0]||'').trim());
   return {email,phone1:phones[0]||'',phone2:phones[1]||''};
 }
 function parseAddress(location){
   const s=String(location||'').trim();
-  const m=s.match(/^(.*?)(?:,s*)?(d{5})s+([^,]+)(?:,s*Deutschland)?$/i);
+  const m=s.match(/^(.*?)(?:,\s*)?(\d{5})\s+([^,]+?)(?:,\s*Deutschland)?$/i);
   if(m)return {street:m[1].trim(),postalCode:m[2],city:m[3].trim()};
   return {street:s,postalCode:'',city:''};
 }
 function splitName(title){
   let t=String(title||'').trim();
-  t=t.replace(/^(?:Besichtigung|Termin|Kundentermin|Auftrag)s*[-:·]s*/i,'').trim();
-  const firstPart=t.split(/s+-s+|,s*(?=d{5})/)[0].trim();
+  t=t.replace(/^(?:Besichtigung|Termin|Kundentermin|Auftrag)\s*[-:·]\s*/i,'').trim();
+  const firstPart=t.split(/\s+-\s+|,\s*(?=\d{5}\b)/)[0].trim();
   if(!firstPart)return {firstName:'',lastName:''};
   if(firstPart.includes(',')){
     const p=firstPart.split(',').map(x=>x.trim()).filter(Boolean);
     return {lastName:p[0]||'',firstName:p.slice(1).join(' ')};
   }
-  const p=firstPart.split(/s+/).filter(Boolean);
+  const p=firstPart.split(/\s+/).filter(Boolean);
   if(p.length===1)return {firstName:'',lastName:p[0]};
   return {firstName:p.slice(0,-1).join(' '),lastName:p[p.length-1]};
 }
