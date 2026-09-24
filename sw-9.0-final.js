@@ -1,5 +1,5 @@
 /* DG Zeiterfassung 10.0 - Railway migration cache */
-const CACHE='dg-zeiterfassung-10.0-absence-live-20260924-0710';
+const CACHE='dg-zeiterfassung-10.0-runtime-live-20260924-0725';
 const STATIC=[
   './index.html',
   './app-5.0.css?v=20260918-800-prod1',
@@ -34,9 +34,22 @@ self.addEventListener('fetch',event=>{
     event.respondWith((async()=>{try{return await fetch(req,{cache:'no-store'});}catch(_e){return (await caches.match('./index.html'))||Response.error();}})());
     return;
   }
+  const liveCode=/\.(?:js|css)$/.test(url.pathname);
+  if(liveCode){
+    event.respondWith((async()=>{
+      try{
+        const fresh=await fetch(req,{cache:'no-store'});
+        if(fresh&&fresh.ok){const c=await caches.open(CACHE);c.put(req,fresh.clone()).catch(()=>{});}
+        return fresh;
+      }catch(_e){
+        return (await caches.match(req))||Response.error();
+      }
+    })());
+    return;
+  }
   event.respondWith((async()=>{
     const cached=await caches.match(req);if(cached)return cached;
-    try{const fresh=await fetch(req);if(fresh&&fresh.ok){const c=await caches.open(CACHE);c.put(req,fresh.clone()).catch(()=>{});}return fresh;}
+    try{const fresh=await fetch(req,{cache:'no-store'});if(fresh&&fresh.ok){const c=await caches.open(CACHE);c.put(req,fresh.clone()).catch(()=>{});}return fresh;}
     catch(_e){return Response.error();}
   })());
 });
