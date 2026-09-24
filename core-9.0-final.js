@@ -5822,6 +5822,54 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 /* ===== END DG APP 10 FRONTEND ENHANCEMENTS ===== */
 
+
+/* ===== DG APP 10 STATUS-DAY CARDS ===== */
+(function(){
+'use strict';
+function esc26(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function css26(){
+  if(document.getElementById('dg26StatusDayCss'))return;
+  const s=document.createElement('style');s.id='dg26StatusDayCss';s.textContent=`
+    .dg48-day.dg26-status-only{border-left:7px solid #dc2626!important;background:#fff7f7!important}
+    .dg48-day.dg26-status-only .dg48-day-state{color:#991b1b!important}
+    .dg26-status-badge{display:inline-block;margin:6px 0 3px;padding:4px 9px;border-radius:999px;background:#fee2e2;color:#991b1b;font-weight:900;font-size:12px}
+    .dg26-status-note{margin-top:6px;font-weight:800;color:#991b1b}
+    .dg26-status-only .dg49-hint{display:none!important}
+  `;document.head.appendChild(s);
+}
+function decorate26(rows){
+  const boxes=[...document.querySelectorAll('#dg48DayResult .dg48-days-employee')];
+  (rows||[]).forEach((emp,ei)=>{
+    const cards=[...(boxes[ei]?.querySelectorAll(':scope > .dg48-day-grid > .dg48-day')||[])];
+    (emp.days||[]).forEach((day,di)=>{
+      const card=cards[di];if(!card)return;
+      const status=String(day.status||'Arbeiten');
+      const prohibited=status==='Unerlaubte Abwesenheit'||status==='Unentschuldigte Abwesenheit';
+      if(!prohibited)return;
+      card.classList.add('dg26-status-only');
+      const state=card.querySelector('.dg48-day-state');
+      if(state)state.textContent='🔴 Unerlaubte Abwesenheit';
+      const strong=card.querySelector(':scope > strong');
+      if(strong&&!card.querySelector('.dg26-status-badge'))strong.insertAdjacentHTML('afterend','<div class="dg26-status-badge">Unerlaubte Abwesenheit</div>');
+      const small=card.querySelector(':scope > .muted.small');
+      if(small)small.innerHTML='0,00 Std. · keine Arbeitszeit gutgeschrieben';
+      const hint=card.querySelector('.dg49-hint');if(hint)hint.remove();
+      const detail=card.querySelector('.dg49-detail');
+      if(detail)detail.innerHTML='<div class="dg26-status-note">Vom Büro eingetragen · automatischer Tagesabschluss · 0,00 Std.</div>';
+      card.querySelectorAll('button').forEach(b=>{if(/manuell abschließen/i.test(b.textContent||''))b.remove();});
+    });
+  });
+}
+function install26(){
+  css26();
+  if(typeof window.renderBossDayClosuresV48==='function'&&!window.__dg26StatusWrapped){
+    window.__dg26StatusWrapped=true;const old=window.renderBossDayClosuresV48;
+    window.renderBossDayClosuresV48=function(rows){const r=old.apply(this,arguments);setTimeout(()=>decorate26(rows),0);return r;};
+  }
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install26,0),{once:true});else setTimeout(install26,0);
+})();
+
 /* ===== DG APP 10 FINAL RAILWAY HARDENING ===== */
 (function(){
 'use strict';
