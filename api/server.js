@@ -1312,29 +1312,6 @@ async function initDb() {
   await reconcileLegacyDayClosureDuplicatesV9();
   await initTimeEntriesShadow();
   await repairOfficeAbsenceCreditsV27();
-  try{
-    const diagDates=['2026-09-18','2026-09-21','2026-09-22'];
-    const [st,en,cl]=await Promise.all([
-      pool.query(`SELECT employee_name,status_date,status,credited_hours,credited_hours_missing,source
-                    FROM day_status_shadow WHERE employee_name=$1 AND status_date=ANY($2::text[]) ORDER BY status_date`,
-                 ['Sharifi Habibullah',diagDates]),
-      pool.query(`SELECT id,employee_name,entry_date,customer,start_time,end_time,hours,activity,closed,source_payload
-                    FROM time_entries_shadow WHERE employee_name=$1 AND entry_date=ANY($2::text[]) ORDER BY entry_date,start_time,id`,
-                 ['Sharifi Habibullah',diagDates]),
-      pool.query(`SELECT employee_name,closure_date,gross_total,pause_minutes,net_total,update_reason
-                    FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=ANY($2::text[]) ORDER BY closure_date`,
-                 ['Sharifi Habibullah',diagDates])
-    ]);
-    const boss=await postgresBossDayClosures({year:2026,month:9});
-    const sh=(boss||[]).find(x=>String(x.employee)==='Sharifi Habibullah');
-    const audit=await postgresPayrollAuditNative({year:2026,month:9});
-    const issues=(audit&&audit.issues||[]).filter(x=>String(x.employee)==='Sharifi Habibullah'&&diagDates.includes(String(x.date||'')));
-    console.log('ABSENCE_DIAG_V28 '+JSON.stringify({
-      statuses:st.rows,entries:en.rows,closures:cl.rows,
-      bossDays:(sh&&sh.days||[]).filter(x=>diagDates.includes(String(x.date||''))),
-      payrollIssues:issues
-    }));
-  }catch(e){console.error('ABSENCE_DIAG_V28 failed:',e.message);}
   await initRegieMetadataShadows();
   await bootstrapCompletedCustomerConsolidationV23();
   await initRegieAttachmentsShadow();
