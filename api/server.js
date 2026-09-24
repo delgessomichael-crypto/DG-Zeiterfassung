@@ -10794,6 +10794,8 @@ async function tryDirectPostgresWrite(action,body){
       }
       legacyPayload=Object.assign({},body,{entry:Object.assign({},entry,{employee:by,clientId:id,start,end,hours,photos:[],customerSignature:''})});
       if(FINAL_CUTOVER)skipLegacySync=true;
+      const sourceCalendarEventId=String(entry.sourceCalendarEventId||'').trim();
+      if(sourceCalendarEventId)calendarAfterCommit={operation:'employee-delete',employee:by,eventId:sourceCalendarEventId};
       let completedConsolidation=null;
       if(String(entry.jobStatus||'').trim()==='Abgeschlossen'){
         completedConsolidation=await consolidateCompletedCustomerV10(
@@ -12905,6 +12907,7 @@ async function tryDirectPostgresWrite(action,body){
     try{
       if(calendarAfterCommit.operation==='sync')await calendarDirect.enqueueSync(calendarAfterCommit.eventId);
       else if(calendarAfterCommit.operation==='delete')await calendarDirect.enqueueDelete(calendarAfterCommit.map||{});
+      else if(calendarAfterCommit.operation==='employee-delete')await calendarDirect.deleteEmployeeCalendarEvent(calendarAfterCommit.employee,calendarAfterCommit.eventId);
     }catch(e){console.error('CALENDAR_SYNC queue failed action='+action+' error='+e.message);}
   }
 
