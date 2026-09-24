@@ -861,7 +861,7 @@ CREATE TABLE IF NOT EXISTS railway_sessions (
   chef_access BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  expires_at TIMESTAMPTZ NOT NULL DEFAULT now() + interval '24 hours',
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT now() + interval '3650 days',
   revoked_at TIMESTAMPTZ
 );
 
@@ -1628,10 +1628,10 @@ async function registerRailwaySession(employee,token,chefAccess){
   await pool.query(
     `INSERT INTO railway_sessions(
       token_hash,employee_name,chef_access,created_at,last_seen_at,expires_at,revoked_at
-    ) VALUES($1,$2,$3,now(),now(),now()+interval '24 hours',NULL)
+    ) VALUES($1,$2,$3,now(),now(),now()+interval '3650 days',NULL)
     ON CONFLICT(token_hash) DO UPDATE SET
       employee_name=EXCLUDED.employee_name,chef_access=EXCLUDED.chef_access,
-      last_seen_at=now(),expires_at=now()+interval '24 hours',revoked_at=NULL`,
+      last_seen_at=now(),expires_at=now()+interval '3650 days',revoked_at=NULL`,
     [tokenHash(token),String(employee),Boolean(chefAccess)]
   );
   return true;
@@ -1678,7 +1678,7 @@ async function localSessionForBody(body,requireChef){
   }
   if(requireChef&&!chefAccess)return null;
   pool.query(
-    'UPDATE railway_sessions SET last_seen_at=now() WHERE token_hash=$1',
+    "UPDATE railway_sessions SET last_seen_at=now(),expires_at=now()+interval '3650 days' WHERE token_hash=$1",
     [h]
   ).catch(()=>{});
   return {employee:String(row.employee_name),chefAccess};
