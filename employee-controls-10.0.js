@@ -3,7 +3,7 @@
 'use strict';
 
 const VERSION='20260924-employee-controls-final1';
-const state=window.DGEmployeeControls=window.DGEmployeeControls||{installed:false,pad:null,noCustomer:false,version:VERSION};
+const state=window.DGEmployeeControls=window.DGEmployeeControls||{installed:false,pad:null,version:VERSION};
 
 function el(id){return document.getElementById(id);}
 function status(text,type){
@@ -12,18 +12,6 @@ function status(text,type){
   }
   const s=el('entryStatus');if(!s)return;
   s.className='status '+(type||'info');s.textContent=text||'';
-}
-function setNoCustomer(value){
-  state.noCustomer=!!value;
-  try{noCustomerPresent=state.noCustomer;}catch(_e){window.noCustomerPresent=state.noCustomer;}
-  const b=el('noCustomerBtn');
-  if(b){
-    b.classList.toggle('dg-no-customer-active',state.noCustomer);
-    b.textContent=state.noCustomer?'✓ Kein Kunde vor Ort':'Kein Kunde vor Ort';
-    b.setAttribute('aria-pressed',state.noCustomer?'true':'false');
-  }
-  const wrap=el('customerSignatureWrap');
-  if(wrap)wrap.classList.toggle('dg-no-customer-selected',state.noCustomer);
 }
 function showTransferConfirmation(){
   const text='✅ Auftrag wurde an das Büro übertragen und ist unter „Einträge des Tages“ sichtbar.';
@@ -47,27 +35,48 @@ function installPad(){
   const wrap=el('customerSignatureWrap'),oldCanvas=el('customerSignature');
   if(!wrap||!oldCanvas)return null;
 
-  // Replace the canvas to remove every legacy pointer/touch listener.
   const canvas=oldCanvas.cloneNode(false);
   canvas.id='customerSignature';
   canvas.dataset.dgFinalPad=VERSION;
   oldCanvas.replaceWith(canvas);
 
-  wrap.classList.add('active','dg-final-signature');
-  const lock=wrap.querySelector('.signature-lock');
-  if(lock)lock.remove();
+  let lock=wrap.querySelector('.signature-lock');
+  if(!lock){
+    lock=document.createElement('div');
+    lock.className='signature-lock';
+    wrap.appendChild(lock);
+  }
+  lock.textContent='Zum Unterschreiben zweimal tippen';
+  wrap.classList.remove('active');
+  wrap.classList.add('dg-final-signature');
+
   const hint=wrap.nextElementSibling;
   if(hint&&hint.classList&&hint.classList.contains('signature-hint')){
-    hint.textContent='Hier direkt mit Finger oder Stift unterschreiben.';
+    hint.textContent='Beim Scrollen bleibt das Feld gesperrt. Zum Unterschreiben zweimal tippen.';
   }
 
   const ctx=canvas.getContext('2d');
-  let drawing=false,signed=false,pointerId=null;
-  canvas.style.touchAction='none';
-  canvas.style.pointerEvents='auto';
+  let drawing=false,signed=false,pointerId=null,active=false,lastTap=0,relockTimer=0;
+  canvas.style.touchAction='auto';
+  canvas.style.pointerEvents='none';
   canvas.style.width='100%';
   canvas.style.height='180px';
 
+  function setActive(v){
+    active=!!v;
+    wrap.classList.toggle('active',active);
+    canvas.style.pointerEvents=active?'auto':'none';
+    canvas.style.touchAction=active?'none':'auto';
+    if(hint&&hint.classList&&hint.classList.contains('signature-hint')){
+      hint.textContent=active
+        ?'Unterschrift aktiv – jetzt unterschreiben.'
+        :'Beim Scrollen bleibt das Feld gesperrt. Zum Unterschreiben zweimal tippen.';
+    }
+  }
+  function scheduleRelock(){
+    clearTimeout(relockTimer);
+    relockTimer=setTimeout(()=>setActive(false),2500);
+  }
   function paintConfig(){
     const ratio=window.devicePixelRatio||1;
     ctx.setTransform(ratio,0,0,ratio,0,0);
@@ -96,9 +105,9 @@ function installPad(){
     return {x:ev.clientX-r.left,y:ev.clientY-r.top};
   }
   function begin(ev){
-    if(ev.isPrimary===false)return;
+    if(!active||ev.isPrimary===false)return;
     ev.preventDefault();ev.stopPropagation();
-    setNoCustomer(false);
+    clearTimeout(relockTimer);
     drawing=true;signed=true;pointerId=ev.pointerId;
     try{canvas.setPointerCapture(pointerId);}catch(_e){}
     const p=point(ev);
@@ -106,7 +115,7 @@ function installPad(){
     if(hint&&hint.classList&&hint.classList.contains('signature-hint'))hint.textContent='Unterschrift erfasst.';
   }
   function move(ev){
-    if(!drawing||ev.pointerId!==pointerId)return;
+    if(!drawing||!active||ev.pointerId!==pointerId)return;
     ev.preventDefault();ev.stopPropagation();
     const p=point(ev);ctx.lineTo(p.x,p.y);ctx.stroke();
   }
@@ -117,25 +126,32 @@ function installPad(){
     drawing=false;
     try{if(pointerId!==null&&canvas.hasPointerCapture(pointerId))canvas.releasePointerCapture(pointerId);}catch(_e){}
     pointerId=null;
+    scheduleRelock();
   }
+
+  const unlock=ev=>{
+    if(ev){ev.preventDefault();ev.stopPropagation();}
+    const now=Date.now();
+    if(now-lastTap<550){
+      lastTap=0;
+      setActive(true);
+    }else{
+      lastTap=now;
+    }
+  };
+  lock.addEventListener('pointerup',unlock,{passive:false});
+  lock.addEventListener('click',ev=>{ev.preventDefault();ev.stopPropagation();});
 
   if(window.PointerEvent){
     canvas.addEventListener('pointerdown',begin,{passive:false});
     canvas.addEventListener('pointermove',move,{passive:false});
     canvas.addEventListener('pointerup',finish,{passive:false});
     canvas.addEventListener('pointercancel',finish,{passive:false});
-  }else{
-    let mouseDown=false;
-    canvas.addEventListener('mousedown',ev=>{mouseDown=true;begin({clientX:ev.clientX,clientY:ev.clientY,pointerId:1,isPrimary:true,preventDefault:()=>ev.preventDefault(),stopPropagation:()=>ev.stopPropagation()});});
-    canvas.addEventListener('mousemove',ev=>{if(mouseDown)move({clientX:ev.clientX,clientY:ev.clientY,pointerId:1,preventDefault:()=>ev.preventDefault(),stopPropagation:()=>ev.stopPropagation()});});
-    window.addEventListener('mouseup',ev=>{if(mouseDown){mouseDown=false;finish({pointerId:1,preventDefault:()=>ev.preventDefault(),stopPropagation:()=>{}});}});
-    canvas.addEventListener('touchstart',ev=>{const t=ev.touches[0];if(t)begin({clientX:t.clientX,clientY:t.clientY,pointerId:1,isPrimary:true,preventDefault:()=>ev.preventDefault(),stopPropagation:()=>ev.stopPropagation()});},{passive:false});
-    canvas.addEventListener('touchmove',ev=>{const t=ev.touches[0];if(t)move({clientX:t.clientX,clientY:t.clientY,pointerId:1,preventDefault:()=>ev.preventDefault(),stopPropagation:()=>ev.stopPropagation()});},{passive:false});
-    canvas.addEventListener('touchend',ev=>finish({pointerId:1,preventDefault:()=>ev.preventDefault(),stopPropagation:()=>ev.stopPropagation()}),{passive:false});
   }
 
   canvas.addEventListener('contextmenu',ev=>ev.preventDefault());
   resize(false);
+  setActive(false);
 
   let resizeTimer=0;
   window.addEventListener('resize',()=>{
@@ -145,12 +161,12 @@ function installPad(){
 
   const pad={
     resize(){resize(true);},
-    lock(){},
+    lock(){setActive(false);},
     clear(){
+      clearTimeout(relockTimer);
       drawing=false;pointerId=null;
       ctx.clearRect(0,0,canvas.width,canvas.height);
-      signed=false;
-      if(hint&&hint.classList&&hint.classList.contains('signature-hint'))hint.textContent='Hier direkt mit Finger oder Stift unterschreiben.';
+      signed=false;setActive(false);
     },
     hasSignature(){return signed;},
     dataUrl(){return signed?canvas.toDataURL('image/png'):'';}
@@ -159,7 +175,6 @@ function installPad(){
   try{customerPad=pad;}catch(_e){window.customerPad=pad;}
   return pad;
 }
-
 function replaceButton(id,handler){
   const old=el(id);if(!old)return null;
   const btn=old.cloneNode(true);
@@ -176,21 +191,10 @@ function replaceButton(id,handler){
 function clearSignature(){
   const pad=state.pad||installPad();
   if(pad)pad.clear();
-  setNoCustomer(false);
-  status('Unterschrift gelöscht. Bitte neu unterschreiben oder „Kein Kunde vor Ort“ wählen.','info');
-}
-function noCustomer(){
-  const pad=state.pad||installPad();
-  if(pad)pad.clear();
-  setNoCustomer(true);
-  status('✅ Kein Kunde vor Ort – die Übertragung ist ohne Kundenunterschrift freigegeben.','ok');
+  status('Unterschrift gelöscht. Die Unterschrift ist für die Übertragung optional.','info');
 }
 async function transfer(){
   const pad=state.pad||installPad();
-  if(!state.noCustomer&&!(pad&&pad.hasSignature())){
-    status('❌ Bitte zuerst unterschreiben oder „Kein Kunde vor Ort“ wählen.','error');
-    return;
-  }
   const btn=el('transferToOfficeBtn');
   if(btn){btn.disabled=true;btn.dataset.oldText=btn.textContent;btn.textContent='Wird an Büro übertragen …';}
   const before=el('entryStatus')?String(el('entryStatus').textContent||''):'';
@@ -198,12 +202,9 @@ async function transfer(){
     if(typeof window.saveEntry!=='function')throw new Error('Übertragungsfunktion wurde nicht geladen.');
     await window.saveEntry();
     const s=el('entryStatus');
-    const ok=!!(s&&s.classList.contains('ok'));
-    if(ok){
-      setNoCustomer(false);
+    const failed=!!(s&&(s.classList.contains('error')||/^❌/.test(String(s.textContent||'').trim())));
+    if(!failed){
       showTransferConfirmation();
-    }else if(s&&String(s.textContent||'')===before){
-      status('❌ Übertragung wurde nicht bestätigt. Bitte Eingaben prüfen.','error');
     }
   }catch(e){
     status('❌ Auftrag konnte nicht übertragen werden: '+(e&&e.message?e.message:'Unbekannter Fehler.'),'error');
@@ -220,14 +221,11 @@ function install(){
   installPad();
 
   replaceButton('clearCustomerSignatureBtn',clearSignature);
-  replaceButton('noCustomerBtn',noCustomer);
   replaceButton('transferToOfficeBtn',transfer);
 
-  setNoCustomer(false);
   const confirm=el('officeTransferConfirm');
   if(confirm){confirm.className='hidden';confirm.textContent='';}
   window.dgFinalClearCustomerSignature=clearSignature;
-  window.dgFinalMarkNoCustomer=noCustomer;
   window.dgFinalTransferToOffice=transfer;
 }
 
