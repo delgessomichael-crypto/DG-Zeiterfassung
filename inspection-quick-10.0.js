@@ -1,19 +1,14 @@
-/* DG App 10 - Chef quick inspection request */
+/* DG App 10 - employee inspection request */
 (function(){
 'use strict';
 
-const V='20260924-1118-inspection-quick1';
+const V='20260924-1235-inspection-all1';
 const $=id=>document.getElementById(id);
 const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 function chefAllowed(){
-  try{
-    if(localStorage.getItem('dg_chef_access')==='1')return true;
-    if(typeof window.canAccessBoss==='function'&&window.canAccessBoss())return true;
-    if(typeof canAccessBoss==='function'&&canAccessBoss())return true;
-  }catch(_e){}
-  const boss=document.getElementById('bossTab');
-  return !!(boss&&!boss.classList.contains('hidden')&&boss.offsetParent!==null);
+  // Besichtigungstermine stehen allen angemeldeten Mitarbeitern zur Verfügung.
+  try{return !!String(localStorage.getItem('dg_employee')||'').trim();}catch(_e){return false;}
 }
 function apiPayload(extra){
   const employee=localStorage.getItem('dg_employee')||'';
@@ -150,7 +145,7 @@ function toggleSpeech(){
   recognition.start();
 }
 async function submit(){
-  if(!chefAllowed()){notice('Diese Funktion ist nur mit Chefzugang verfügbar.','error');return;}
+  if(!chefAllowed()){notice('Bitte erneut als Mitarbeiter anmelden.','error');return;}
   const item={
     lastName:String($('inspectionLastName')?.value||'').trim(),
     firstName:String($('inspectionFirstName')?.value||'').trim(),
@@ -173,7 +168,16 @@ async function submit(){
     if(!fn)throw new Error('API ist noch nicht bereit.');
     const r=await fn(apiPayload({action:'createEmployeeInspectionRequestV10',item}));
     notice('✅ Besichtigung wurde an das Büro übertragen und steht unter „Angebote zu erstellen“.','ok');
+    if(item.calendarEventId){
+      try{
+        if(typeof window.removeCalendarEventLocally==='function')window.removeCalendarEventLocally(item.calendarEventId);
+        else if(Array.isArray(window.__dgCalendarEvents)){
+          window.__dgCalendarEvents=window.__dgCalendarEvents.filter(e=>String(e&&e.id||'')!==item.calendarEventId);
+        }
+      }catch(_e){}
+    }
     if(typeof window.dg60RefreshOfferCounts==='function')window.dg60RefreshOfferCounts(true).catch(()=>{});
+    if(typeof window.loadCalendarEvents==='function')window.loadCalendarEvents().catch(()=>{});
     setTimeout(()=>{closeModal();clearForm();},1400);
     return r;
   }catch(e){
