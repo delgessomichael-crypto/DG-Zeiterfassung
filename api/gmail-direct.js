@@ -506,6 +506,7 @@ function createGmailDirect(opts){
   const FINANCE_LABEL='AAA - Erhaltene Rechnungen';
   const TAX_LABEL='Steuerberaterin Frau Busse';
   const TAX_MAIL='kontakt@buchhaltung-busse.de';
+  const financeLabelCache=new Map();
 
   function hasModifyScope(r){
     const s=String(r&&r.scope||'');
@@ -527,11 +528,19 @@ function createGmailDirect(opts){
     return Array.isArray(x.labels)?x.labels:[];
   }
   async function ensureLabel(token,name){
+    const cacheKey=String(name||'');
+    if(financeLabelCache.has(cacheKey))return financeLabelCache.get(cacheKey);
     const labels=await gmailLabels(token);
-    const hit=labels.find(x=>String(x.name||'')===String(name));
-    if(hit)return String(hit.id||'');
-    const made=await apiJson(token,'POST','labels',{name:String(name),labelListVisibility:'labelShow',messageListVisibility:'show'});
-    return String(made.id||'');
+    const hit=labels.find(x=>String(x.name||'')===cacheKey);
+    if(hit){
+      const id=String(hit.id||'');
+      if(id)financeLabelCache.set(cacheKey,id);
+      return id;
+    }
+    const made=await apiJson(token,'POST','labels',{name:cacheKey,labelListVisibility:'labelShow',messageListVisibility:'show'});
+    const id=String(made.id||'');
+    if(id)financeLabelCache.set(cacheKey,id);
+    return id;
   }
   async function moveToFinanceLabel(token,messageId,labelName){
     const labelId=await ensureLabel(token,labelName);
@@ -569,9 +578,15 @@ function createGmailDirect(opts){
     if(!configured())return {ok:true,configured:false,connected:false,needsConfiguration:true,redirectUri};
     const r=await row();if(!r)return {ok:true,configured:true,connected:false,needsConnect:true,redirectUri};
     const canModify=hasModifyScope(r);
-    const token=await accessToken(),query='in:inbox -category:promotions -category:social';
+    // Nur echte Rechnungs-/Steuerberater-Kandidaten aus Gmail laden. Der alte Vollscan
+    // des gesamten Posteingangs konnte beim ersten Lauf Googles Minutenquota ausloesen.
+    const token=await accessToken();
+    const query='in:inbox -category:promotions -category:social {from:'+TAX_MAIL+
+      ' subject:rechnung subject:invoice subject:gutschrift subject:mahnung subject:zahlungserinnerung'+
+      ' subject:honorarrechnung subject:beleg filename:rechnung filename:invoice filename:gutschrift'+
+      ' filename:mahnung filename:zahlungserinnerung filename:honorarrechnung filename:beleg}';
     let pageToken='',ids=[];
-    for(let page=0;page<10;page++){
+    for(let page=0;page<3;page++){
       const q=new URLSearchParams({q:query,maxResults:'100'});if(pageToken)q.set('pageToken',pageToken);
       const list=await api(token,'messages?'+q.toString());
       ids.push(...(list.messages||[]).map(x=>String(x.id||'')).filter(Boolean));
