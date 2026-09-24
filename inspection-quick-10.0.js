@@ -7,7 +7,13 @@ const $=id=>document.getElementById(id);
 const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 function chefAllowed(){
-  return localStorage.getItem('dg_chef_access')==='1';
+  try{
+    if(localStorage.getItem('dg_chef_access')==='1')return true;
+    if(typeof window.canAccessBoss==='function'&&window.canAccessBoss())return true;
+    if(typeof canAccessBoss==='function'&&canAccessBoss())return true;
+  }catch(_e){}
+  const boss=document.getElementById('bossTab');
+  return !!(boss&&!boss.classList.contains('hidden')&&boss.offsetParent!==null);
 }
 function apiPayload(extra){
   const employee=localStorage.getItem('dg_employee')||'';
@@ -215,10 +221,14 @@ function ensureButton(){
   if(!wrap){
     wrap=document.createElement('div');
     wrap.id='inspectionQuickLauncher';
-    wrap.className='inspection-quick-launcher';
+    wrap.className='inspection-quick-launcher hidden';
     wrap.innerHTML='<button type="button" class="btn success" id="inspectionQuickBtn">Besichtigungstermin</button>';
     tabs.insertAdjacentElement('afterend',wrap);
-    $('inspectionQuickBtn').addEventListener('click',openModal);
+  }
+  const btn=$('inspectionQuickBtn');
+  if(btn&&!btn.dataset.dgInspectionBound){
+    btn.dataset.dgInspectionBound='1';
+    btn.addEventListener('click',openModal);
   }
   wrap.classList.remove('hidden');
 }
