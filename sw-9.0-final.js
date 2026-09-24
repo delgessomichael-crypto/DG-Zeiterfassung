@@ -1,9 +1,9 @@
 /* DG Zeiterfassung 10.0 - Railway migration cache */
-const CACHE='dg-zeiterfassung-10.0-time-speech-day-20260924-1425';
+const CACHE='dg-zeiterfassung-10.0-login-persist-20260924-1438';
 const STATIC=[
   './index.html',
   './app-5.0.css?v=20260924-1130-inspection-quick1',
-  './core-9.0-final.js?v=20260924-1305-login-safe1',
+  './core-9.0-final.js?v=20260924-1438-login-persist1',
   './employee-controls-10.0.js?v=20260924-1100-signature-optional2',
   './inspection-quick-10.0.js?v=20260924-1425-inspection-time-speech2',
   './day-total-display-10.0.js?v=20260924-1425-day-total-clear1',
