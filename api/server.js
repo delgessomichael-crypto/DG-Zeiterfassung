@@ -10371,6 +10371,26 @@ async function tryDirectPostgresRead(action,body){
     const session=await localSessionForBody(body,true);if(!session)return null;
     return gmailDirect.syncForUser(session.employee);
   }
+  if(action==='getFinanceOverviewV10'){
+    const session=await localSessionForBody(body,true);if(!session)return null;
+    return gmailDirect.financeOverview();
+  }
+  if(action==='syncFinanceGmailV10'){
+    const session=await localSessionForBody(body,true);if(!session)return null;
+    return gmailDirect.financeSyncForUser(session.employee);
+  }
+  if(action==='getFinanceInboxV10'){
+    const session=await localSessionForBody(body,true);if(!session)return null;
+    return gmailDirect.financeList('incoming','open');
+  }
+  if(action==='getTaxAdvisorInboxV10'){
+    const session=await localSessionForBody(body,true);if(!session)return null;
+    return gmailDirect.financeList('tax','open');
+  }
+  if(action==='getFinanceArchiveV10'){
+    const session=await localSessionForBody(body,true);if(!session)return null;
+    return gmailDirect.financeArchive(String(body.kind||''),Number(body.year||0),Number(body.month||0));
+  }
   if(action==='createRegieReportZip')return directRegieReportZipV24(body);
   if(action==='createRegiePhotoZip')return directRegiePhotoZipV24(body);
   if(action==='createTaxAdvisorPdf')return directTaxAdvisorPdfV24(body);
@@ -10453,6 +10473,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus','saveOfferCreatedWithReminder','createInspectionOffer','createEmployeeInspectionRequestV10',
   'mergeRegieObjects','saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed','setMonthClosureStatus','setPayrollMonthStatus','completePayrollCycle','forceCompletePayrollCycle',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
+  'markFinancePaidV10','markTaxMailAsInvoiceV10','archiveTaxAdvisorMailV10',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry','inquiryToOffer',
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','syncHolidays','saveEmployeeAdmin','setEmployeeActive','savePlannerWorker','setPlannerWorkerActive','movePlannerWorker','planRequest3','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','reserveMaintenanceDeviceId','saveMaintenanceCustomer','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','saveAbsence','deleteAbsence','endSicknessAbsence',
@@ -10600,6 +10621,18 @@ async function tryDirectPostgresWrite(action,body){
   const employeeSelfAction=['confirmEmployeeAssignment','reportEmployeeAssignmentIssue','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','saveEmployeeLocationV10','createEmployeeInspectionRequestV10'].includes(action);
   const session=await localSessionForBody(body,!employeeSelfAction);if(!session)return null;
   const by=String(session.employee||body.employee||'').trim(),nowIso=new Date().toISOString();
+  if(action==='markFinancePaidV10'){
+    const result=await gmailDirect.markPaid(body.messageId,by,false);
+    return {result,outboxId:0};
+  }
+  if(action==='markTaxMailAsInvoiceV10'){
+    const result=await gmailDirect.markPaid(body.messageId,by,true);
+    return {result,outboxId:0};
+  }
+  if(action==='archiveTaxAdvisorMailV10'){
+    const result=await gmailDirect.archiveTax(body.messageId,by);
+    return {result,outboxId:0};
+  }
   const client=await pool.connect();
   let result=null,outboxId=0,legacyAction=action,legacyPayload=body,skipLegacySync=Boolean(directCalendarReady),calendarAfterCommit=null;
   try{
@@ -13388,7 +13421,7 @@ async function proxyLegacy(req, res, body) {
       console.error('Direct planner calendar read failed; retaining legacy fallback:',e.message);
     }
   }
-  if (['ping','systemHealthCheck','getDashboardSummary51','getCustomerInquiries','getInquiryReminders','getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getRegieAttachments','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts','getEmployeeWorkOverviewV10','getPartnerNetworkV10','getWhatsappInboxV10','getWhatsappMediaV10','getEmployeeLocationsV10','getAiAssistantV10','getGmailStatusV10','syncGmailInquiriesV10','getMaintenanceAttachment','getMapsBrowserConfig','createRegieReportZip','createRegiePhotoZip','createTaxAdvisorPdf','getBillingReviewTargetV10','sendBillingReviewRequestV10'].includes(action)) {
+  if (['ping','systemHealthCheck','getDashboardSummary51','getCustomerInquiries','getInquiryReminders','getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getRegieAttachments','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts','getEmployeeWorkOverviewV10','getPartnerNetworkV10','getWhatsappInboxV10','getWhatsappMediaV10','getEmployeeLocationsV10','getAiAssistantV10','getGmailStatusV10','syncGmailInquiriesV10','getFinanceOverviewV10','syncFinanceGmailV10','getFinanceInboxV10','getTaxAdvisorInboxV10','getFinanceArchiveV10','getMaintenanceAttachment','getMapsBrowserConfig','createRegieReportZip','createRegiePhotoZip','createTaxAdvisorPdf','getBillingReviewTargetV10','sendBillingReviewRequestV10'].includes(action)) {
     try {
       const direct=await tryDirectPostgresRead(action,body);
       if (direct!==null) {
