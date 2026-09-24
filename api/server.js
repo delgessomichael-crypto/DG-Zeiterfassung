@@ -10781,7 +10781,7 @@ async function tryDirectPostgresWrite(action,body){
              offer_id,offer_changed_at_text,offer_changed_by,maintenance,next_maintenance_due,maintenance_customer_id,
              maintenance_object_id,maintenance_device_id,shadow_updated_at
            ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'',$9,false,$10,$11,$12,$13,$14,$15,$16,false,'','',$17,
-                    'Offen','','',$18,$19,$20,$21,'','','','',$22,$23,$24,$25,$26,now())`,
+                    'Offen','','',$18,$19,$20,$21,'','','',$22,$23,$24,$25,$26,now())`,
           [id,by,date,customer,start,end,hours,activity,nowIso,materialUsed,material,
            signatureFile?signatureFile.id:'',signatureFile?signatureFile.url:'',photoFiles.length,
            photoFiles.map(x=>x.id).join(','),photoFiles.map(x=>x.url).join(' | '),String(entry.sourceCalendarEventId||''),
