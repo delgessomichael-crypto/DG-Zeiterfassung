@@ -1772,7 +1772,7 @@ async function d34AqonInquiries(){
     DG3.inquiries=all||[];
     const rows=(all||[]).filter(r=>r.source==='AQON PURE');
     $('d34AqonList').innerHTML=rows.map((r,i)=>d32InquiryCard(r,i,false)).join('')||'Keine offenen AQON PURE Anfragen.';
-    setMessage('d34AqonStatus',rows.length+' offene AQON PURE Anfrage(n). · Gmail-Abgleich nur noch über „Jetzt synchronisieren“.','ok');
+    setMessage('d34AqonStatus',rows.length+' offene AQON PURE Anfrage(n). · Gmail-Abgleich über Railway: automatisch alle 20 Minuten nach einmaliger Gmail-Verbindung und zusätzlich über „Jetzt synchronisieren“.','ok');
     d34SetAqonCount(rows.length);d3Count('inquiries',(all||[]).length);
   }catch(e){setMessage('d34AqonStatus','AQON-Anfragen konnten nicht geladen werden: '+e.message,'error');}
 }
@@ -5815,7 +5815,7 @@ function looksAddr10(el){const k=[el.id,el.name,el.placeholder,el.getAttribute('
 async function places10(root=document){root.querySelectorAll('input').forEach(async el=>{if(el.dataset.dg10Places||!looksAddr10(el))return;el.dataset.dg10Places='loading';if(!await loadMaps10()){delete el.dataset.dg10Places;return;}const ac=new google.maps.places.Autocomplete(el,{componentRestrictions:{country:'de'},fields:['formatted_address','address_components','place_id'],types:['address']});ac.addListener('place_changed',()=>{const p=ac.getPlace();if(p&&p.formatted_address){el.value=p.formatted_address;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}});el.dataset.dg10Places='1';});}
 
 /* 13. Gmail + Kalender alle 20 Minuten */
-let lastSync10=0;async function sync20(){if(document.hidden||!navigator.onLine||Date.now()-lastSync10<1190000)return;lastSync10=Date.now();if(typeof canAccessBoss==='function'&&canAccessBoss()){try{if(typeof d3Inquiries==='function')await d3Inquiries();}catch(_e){}try{if(typeof dg62Load==='function')await dg62Load();}catch(_e){}}else{try{if(typeof loadCalendarEvents==='function')await loadCalendarEvents(true);}catch(_e){}}}
+let lastSync10=0;async function autoGmail10(){if(typeof canAccessBoss!=='function'||!canAccessBoss())return;try{const s=await api(bossPayload10({action:'getGmailStatusV10'}));if(s&&s.configured&&s.connected)await api(bossPayload10({action:'syncGmailInquiriesV10'}));}catch(_e){}}async function sync20(){if(document.hidden||!navigator.onLine||Date.now()-lastSync10<1190000)return;lastSync10=Date.now();if(typeof canAccessBoss==='function'&&canAccessBoss()){try{await autoGmail10();}catch(_e){}try{if(typeof d3Inquiries==='function')await d3Inquiries();}catch(_e){}try{if(typeof dg62Load==='function')await dg62Load();}catch(_e){}}else{try{if(typeof loadCalendarEvents==='function')await loadCalendarEvents(true);}catch(_e){}}}
 
 function install10(){addCss10();speech10(document);cleanup10();places10(document);if(typeof canAccessBoss==='function'&&canAccessBoss()){ensureEmployeeOverview10();refreshEmpSelect10();ensurePartner10();ensureAi10();}const obs=new MutationObserver(ms=>{for(const m of ms)for(const n of m.addedNodes)if(n.nodeType===1){speech10(n);places10(n);}cleanup10();decorateInquiryMerge10();refreshEmpSelect10();});obs.observe(document.body,{childList:true,subtree:true});setInterval(sync20,20*60*1000);setTimeout(()=>{decorateInquiryMerge10();sync20();},1500);}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install10,{once:true});else setTimeout(install10,0);
