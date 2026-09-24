@@ -2833,8 +2833,8 @@ const V502='5.0.2';
  */
 window.initPad=initPad=function(id){
   const canvas=$(id),ctx=canvas.getContext('2d'),wrap=$(id+'Wrap');
-  let drawing=false,signed=false,active=false,lastTap=0,activePointer=null;
-  function setActive(v){active=!!v;if(wrap)wrap.classList.toggle('active',active);canvas.style.touchAction=active?'none':'auto';}
+  let drawing=false,signed=false,active=false,activePointer=null;
+  function setActive(v){active=!!v;if(wrap)wrap.classList.toggle('active',active);canvas.style.touchAction=active?'none':'auto';const h=wrap&&wrap.nextElementSibling;if(h&&h.classList&&h.classList.contains('signature-hint'))h.textContent=active?'Unterschrift aktiv – bitte jetzt im Feld unterschreiben.':'Zum Unterschreiben Feld einmal antippen. Beim Scrollen bleibt es gesperrt.';}
   function resize(){
     const ratio=devicePixelRatio||1,rect=canvas.getBoundingClientRect(),old=signed?canvas.toDataURL('image/png'):'';
     canvas.width=Math.max(1,Math.round(rect.width*ratio));canvas.height=Math.round(180*ratio);
@@ -2869,13 +2869,11 @@ window.initPad=initPad=function(id){
 
   if(wrap){
     const lock=wrap.querySelector('.signature-lock');
-    const unlock=ev=>{ev.preventDefault();ev.stopPropagation();setActive(true);lastTap=0;};
-    const tap=ev=>{
-      ev.preventDefault();ev.stopPropagation();const now=Date.now();
-      if(ev.type==='dblclick'||now-lastTap<550)unlock(ev);else lastTap=now;
-    };
-    lock.addEventListener('dblclick',unlock,{passive:false});
-    lock.addEventListener('pointerup',tap,{passive:false});
+    const unlock=ev=>{if(ev){ev.preventDefault();ev.stopPropagation();}setActive(true);};
+    if(lock){
+      lock.addEventListener('pointerup',unlock,{passive:false});
+      lock.addEventListener('click',unlock,{passive:false});
+    }
   }
   resize();setActive(false);
   return{
@@ -3861,9 +3859,13 @@ window.d3Api=d3Api=async function(payload){
     const controller=new AbortController(),timeoutMs=['getMonthPayrollAudit','createTaxAdvisorPdf','setPayrollMonthStatus','completePayrollCycle'].includes(action)?180000:65000,timer=setTimeout(()=>controller.abort(),timeoutMs);
     try{
       let response;try{response=await fetch(BACKEND_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({},payload,{clientVersion:V})),signal:controller.signal});}catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Speichern zuerst Daten neu laden.':'Keine Serververbindung.','network');}
-      if(!response.ok)throw dgError('HTTP '+response.status,'network');
-      let data;try{data=JSON.parse(await response.text());}catch(_e){throw dgError('Ungültige Serverantwort.','server');}
-      if(!data.ok)throw dgError(data.error||'Serverfehler.','server');
+      let raw='',data=null;
+      try{raw=await response.text();data=raw?JSON.parse(raw):{};}catch(_e){
+        if(!response.ok)throw dgError('HTTP '+response.status,'network');
+        throw dgError('Ungültige Serverantwort.','server');
+      }
+      if(!response.ok)throw dgError((data&&data.error)||('HTTP '+response.status),response.status>=500?'server':'request');
+      if(!data||!data.ok)throw dgError((data&&data.error)||'Serverfehler.','server');
       return data.data!==undefined?data.data:data;
     }finally{clearTimeout(timer);if(window.DG3&&!read)DG3.pending=Math.max(0,(DG3.pending||1)-1);}
   })();
