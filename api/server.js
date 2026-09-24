@@ -29,6 +29,7 @@ const WHATSAPP_REVIEW_TEMPLATE = String(process.env.WHATSAPP_REVIEW_TEMPLATE||''
 const WHATSAPP_REVIEW_TEMPLATE_LANG = String(process.env.WHATSAPP_REVIEW_TEMPLATE_LANG||'de').trim()||'de';
 const FINAL_CUTOVER = /^(1|true|yes|ja)$/i.test(String(process.env.FINAL_CUTOVER||'false'));
 const FINAL_FILE_IMPORT_KEY = String(process.env.FINAL_FILE_IMPORT_KEY||MIGRATION_UPLOAD_KEY||'');
+const DG_LEGACY_DELTA_KEY = String(process.env.DG_LEGACY_DELTA_KEY||'');
 const API_ORIGIN = String(process.env.API_ORIGIN || 'https://dg-app-10-api-production.up.railway.app').replace(/\/$/,'');
 
 
@@ -3784,7 +3785,8 @@ async function postgresBossDayClosures(body){
       [prefix+'%']
     ),
     pool.query(
-      `SELECT employee_name,status_date,status FROM day_status_shadow WHERE status_date LIKE $1`,
+      `SELECT employee_name,status_date,status,source,credited_hours,credited_hours_missing
+         FROM day_status_shadow WHERE status_date LIKE $1`,
       [prefix+'%']
     ),
     employeeActiveMapLiveOrSnapshot()
@@ -3824,13 +3826,24 @@ async function postgresBossDayClosures(body){
       isSupplement:false,supplementCreatedAt:''
     });
   }
+  // Status-only days must be visible even without a work report.
+  for(const r of statusQ.rows){
+    const employee=String(r.employee_name||''),date=berlinDateOnly(r.status_date),status=String(r.status||'Arbeiten');
+    if(!employee||!date||status==='Arbeiten')continue;
+    const d=ensure(employee,date);
+    d.status=status;
+    d.statusSource=String(r.source||'');
+    d.creditedHours=Math.round(Number(r.credited_hours||0)*100)/100;
+    d.creditedHoursMissing=Boolean(r.credited_hours_missing);
+  }
   const out=[];
   const round=x=>Math.round(Number(x||0)*100)/100;
   for(const [employee,daysMap] of byEmployee){
     const days=[...daysMap.values()].sort((a,b)=>a.date.localeCompare(b.date)).map(d=>{
       const gross=round(d.hours),pause=gross>=6?1:0;
       d.grossHours=gross;d.pauseHours=round(pause);d.hours=round(Math.max(0,gross-pause));
-      d.status=statusMap.get(employee+'|'+d.date)||'Arbeiten';
+      d.status=d.status||statusMap.get(employee+'|'+d.date)||'Arbeiten';
+      d.statusOnly=d.status!=='Arbeiten'&&Number(d.entryCount||0)===0;
       d.reports.sort((a,b)=>String(a.start||'').localeCompare(String(b.start||'')));
       return d;
     });
@@ -3851,7 +3864,8 @@ async function verifyBossDayClosuresDirect(rows,body){
 async function directBossDayClosuresRead(body){
   const session=await localSessionForBody(body,true);if(!session)return null;
   const key=bossDayClosuresVerifyKey(body);if(!key)return null;
-  if(!(await shadowReadyForDirectRead(key)))return null;
+  const year=Number(body&&body.year)||0,month=Number(body&&body.month)||0;
+  if(year*100+month<202609 && !(await shadowReadyForDirectRead(key)))return null;
   return postgresBossDayClosures(body);
 }
 
@@ -4176,7 +4190,8 @@ async function directDayDataRead(body){
   const employee=String(body.employee||session.employee||'').trim();
   if(!employee||employee!==session.employee)return null;
   const key=dayDataVerifyKey(body,employee);if(!key)return null;
-  if(!(await shadowReadyForDirectRead(key)))return null;
+  const date=berlinDateOnly(body&&body.date||'');
+  if(date<'2026-09-07' && !(await shadowReadyForDirectRead(key)))return null;
   return postgresDayData(body,employee);
 }
 
@@ -4263,7 +4278,8 @@ async function directWeekDataRead(body){
   const employee=String(body.employee||session.employee||'').trim();
   if(!employee||employee!==session.employee)return null;
   const key=weekVerifyKey(body,employee);if(!key)return null;
-  if(!(await shadowReadyForDirectRead(key)))return null;
+  const range=weekRangeFromReference(body&&body.referenceDate);
+  if((!range||range.end<'2026-09-07') && !(await shadowReadyForDirectRead(key)))return null;
   return postgresWeekData(body,employee);
 }
 
@@ -13930,6 +13946,120 @@ async function latencySummary() {
   return {ok:true,total:total.rows[0]?.total||0,summary:summary.rows,recent:recent.rows};
 }
 
+
+function legacyDeltaAuthorizedV26(req){
+  if(!DG_LEGACY_DELTA_KEY)return false;
+  const key=String(req.headers['x-dg-legacy-delta-key']||'');
+  if(key.length!==DG_LEGACY_DELTA_KEY.length)return false;
+  return crypto.timingSafeEqual(Buffer.from(key),Buffer.from(DG_LEGACY_DELTA_KEY));
+}
+async function importLegacyTimeDeltaV26(body){
+  if(!pool)throw new Error('PostgreSQL ist nicht konfiguriert.');
+  const files=Array.isArray(body&&body.files)?body.files:[];
+  const entries=Array.isArray(body&&body.entries)?body.entries:[];
+  const closures=Array.isArray(body&&body.closures)?body.closures:[];
+  if(files.length>20||entries.length>100||closures.length>100)throw new Error('Legacy-Delta ist zu groß.');
+  let filesInserted=0,filesExisting=0,entriesInserted=0,entriesExisting=0,closuresInserted=0,closuresExisting=0;
+  for(const item of files){
+    const id=String(item&&item.id||'').trim(),sourceUrl=String(item&&item.sourceUrl||'').trim();
+    if(!id||!sourceUrl)throw new Error('Legacy-Datei-ID oder Quell-URL fehlt.');
+    const old=await pool.query('SELECT 1 FROM binary_files_v10 WHERE id=$1 LIMIT 1',[id]);
+    if(old.rowCount){filesExisting++;continue;}
+    let u;try{u=new URL(sourceUrl);}catch(_e){throw new Error('Ungültige Legacy-Datei-URL.');}
+    const host=String(u.hostname||'').toLowerCase();
+    if(u.protocol!=='https:'||!(host==='oaiusercontent.com'||host.endsWith('.oaiusercontent.com')))
+      throw new Error('Legacy-Datei-Host ist nicht freigegeben.');
+    const upstream=await fetch(u.toString(),{redirect:'follow'});
+    if(!upstream.ok)throw new Error('Legacy-Datei konnte nicht geladen werden: HTTP '+upstream.status);
+    const data=Buffer.from(await upstream.arrayBuffer());
+    await storeBinaryFileV24(pool,{
+      id,name:String(item.name||'Auftragsbild.jpg'),
+      mime:String(item.mime||upstream.headers.get('content-type')||'application/octet-stream'),
+      data,kind:'legacy-time-entry-photo',source:'google-drive-final-delta'
+    });
+    filesInserted++;
+  }
+  for(const e of entries){
+    const id=String(e&&e.id||'').trim(),employee=String(e&&e.employee||'').trim(),date=berlinDateOnly(e&&e.date||'');
+    const customer=String(e&&e.customer||'').trim();
+    if(!id||!employee||!validIsoDateText(date)||date<'2026-09-07'||!customer)throw new Error('Ungültiger Legacy-Zeiteintrag.');
+    const objectId=String(e.objectId||'').trim();
+    if(objectId){
+      await pool.query(
+        `INSERT INTO objects_shadow(id,object_key,display_name,created_at_text,shadow_updated_at)
+         VALUES($1,$2,$3,$4,now()) ON CONFLICT(id) DO NOTHING`,
+        [objectId,shadowObjectKey(customer),customer,String(e.transmittedAt||new Date().toISOString())]
+      );
+    }
+    const q=await pool.query(
+      `INSERT INTO time_entries_shadow(
+         id,employee_name,entry_date,customer,start_time,end_time,hours,activity,transmitted_at_text,closed,
+         material_used,material,photo_count,photo_file_ids,photo_urls,source_calendar_event_id,billing_status,
+         object_id,job_status,is_supplement,maintenance,source_payload,shadow_updated_at
+       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,true,$10,$11,$12,$13,'',$14,$15,$16,$17,false,false,$18::jsonb,now())
+       ON CONFLICT(id) DO NOTHING RETURNING id`,
+      [id,employee,date,customer,String(e.start||''),String(e.end||''),Number(e.hours||0),String(e.activity||''),
+       String(e.transmittedAt||''),Boolean(e.materialUsed),String(e.material||''),Number(e.photoCount||0),
+       String(e.photoFileIds||''),String(e.sourceCalendarEventId||''),String(e.billingStatus||'Offen'),
+       objectId,String(e.jobStatus||'Abgeschlossen'),JSON.stringify({source:'google-final-delta',importedAt:new Date().toISOString()})]
+    );
+    if(q.rowCount)entriesInserted++;else entriesExisting++;
+  }
+  for(const d of closures){
+    const employee=String(d&&d.employee||'').trim(),date=berlinDateOnly(d&&d.date||'');
+    if(!employee||!validIsoDateText(date)||date<'2026-09-07')throw new Error('Ungültiger Legacy-Tagesabschluss.');
+    const q=await pool.query(
+      `INSERT INTO day_closures_shadow(
+         employee_name,closure_date,closed_at_text,gross_total,legacy_col5,legacy_col6,pause_minutes,net_total,
+         updated_at_text,update_reason,shadow_updated_at
+       ) VALUES($1,$2,$3,$4,'','',$5,$6,$7,$8,now())
+       ON CONFLICT(employee_name,closure_date) DO NOTHING
+       RETURNING employee_name`,
+      [employee,date,String(d.closedAt||''),Number(d.gross||0),Number(d.pauseMinutes||0),Number(d.net||0),
+       String(d.updatedAt||''),String(d.reason||'Google-Finaldelta 23.09.2026')]
+    );
+    if(q.rowCount)closuresInserted++;else closuresExisting++;
+  }
+  await finalizeLocalFileReferencesV24();
+  for(const e of entries){
+    if(String(e&&e.jobStatus||'')==='Abgeschlossen'){
+      await consolidateCompletedCustomerAfterMirrorV10({
+        employee:'System Google-Finaldelta',
+        entry:{customer:String(e.customer||''),jobStatus:'Abgeschlossen'}
+      });
+    }
+  }
+  await pool.query("DELETE FROM response_cache WHERE action IN ('getBossDayClosures','getDayData','getWeekData','getMonthData','getBossMonthData','getRegieReports','getObjectReports','getDashboardSummary51')");
+  const affected=new Set();
+  for(const e of entries)affected.add(String(e.employee||'')+'|'+String(e.date||''));
+  for(const d of closures)affected.add(String(d.employee||'')+'|'+String(d.date||''));
+  for(const x of affected){
+    const [employee,date]=x.split('|');if(!employee||!date)continue;
+    const p=date.split('-').map(Number);
+    await saveShadowVerifyStat(dayDataVerifyKey({date},employee),1,1,0);
+    await saveShadowVerifyStat(weekVerifyKey({referenceDate:date},employee),1,1,0);
+    await saveShadowVerifyStat(monthDataVerifyKey({employee,year:p[0],month:p[1]}),1,1,0);
+    await saveShadowVerifyStat(bossDayClosuresVerifyKey({year:p[0],month:p[1]}),1,1,0);
+  }
+  const audit=body&&body.audit||{},auditEmployee=String(audit.employee||'').trim(),
+        auditDates=(Array.isArray(audit.dates)?audit.dates:[]).map(berlinDateOnly).filter(Boolean);
+  let statusRows=[],closureRows=[],entryRows=[];
+  if(auditEmployee&&auditDates.length){
+    const [s,d,e]=await Promise.all([
+      pool.query(`SELECT employee_name,status_date,status,source,credited_hours,credited_hours_missing
+                    FROM day_status_shadow WHERE employee_name=$1 AND status_date=ANY($2::text[]) ORDER BY status_date`,[auditEmployee,auditDates]),
+      pool.query(`SELECT employee_name,closure_date,closed_at_text,gross_total,pause_minutes,net_total,update_reason
+                    FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=ANY($2::text[]) ORDER BY closure_date`,[auditEmployee,auditDates]),
+      pool.query(`SELECT id,employee_name,entry_date,customer,start_time,end_time,hours,job_status,photo_count,photo_file_ids,photo_urls
+                    FROM time_entries_shadow WHERE employee_name=$1 AND entry_date=ANY($2::text[]) ORDER BY entry_date,start_time,id`,[auditEmployee,auditDates])
+    ]);
+    statusRows=s.rows;closureRows=d.rows;entryRows=e.rows;
+  }
+  console.log('LEGACY_TIME_DELTA_V26 files='+filesInserted+' new/'+filesExisting+' existing entries='+entriesInserted+' new/'+entriesExisting+' existing closures='+closuresInserted+' new/'+closuresExisting+' existing');
+  return {ok:true,filesInserted,filesExisting,entriesInserted,entriesExisting,closuresInserted,closuresExisting,
+    audit:{employee:auditEmployee,dates:auditDates,statusRows,closureRows,entryRows},finalAudit:await finalCutoverAuditV24()};
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
@@ -14005,6 +14135,11 @@ const server = http.createServer(async (req, res) => {
       const data=await readBinary(req,20*1024*1024);
       const stored=await storeBinaryFileV24(pool,{id,name,mime:String(req.headers['content-type']||'application/octet-stream'),data,kind,source:'google-drive-migration'});
       return json(res,200,{ok:true,file:{id:stored.id,name:stored.name,mime:stored.mime,size:stored.size,sha256:stored.sha256}},req);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/migration/time-delta-v26') {
+      if(!legacyDeltaAuthorizedV26(req))return json(res,401,{ok:false,error:'Unauthorized'},req);
+      return json(res,200,await importLegacyTimeDeltaV26(await readBody(req)),req);
     }
 
     if (req.method === 'POST' && url.pathname === '/v1/migration/files-from-urls') {
