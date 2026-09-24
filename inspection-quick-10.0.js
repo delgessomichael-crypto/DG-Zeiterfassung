@@ -2,13 +2,17 @@
 (function(){
 'use strict';
 
-const V='20260924-1235-inspection-all1';
+const V='20260924-1252-inspection-start-safe1';
 const $=id=>document.getElementById(id);
 const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 function chefAllowed(){
-  // Besichtigungstermine stehen allen angemeldeten Mitarbeitern zur Verfügung.
-  try{return !!String(localStorage.getItem('dg_employee')||'').trim();}catch(_e){return false;}
+  // Erst aktiv, wenn die Mitarbeiteransicht wirklich geöffnet wurde.
+  try{
+    const employee=String(localStorage.getItem('dg_employee')||'').trim();
+    const main=document.getElementById('mainScreen');
+    return !!(employee&&main&&!main.classList.contains('hidden'));
+  }catch(_e){return false;}
 }
 function apiPayload(extra){
   const employee=localStorage.getItem('dg_employee')||'';
@@ -243,7 +247,9 @@ function ensureButton(){
 function install(){
   buildModal();ensureButton();
   const mo=new MutationObserver(()=>ensureButton());
-  mo.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class']});
+  // Nur Strukturänderungen beobachten. Klassenänderungen würden den eigenen
+  // Launcher erneut triggern und können auf Android den Start blockieren.
+  mo.observe(document.body,{subtree:true,childList:true});
   const baseOpen=window.openMain;
   if(typeof baseOpen==='function'&&!baseOpen.__inspectionWrapped){
     const wrapped=function(){const r=baseOpen.apply(this,arguments);setTimeout(ensureButton,0);return r;};
