@@ -10448,12 +10448,12 @@ async function invalidateLegacySnapshotsAfterDirectWrite(action,body){
       "DELETE FROM exact_views_shadow WHERE action IN ('getMonthPayrollAudit','getPayrollCycleState')"
     ));
   }
-  if(/Offer/i.test(a)){
+  if(/Offer/i.test(a)||a==='createEmployeeInspectionRequestV10'){
     tasks.push(pool.query(
       "DELETE FROM exact_views_shadow WHERE action IN ('getOfferReports','getOfferStatistics')"
     ));
   }
-  if(/Dashboard|Offer|OwnReminder|Inquiry|ManualOrder|Maintenance|Planner|Entry|Day|Absence|Vacation|Payroll/i.test(a)){
+  if(/Dashboard|Offer|OwnReminder|Inquiry|ManualOrder|Maintenance|Planner|Entry|Day|Absence|Vacation|Payroll/i.test(a)||a==='createEmployeeInspectionRequestV10'){
     tasks.push(pool.query(
       "DELETE FROM exact_views_shadow WHERE action='getDashboardSummary51'"
     ));
