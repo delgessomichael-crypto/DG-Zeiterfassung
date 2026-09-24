@@ -1,7 +1,7 @@
 /* DG App 10 - Rechnungswesen / Gmail workflow */
 (function(){
 'use strict';
-const V='20260924-1810-finance-sync4';
+const V='20260924-1835-finance-delete5';
 const q=id=>document.getElementById(id);
 const MONTHS=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
 const state={incoming:[],tax:[],syncing:false};
@@ -80,6 +80,7 @@ function mailHtml(x,kind){
  let actions='<a class="btn secondary" target="_blank" rel="noopener" href="'+esc(x.gmailUrl||'#')+'">In Gmail öffnen</a>';
  if(kind==='incoming')actions+='<button class="btn success" data-paid="'+esc(x.messageId)+'">Als bezahlt markieren</button>';
  if(kind==='tax')actions+='<button class="btn success" data-tax-invoice="'+esc(x.messageId)+'">Als Rechnung markieren</button><button class="btn secondary" data-tax-archive="'+esc(x.messageId)+'">Archivieren</button>';
+ actions+='<button class="btn danger" data-fin-delete="'+esc(x.messageId)+'">Löschen</button>';
  return '<div class="dg10-fin-mail"><div class="dg10-fin-head"><div><div class="dg10-fin-subject">'+esc(x.subject||'(ohne Betreff)')+'</div><div class="dg10-fin-meta">'+esc(x.senderName||x.senderEmail||'')+(x.senderEmail?' · '+esc(x.senderEmail):'')+'</div></div><strong>'+esc(de(x.receivedAt))+'</strong></div>'+(files?'<div class="dg10-fin-files"><div class="muted small" style="margin-bottom:6px"><strong>Anhänge</strong></div><div class="dg10-fin-actions">'+files+'</div></div>':'')+'<div class="dg10-fin-actions">'+actions+'</div></div>';
 }
 function googleReconnectHtml(url){
@@ -150,7 +151,7 @@ async function loadArchive(kind){
  const host=q(kind==='paid'?'dg10ArchivePaidList':'dg10ArchiveTaxList');if(!host)return;
  try{
    const rows=await req({action:'getFinanceArchiveV10',kind,year:y,month:m});
-   host.innerHTML=(rows||[]).map(x=>'<div class="dg10-fin-mail"><div class="dg10-fin-subject">'+esc(x.subject||'(ohne Betreff)')+'</div><div class="dg10-fin-meta">'+esc(x.senderName||x.senderEmail||'')+' · '+esc(kind==='paid'?'Bezahlt: '+de(x.paidAt):'Archiviert: '+de(x.archivedAt))+'</div>'+(financeFilesHtml(x.attachments)?'<div class="dg10-fin-files"><div class="muted small" style="margin:8px 0 6px"><strong>Anhänge</strong></div><div class="dg10-fin-actions">'+financeFilesHtml(x.attachments)+'</div></div>':'')+'<div class="dg10-fin-actions"><a class="btn secondary" target="_blank" rel="noopener" href="'+esc(x.gmailUrl||'#')+'">In Gmail öffnen</a></div></div>').join('')||'<div class="status ok">Keine Einträge in '+MONTHS[m-1]+' '+y+'.</div>';
+   host.innerHTML=(rows||[]).map(x=>'<div class="dg10-fin-mail"><div class="dg10-fin-subject">'+esc(x.subject||'(ohne Betreff)')+'</div><div class="dg10-fin-meta">'+esc(x.senderName||x.senderEmail||'')+' · '+esc(kind==='paid'?'Bezahlt: '+de(x.paidAt):'Archiviert: '+de(x.archivedAt))+'</div>'+(financeFilesHtml(x.attachments)?'<div class="dg10-fin-files"><div class="muted small" style="margin:8px 0 6px"><strong>Anhänge</strong></div><div class="dg10-fin-actions">'+financeFilesHtml(x.attachments)+'</div></div>':'')+'<div class="dg10-fin-actions"><a class="btn secondary" target="_blank" rel="noopener" href="'+esc(x.gmailUrl||'#')+'">In Gmail öffnen</a><button class="btn danger" data-fin-delete="'+esc(x.messageId)+'">Löschen</button></div></div>').join('')||'<div class="status ok">Keine Einträge in '+MONTHS[m-1]+' '+y+'.</div>';
  }catch(e){host.innerHTML='<div class="status error">'+esc(e.message)+'</div>';}
 }
 function openArchive(kind){
@@ -173,6 +174,22 @@ function wireCards(){
      return;
    }
    const paid=e.target.closest('[data-paid]');if(paid){e.preventDefault();paid.disabled=true;try{await req({action:'markFinancePaidV10',messageId:paid.dataset.paid});await refreshIncoming();}finally{paid.disabled=false;}return;}
+   const del=e.target.closest('[data-fin-delete]');if(del){
+     e.preventDefault();
+     if(!confirm('Diese E-Mail wirklich löschen? Sie wird aus der App entfernt und in Gmail in den Papierkorb verschoben.'))return;
+     del.disabled=true;
+     try{
+       await req({action:'deleteFinanceMailV10',messageId:del.dataset.finDelete});
+       const active=q('bossView')?.querySelector('.dg80-shell-active');
+       if(active?.id==='dg10InvoiceIncoming')await refreshIncoming();
+       else if(active?.id==='dg10TaxAdvisor')await refreshTax();
+       else if(active?.id==='dg10ArchivePaid')await loadArchive('paid');
+       else if(active?.id==='dg10ArchiveTax')await loadArchive('tax');
+       await refreshCounts();
+     }finally{del.disabled=false;}
+     return;
+   }
+
    const ti=e.target.closest('[data-tax-invoice]');if(ti){e.preventDefault();ti.disabled=true;try{await req({action:'markTaxMailAsInvoiceV10',messageId:ti.dataset.taxInvoice});await refreshTax();}finally{ti.disabled=false;}return;}
    const ta=e.target.closest('[data-tax-archive]');if(ta){e.preventDefault();ta.disabled=true;try{await req({action:'archiveTaxAdvisorMailV10',messageId:ta.dataset.taxArchive});await refreshTax();}finally{ta.disabled=false;}return;}
    const ar=e.target.closest('[data-dg10-archive]');if(ar){e.preventDefault();openArchive(ar.dataset.dg10Archive);return;}
