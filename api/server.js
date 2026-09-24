@@ -13058,8 +13058,10 @@ async function tryDirectPostgresWrite(action,body){
 }
 
 const GOOGLE_RETAINED_ACTIONS_V24=new Set([
-  'getEmployeeCalendarEvents','getPlannerEvents','saveExternalGoogleEvent','deleteExternalGoogleEvent',
-  'savePlannerEvent','deletePlannerEvent','transferPlannerEvent','planRequest3'
+  // Only Google Calendar reads and explicit external Google-event edits may use the
+  // legacy Google bridge while direct OAuth is unavailable. All DG business data,
+  // including planner writes and request status changes, stays PostgreSQL-only.
+  'getEmployeeCalendarEvents','getPlannerEvents','saveExternalGoogleEvent','deleteExternalGoogleEvent'
 ]);
 function googleRetainedActionV24(action){return GOOGLE_RETAINED_ACTIONS_V24.has(String(action||''));}
 
