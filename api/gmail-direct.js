@@ -54,6 +54,27 @@ function createGmailDirect(opts){
       );
       CREATE INDEX IF NOT EXISTS gmail_import_messages_v10_inquiry_idx
         ON gmail_import_messages_v10(inquiry_id);
+
+      CREATE TABLE IF NOT EXISTS finance_mail_v10(
+        message_id TEXT PRIMARY KEY,
+        thread_id TEXT,
+        sender_email TEXT,
+        sender_name TEXT,
+        subject TEXT,
+        received_at_text TEXT,
+        category TEXT NOT NULL DEFAULT 'incoming',
+        status TEXT NOT NULL DEFAULT 'open',
+        paid_at_text TEXT,
+        archived_at_text TEXT,
+        attachments_json TEXT,
+        gmail_label TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS finance_mail_v10_status_idx
+        ON finance_mail_v10(category,status,received_at_text DESC);
+      CREATE INDEX IF NOT EXISTS finance_mail_v10_paid_idx
+        ON finance_mail_v10(paid_at_text DESC);
     `);
   }
 
@@ -72,7 +93,7 @@ function createGmailDirect(opts){
     const q=new URLSearchParams({
       client_id:clientId,redirect_uri:redirectUri,response_type:'code',access_type:'offline',
       prompt:'consent',include_granted_scopes:'true',
-      scope:'openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar',state
+      scope:'openid email https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/calendar',state
     });
     return 'https://accounts.google.com/o/oauth2/v2/auth?'+q.toString();
   }
@@ -95,6 +116,15 @@ function createGmailDirect(opts){
     const r=await fetch('https://gmail.googleapis.com/gmail/v1/users/me/'+path,{headers:{Authorization:'Bearer '+token}});
     const x=await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(String(x&&x.error&&x.error.message||('Gmail HTTP '+r.status)));
+    return x;
+  }
+  async function apiJson(token,method,path,body){
+    const opt={method:String(method||'GET').toUpperCase(),headers:{Authorization:'Bearer '+token}};
+    if(body!==undefined){opt.headers['Content-Type']='application/json';opt.body=JSON.stringify(body);}
+    const r=await fetch('https://gmail.googleapis.com/gmail/v1/users/me/'+path,opt);
+    if(r.status===204)return {ok:true};
+    const x=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(String(x&&x.error&&x.error.message||('Gmail HTTP '+r.status)));
     return x;
   }
   async function calendarApi(method,path,body){
@@ -326,6 +356,160 @@ function createGmailDirect(opts){
     return {imported:true,inquiryId,source:rec.source};
   }
 
+
+  const FINANCE_LABEL='AAA - Erhaltene Rechnungen';
+  const TAX_LABEL='Steuerberaterin Frau Busse';
+  const TAX_MAIL='kontakt@buchhaltung-busse.de';
+
+  function hasModifyScope(r){
+    const s=String(r&&r.scope||'');
+    return s.includes('https://www.googleapis.com/auth/gmail.modify')||s.includes('https://mail.google.com/');
+  }
+  function financeKind(msg){
+    const h=headers(msg&&msg.payload||{}),from=sender(h.from),mail=String(from.email||'').toLowerCase();
+    if(mail===TAX_MAIL)return 'tax';
+    const names=attachmentNames(msg&&msg.payload||{},msg&&msg.id||'').join(' ');
+    const hay=(String(h.subject||'')+' '+names).toLowerCase();
+    const invoice=/(^|[\\s_\\-])(rechnung(?:en)?|invoice|gutschrift|mahnung|zahlungserinnerung|honorar(?:rechnung)?|beleg)([\\s_.\\-]|$)/i.test(hay);
+    return invoice?'incoming':'';
+  }
+  async function gmailLabels(token){
+    const x=await api(token,'labels');
+    return Array.isArray(x.labels)?x.labels:[];
+  }
+  async function ensureLabel(token,name){
+    const labels=await gmailLabels(token);
+    const hit=labels.find(x=>String(x.name||'')===String(name));
+    if(hit)return String(hit.id||'');
+    const made=await apiJson(token,'POST','labels',{name:String(name),labelListVisibility:'labelShow',messageListVisibility:'show'});
+    return String(made.id||'');
+  }
+  async function moveToFinanceLabel(token,messageId,labelName){
+    const labelId=await ensureLabel(token,labelName);
+    if(!labelId)throw new Error('Gmail-Label konnte nicht erstellt werden: '+labelName);
+    await apiJson(token,'POST','messages/'+encodeURIComponent(messageId)+'/modify',{addLabelIds:[labelId],removeLabelIds:['INBOX']});
+    return labelId;
+  }
+  function financeRow(r){
+    let attachments=[];try{attachments=JSON.parse(String(r.attachments_json||'[]'));if(!Array.isArray(attachments))attachments=[];}catch(_e){attachments=[];}
+    return {
+      messageId:String(r.message_id||''),threadId:String(r.thread_id||''),senderEmail:String(r.sender_email||''),
+      senderName:String(r.sender_name||''),subject:String(r.subject||''),receivedAt:String(r.received_at_text||''),
+      category:String(r.category||''),status:String(r.status||''),paidAt:String(r.paid_at_text||''),
+      archivedAt:String(r.archived_at_text||''),attachments,gmailLabel:String(r.gmail_label||''),
+      gmailUrl:'https://mail.google.com/mail/u/0/#all/'+encodeURIComponent(String(r.message_id||''))
+    };
+  }
+  async function storeFinanceMessage(msg,kind,labelName){
+    const h=headers(msg.payload||{}),from=sender(h.from),received=new Date(Number(msg.internalDate)||Date.now()).toISOString();
+    const att=attachments(msg.payload||{},msg.id).map(x=>({name:x.name,mime:x.mime,size:x.size,messageId:x.messageId,attachmentId:x.attachmentId}));
+    await pool.query(
+      `INSERT INTO finance_mail_v10(message_id,thread_id,sender_email,sender_name,subject,received_at_text,category,status,attachments_json,gmail_label,updated_at)
+       VALUES($1,$2,$3,$4,$5,$6,$7,'open',$8,$9,now())
+       ON CONFLICT(message_id) DO UPDATE SET
+         thread_id=EXCLUDED.thread_id,sender_email=EXCLUDED.sender_email,sender_name=EXCLUDED.sender_name,
+         subject=EXCLUDED.subject,received_at_text=EXCLUDED.received_at_text,
+         category=CASE WHEN finance_mail_v10.status='open' THEN EXCLUDED.category ELSE finance_mail_v10.category END,
+         attachments_json=EXCLUDED.attachments_json,gmail_label=EXCLUDED.gmail_label,updated_at=now()`,
+      [String(msg.id||''),String(msg.threadId||''),String(from.email||''),String(from.name||''),String(h.subject||''),
+       received,kind,JSON.stringify(att),labelName]
+    );
+  }
+  async function syncFinance(){
+    if(!configured())return {ok:true,configured:false,connected:false,needsConfiguration:true,redirectUri};
+    const r=await row();if(!r)return {ok:true,configured:true,connected:false,needsConnect:true,redirectUri};
+    if(!hasModifyScope(r))return {ok:true,configured:true,connected:true,needsReconnect:true,email:String(r.account_email||''),scope:String(r.scope||'')};
+    const token=await accessToken(),query='in:inbox -category:promotions -category:social';
+    let pageToken='',ids=[];
+    for(let page=0;page<10;page++){
+      const q=new URLSearchParams({q:query,maxResults:'100'});if(pageToken)q.set('pageToken',pageToken);
+      const list=await api(token,'messages?'+q.toString());
+      ids.push(...(list.messages||[]).map(x=>String(x.id||'')).filter(Boolean));
+      pageToken=String(list.nextPageToken||'');if(!pageToken)break;
+    }
+    ids=[...new Set(ids)];
+    let imported=0,tax=0,ignored=0,failed=0;
+    for(const id of ids){
+      try{
+        const known=await pool.query('SELECT status FROM finance_mail_v10 WHERE message_id=$1 LIMIT 1',[id]);
+        if(known.rowCount){ignored++;continue;}
+        const msg=await api(token,'messages/'+encodeURIComponent(id)+'?format=full');
+        const kind=financeKind(msg);if(!kind){ignored++;continue;}
+        const label=kind==='tax'?TAX_LABEL:FINANCE_LABEL;
+        await storeFinanceMessage(msg,kind,label);
+        await moveToFinanceLabel(token,id,label);
+        if(kind==='tax')tax++;else imported++;
+      }catch(e){failed++;console.error('FINANCE_GMAIL message='+id+' error='+e.message);}
+    }
+    const summary={at:new Date().toISOString(),scanned:ids.length,imported,tax,ignored,failed};
+    await pool.query(`INSERT INTO app_meta(key,value) VALUES('finance_mail_last_sync_v10',$1::jsonb)
+      ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,[JSON.stringify(summary)]);
+    return Object.assign({ok:true,configured:true,connected:true,email:String(r.account_email||'')},summary);
+  }
+  async function financeSyncForUser(actor){
+    const r=await syncFinance();
+    if(r.needsConnect||r.needsReconnect)r.authUrl=await authUrl(actor);
+    return r;
+  }
+  async function financeList(category,status){
+    const q=await pool.query(
+      `SELECT * FROM finance_mail_v10 WHERE category=$1 AND status=$2 ORDER BY received_at_text DESC NULLS LAST,updated_at DESC LIMIT 500`,
+      [String(category),String(status)]
+    );
+    return q.rows.map(financeRow);
+  }
+  async function financeOverview(){
+    const q=await pool.query(
+      `SELECT
+        COUNT(*) FILTER(WHERE category='incoming' AND status='open')::int AS incoming,
+        COUNT(*) FILTER(WHERE category='tax' AND status='open')::int AS tax
+       FROM finance_mail_v10`
+    );
+    const r=q.rows[0]||{};
+    const s=await row();
+    return {incoming:Number(r.incoming||0),tax:Number(r.tax||0),modifyAuthorized:hasModifyScope(s),connected:Boolean(s)};
+  }
+  async function financeArchive(kind,year,month){
+    year=Number(year||0);month=Number(month||0);
+    let status=kind==='tax'?'tax_archived':'paid';
+    const dateExpr=status==='paid'?'paid_at_text':'archived_at_text';
+    const vals=[status],where=['status=$1'];
+    if(year>0){vals.push(String(year));where.push(`substring(COALESCE(${dateExpr},received_at_text),1,4)=\$${vals.length}`);}
+    if(month>0){vals.push(String(month).padStart(2,'0'));where.push(`substring(COALESCE(${dateExpr},received_at_text),6,2)=\$${vals.length}`);}
+    const q=await pool.query('SELECT * FROM finance_mail_v10 WHERE '+where.join(' AND ')+' ORDER BY COALESCE('+dateExpr+',received_at_text) DESC LIMIT 1000',vals);
+    return q.rows.map(financeRow);
+  }
+  async function markPaid(messageId,actor,fromTax){
+    messageId=String(messageId||'').trim();if(!messageId)throw new Error('E-Mail fehlt.');
+    const now=new Date().toISOString();
+    const q=await pool.query(
+      `UPDATE finance_mail_v10 SET status='paid',paid_at_text=$2,archived_at_text=NULL,updated_at=now()
+        WHERE message_id=$1 RETURNING *`,[messageId,now]
+    );
+    if(!q.rowCount)throw new Error('E-Mail wurde nicht gefunden.');
+    if(fromTax){
+      const r=await row();
+      if(hasModifyScope(r)){
+        try{const token=await accessToken();const labelId=await ensureLabel(token,FINANCE_LABEL);if(labelId)await apiJson(token,'POST','messages/'+encodeURIComponent(messageId)+'/modify',{addLabelIds:[labelId]});}catch(e){console.error('FINANCE_GMAIL add invoice label failed',e.message);}
+      }
+    }
+    await pool.query(`INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
+      ['finance_last_action_v10',JSON.stringify({action:fromTax?'tax_as_invoice':'paid',messageId,actor:String(actor||''),at:now})]);
+    return financeRow(q.rows[0]);
+  }
+  async function archiveTax(messageId,actor){
+    messageId=String(messageId||'').trim();if(!messageId)throw new Error('E-Mail fehlt.');
+    const now=new Date().toISOString();
+    const q=await pool.query(
+      `UPDATE finance_mail_v10 SET status='tax_archived',archived_at_text=$2,updated_at=now()
+        WHERE message_id=$1 AND category='tax' RETURNING *`,[messageId,now]
+    );
+    if(!q.rowCount)throw new Error('Steuerberater-Mail wurde nicht gefunden.');
+    await pool.query(`INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
+      ['finance_last_action_v10',JSON.stringify({action:'tax_archive',messageId,actor:String(actor||''),at:now})]);
+    return financeRow(q.rows[0]);
+  }
+
   async function sync(){
     if(syncing)return {ok:true,skipped:true,reason:'busy'};
     if(!configured())return {ok:true,configured:false,connected:false,needsConfiguration:true,redirectUri};
@@ -366,7 +550,7 @@ function createGmailDirect(opts){
     const r=await row(); let last=null;
     const q=await pool.query("SELECT value,updated_at FROM app_meta WHERE key='gmail_last_sync_v10' LIMIT 1");
     if(q.rowCount) last=Object.assign({},q.rows[0].value||{},{updatedAt:q.rows[0].updated_at});
-    return {configured:configured(),connected:Boolean(r),email:String(r&&r.account_email||''),scope:String(r&&r.scope||''),calendarAuthorized:Boolean(r&&String(r.scope||'').includes('https://www.googleapis.com/auth/calendar')),redirectUri,lastSync:last};
+    return {configured:configured(),connected:Boolean(r),email:String(r&&r.account_email||''),scope:String(r&&r.scope||''),modifyAuthorized:hasModifyScope(r),calendarAuthorized:Boolean(r&&String(r.scope||'').includes('https://www.googleapis.com/auth/calendar')),redirectUri,lastSync:last};
   }
 
   async function callback(code,state){
@@ -385,7 +569,7 @@ function createGmailDirect(opts){
       [account,e.ct,e.iv,e.tag,String(t.scope||'')]
     );
     await pool.query('DELETE FROM app_meta WHERE key=$1',['gmail_oauth_state:'+String(state||'')]);
-    setImmediate(()=>sync().catch(err=>console.error('GMAIL first sync failed',err.message)));
+    setImmediate(()=>Promise.allSettled([sync(),syncFinance()]).then(rows=>rows.forEach(x=>{if(x.status==='rejected')console.error('GMAIL first sync failed',x.reason&&x.reason.message||x.reason);})));
     return {ok:true,email:account};
   }
 
@@ -395,14 +579,18 @@ function createGmailDirect(opts){
     return r;
   }
 
+  async function scheduledSync(){
+    const results=await Promise.allSettled([sync(),syncFinance()]);
+    for(const x of results)if(x.status==='rejected')console.error('GMAIL scheduled sync failed',x.reason&&x.reason.message||x.reason);
+  }
   function start(){
     if(timer||!pool) return;
-    timer=setInterval(()=>sync().catch(e=>console.error('GMAIL scheduled sync failed',e.message)),intervalMs);
+    timer=setInterval(()=>scheduledSync().catch(e=>console.error('GMAIL scheduled sync failed',e.message)),intervalMs);
     if(timer.unref) timer.unref();
-    setTimeout(()=>sync().catch(e=>console.error('GMAIL startup sync failed',e.message)),15000);
+    setTimeout(()=>scheduledSync().catch(e=>console.error('GMAIL startup sync failed',e.message)),15000);
   }
 
-  return {init,start,status,syncForUser,callback,authUrl,configured,calendarApi,googleConnection,accessToken};
+  return {init,start,status,syncForUser,financeSyncForUser,financeList,financeOverview,financeArchive,markPaid,archiveTax,callback,authUrl,configured,calendarApi,googleConnection,accessToken};
 }
 
 module.exports={createGmailDirect};
