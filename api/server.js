@@ -10634,7 +10634,7 @@ async function tryDirectPostgresWrite(action,body){
     return {result,outboxId:0};
   }
   const client=await pool.connect();
-  let result=null,outboxId=0,legacyAction=action,legacyPayload=body,skipLegacySync=Boolean(directCalendarReady),calendarAfterCommit=null;
+  let result=null,outboxId=0,legacyAction=action,legacyPayload=body,skipLegacySync=Boolean(directCalendarReady),calendarAfterCommit=null,gmailArchiveAfterCommit=null;
   try{
     await client.query('BEGIN');
     if(action==='addRegieAttachments'){
@@ -12198,6 +12198,7 @@ async function tryDirectPostgresWrite(action,body){
             `SELECT id,due_date_text FROM offer_reminders_shadow
               WHERE offer_id=$1 AND status='Offen' ORDER BY created_at_text DESC NULLS LAST LIMIT 1`,[existingOffer]
           );
+          gmailArchiveAfterCommit={inquiryId,actor:by};
           result={ok:true,existing:true,offerId:existingOffer,
             reminderId:String(rq.rows[0]?.id||''),dueDate:String(rq.rows[0]?.due_date_text||'')};
         }
@@ -12237,6 +12238,7 @@ async function tryDirectPostgresWrite(action,body){
           [inquiryId,customer,phone,offerId,nowIso,by]
         );
         legacyPayload=Object.assign({},body,{offerId,reminderId});
+        gmailArchiveAfterCommit={inquiryId,actor:by};
         result={ok:true,existing:false,offerId,reminderId,dueDate:due};
       }
     }else if(action==='createInquiryReminder'){
@@ -12401,6 +12403,7 @@ async function tryDirectPostgresWrite(action,body){
                   changed_at_text=$2,changed_by=$3,shadow_updated_at=now()
             WHERE id=$1`,[id,nowIso,by]
         );
+        gmailArchiveAfterCommit={inquiryId:id,actor:by};
         result={ok:true};
       }
     }else if(action==='endSicknessAbsence'){
@@ -12907,6 +12910,7 @@ async function tryDirectPostgresWrite(action,body){
              changed_at_text=$2,changed_by=$3,shadow_updated_at=now() WHERE id=$1`,
           [inquiryId,nowIso,by]
         );
+        gmailArchiveAfterCommit={inquiryId,actor:by};
       }
       result={ok:true,id,inquiryId};
     }else if(['saveManualOrderNote','setManualOrderStatus','deleteManualOrder'].includes(action)){
@@ -13058,6 +13062,18 @@ async function tryDirectPostgresWrite(action,body){
       else if(calendarAfterCommit.operation==='delete')await calendarDirect.enqueueDelete(calendarAfterCommit.map||{});
       else if(calendarAfterCommit.operation==='employee-delete')await calendarDirect.deleteEmployeeCalendarEvent(calendarAfterCommit.employee,calendarAfterCommit.eventId);
     }catch(e){console.error('CALENDAR_SYNC queue failed action='+action+' error='+e.message);}
+  }
+  if(gmailArchiveAfterCommit){
+    try{
+      const g=await gmailDirect.archiveInquiryMessages(gmailArchiveAfterCommit.inquiryId,gmailArchiveAfterCommit.actor);
+      if(result&&typeof result==='object'){
+        result.gmailArchived=Number(g&&g.archived||0);
+        if(g&&g.needsReconnect)result.gmailNeedsReconnect=true;
+      }
+    }catch(e){
+      console.error('GMAIL_INQUIRY_ARCHIVE failed action='+action+' inquiry='+gmailArchiveAfterCommit.inquiryId+' error='+e.message);
+      if(result&&typeof result==='object')result.gmailArchiveError=String(e&&e.message||e);
+    }
   }
 
   if(action==='saveTimeBankManual'){
