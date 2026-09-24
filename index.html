@@ -14,7 +14,7 @@
 <link rel="preconnect" href="https://dg-app-10-api-production.up.railway.app"/>
 <link rel="dns-prefetch" href="//dg-app-10-api-production.up.railway.app"/>
 <link rel="preload" href="./app-5.0.css?v=20260918-800-prod1" as="style"/>
-<link rel="preload" href="./core-9.0-final.js?v=20260924-0710-absence-live" as="script" fetchpriority="high"/>
+<link rel="preload" href="./core-9.0-final.js?v=20260924-0725-runtime-live" as="script" fetchpriority="high"/>
 <link rel="manifest" href="manifest.json"/>
 <link href="dg_icon_192.png" rel="icon"/>
 <link href="dg_icon_192.png" rel="apple-touch-icon"/>
@@ -230,7 +230,7 @@
   if(!('serviceWorker' in navigator))return;
   window.addEventListener('load',function(){
     var start=function(){
-      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260923-2240-final-clean2',{updateViaCache:'none'})
+      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260924-0725-runtime-live',{updateViaCache:'none'})
         .then(function(r){return r.update();})
         .catch(function(e){console.warn('DG Offline-Cache nicht bereit',e);});
     };
@@ -243,7 +243,7 @@
 })();
 </script>
 
-<script defer fetchpriority="high" src="./core-9.0-final.js?v=20260924-0710-absence-live"></script>
+<script defer fetchpriority="high" src="./core-9.0-final.js?v=20260924-0725-runtime-live"></script>
 <script defer fetchpriority="low" src="./customerflow-9.0-final.js?v=20260920-900-final1"></script>
 <script defer fetchpriority="low" src="./payroll-9.0-final.js?v=20260923-2240-v10-final"></script>
 <script defer fetchpriority="low" src="./ui-9.0-final.js?v=20260923-1620-v10-title-final"></script>
