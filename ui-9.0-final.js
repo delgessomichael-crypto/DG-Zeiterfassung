@@ -3550,7 +3550,7 @@ setTimeout(applyVersion10,3200);
 const V='20260924-1835-finance-delete5';
 const q=id=>document.getElementById(id);
 const MONTHS=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
-const state={incoming:[],tax:[],syncing:false};
+const state={incoming:[],tax:[],syncing:false,reconnectUrl:''};
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function boss(){return q('bossView');}
 function dash(){return boss()?.querySelector(':scope > .d3-dashboard');}
@@ -3641,15 +3641,12 @@ async function handleSync(area){
  if(target)target.innerHTML='<div class="status info">Gmail wird synchronisiert …</div>';
  try{
    const r=await req({action:'syncFinanceGmailV10'});
-   if(r&&(r.needsReconnect||r.needsConnect)&&r.authUrl){
-     const html=googleReconnectHtml(r.authUrl);
-     if(target)target.innerHTML=html;
-     return false;
-   }
+   state.reconnectUrl=(r&&(r.needsReconnect||r.needsConnect)&&r.authUrl)?String(r.authUrl):'';
    if(target){
      target.innerHTML='<div class="status ok">Synchronisierung abgeschlossen: '+
        Number(r&&r.imported||0)+' Rechnung(en), '+Number(r&&r.tax||0)+' Steuerberater-Mail(s), '+
-       Number(r&&r.failed||0)+' Fehler.</div>';
+       Number(r&&r.failed||0)+' Fehler.</div>'+
+       (state.reconnectUrl?googleReconnectHtml(state.reconnectUrl):'');
    }
    return true;
  }catch(e){
@@ -3663,7 +3660,7 @@ async function refreshIncoming(){
  try{
    const rows=await req({action:'getFinanceInboxV10'});state.incoming=rows||[];
    host.innerHTML=state.incoming.map(x=>mailHtml(x,'incoming')).join('')||'<div class="status ok">Keine offenen Eingangsrechnungen.</div>';
-   if(st)st.innerHTML='<div class="status ok">'+state.incoming.length+' offene Rechnung(en) im allgemeinen Rechnungseingang.</div>';
+   if(st)st.innerHTML='<div class="status ok">'+state.incoming.length+' offene Rechnung(en) im allgemeinen Rechnungseingang.</div>'+(state.reconnectUrl?googleReconnectHtml(state.reconnectUrl):'');
  }catch(e){if(st)st.innerHTML='<div class="status error">'+esc(e.message)+'</div>';}
 }
 async function refreshTax(){
@@ -3671,7 +3668,7 @@ async function refreshTax(){
  try{
    const rows=await req({action:'getTaxAdvisorInboxV10'});state.tax=rows||[];
    host.innerHTML=state.tax.map(x=>mailHtml(x,'tax')).join('')||'<div class="status ok">Keine offenen Nachrichten von Frau Busse.</div>';
-   if(st)st.innerHTML='<div class="status ok">'+state.tax.length+' Nachricht(en) von Frau Busse.</div>';
+   if(st)st.innerHTML='<div class="status ok">'+state.tax.length+' Nachricht(en) von Frau Busse.</div>'+(state.reconnectUrl?googleReconnectHtml(state.reconnectUrl):'');
  }catch(e){if(st)st.innerHTML='<div class="status error">'+esc(e.message)+'</div>';}
 }
 async function loadIncoming(sync){
