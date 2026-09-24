@@ -10883,9 +10883,47 @@ async function tryDirectPostgresWrite(action,body){
            activity_note=EXCLUDED.activity_note,shadow_updated_at=now()`,
         [offerId,customer,phone,email,details,nowIso,by,calendarEventId,berlinTodayIso(),description]
       );
+      let timeEntryId='',timeDayData=null;
+      if(Boolean(item.captureTime)){
+        const date=berlinDateOnly(item.timeDate||berlinTodayIso());
+        const start=String(item.timeStart||'').trim(),end=String(item.timeEnd||'').trim();
+        if(!validIsoDateText(date))throw new Error('Datum der Zeiterfassung ist ungültig.');
+        if(!/^\\d{2}:\\d{2}$/.test(start)||!/^\\d{2}:\\d{2}$/.test(end))throw new Error('Von-/Bis-Zeit der Zeiterfassung ist ungültig.');
+        const sm=Number(start.slice(0,2))*60+Number(start.slice(3,5));
+        const em=Number(end.slice(0,2))*60+Number(end.slice(3,5));
+        const hours=Math.round(((em-sm)/60)*100)/100;
+        if(!(hours>0&&hours<=12))throw new Error('Zeiterfassung muss größer als 0 und höchstens 12 Stunden sein.');
+        const closedQ=await client.query(
+          'SELECT 1 FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 LIMIT 1',[by,date]
+        );
+        const isSupplement=Boolean(closedQ.rowCount);
+        timeEntryId='BESZEIT-MA-'+crypto.randomUUID();
+        await client.query(
+          `INSERT INTO time_entries_shadow(
+             id,employee_name,entry_date,customer,start_time,end_time,hours,activity,calendar_id,transmitted_at_text,
+             closed,material_used,material,customer_signature_id,customer_signature_url,photo_count,photo_file_ids,photo_urls,
+             additional_employees_used,additional_employees_text,additional_employee_hours_text,source_calendar_event_id,
+             billing_status,billed_at_text,billed_by,object_id,job_status,is_supplement,supplement_created_at_text,
+             offer_id,offer_changed_at_text,offer_changed_by,maintenance,next_maintenance_due,maintenance_customer_id,
+             maintenance_object_id,maintenance_device_id,source_payload,shadow_updated_at
+           ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'',$9,$10,false,'','','',0,'','',false,'','',$11,
+                    'Offen','','','',$12,$13,$14,$15,$9,$2,false,'','','','',$16::jsonb,now())`,
+          [timeEntryId,by,date,customer,start,end,hours,
+           'Besichtigungstermin · '+description,nowIso,isSupplement,calendarEventId,
+           'Angebot zu erstellen',isSupplement,isSupplement?nowIso:'',offerId,
+           JSON.stringify({source:'createEmployeeInspectionRequestV10',offerId,captureTime:true})]
+        );
+        await client.query(
+          `UPDATE inquiry_offers_shadow SET inspection_date=$2,inspection_hours=$3,activity_note=$4,shadow_updated_at=now()
+            WHERE offer_id=$1`,
+          [offerId,date,hours,description]
+        );
+        timeDayData=await postgresDayData({date},by);
+      }
       result={
         ok:true,offerId,status:'Zu erstellen',customer,firstName,lastName,street,postalCode,city,
-        email,mobile,landline,description,calendarEventId,createdAt:nowIso,createdBy:by
+        email,mobile,landline,description,calendarEventId,createdAt:nowIso,createdBy:by,
+        timeEntryId,timeCaptured:Boolean(timeEntryId),dayData:timeDayData
       };
       if(calendarEventId)calendarAfterCommit={operation:'employee-delete',employee:by,eventId:calendarEventId};
       skipLegacySync=true;
@@ -13026,9 +13064,9 @@ async function tryDirectPostgresWrite(action,body){
     ]);
     if(year)await mirrorHolidayYear(year);
   }
-  if(action==='createInspectionOffer'){
+  if(action==='createInspectionOffer'||action==='createEmployeeInspectionRequestV10'){
     await Promise.all([
-      pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'offer_%' OR shadow_name LIKE 'regie_%' OR shadow_name LIKE 'day_data:%' OR shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'month_data:%' OR shadow_name LIKE 'boss_month_native:%'"),
+      pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'offer_%' OR shadow_name LIKE 'regie_%' OR shadow_name LIKE 'day_data:%' OR shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'month_data:%' OR shadow_name LIKE 'boss_month_native:%' OR shadow_name LIKE 'boss_day_closures:%'"),
       pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getOfferReports','getOfferStatistics','getMonthPayrollAudit','getPayrollCycleState','getDashboardSummary51')")
     ]);
   }
