@@ -185,6 +185,85 @@ function createGmailDirect(opts){
     return body.length>5000?body.slice(0,5000):body;
   }
   function attachmentNames(payload,messageId){return attachments(payload,messageId).map(x=>x.name).filter(Boolean);}
+  function financeFileUrl(id){
+    id=String(id||'').trim();
+    return id?(apiOrigin+'/v1/files/'+encodeURIComponent(id)):'';
+  }
+  function b64buf(v){
+    const s=String(v||'').replace(/-/g,'+').replace(/_/g,'/');
+    return Buffer.from(s+(s.length%4?'='.repeat(4-s.length%4):''),'base64');
+  }
+  function financePartFiles(payload,messageId){
+    const out=[];
+    function walk(x){
+      for(const y of (x&&x.parts||[])){
+        const name=String(y.filename||'').trim(),body=y.body||{};
+        if(name&&(body.attachmentId||body.data)){
+          out.push({
+            messageId:String(messageId||''),attachmentId:String(body.attachmentId||''),
+            inlineData:String(body.data||''),name,mime:String(y.mimeType||'application/octet-stream'),
+            size:Number(body.size||0)
+          });
+        }
+        walk(y);
+      }
+    }
+    walk(payload);
+    return out.slice(0,30);
+  }
+  async function persistFinanceAttachments(token,msg){
+    const files=financePartFiles(msg&&msg.payload||{},msg&&msg.id||'');
+    const stored=[];
+    for(const f of files){
+      try{
+        let data=Buffer.alloc(0);
+        if(f.attachmentId){
+          const x=await api(token,'messages/'+encodeURIComponent(f.messageId)+'/attachments/'+encodeURIComponent(f.attachmentId));
+          data=b64buf(x&&x.data||'');
+        }else if(f.inlineData)data=b64buf(f.inlineData);
+        if(!data.length)continue;
+        if(data.length>25*1024*1024){
+          stored.push({name:f.name,mime:f.mime,size:data.length,tooLarge:true});
+          continue;
+        }
+        const key=f.messageId+'|'+(f.attachmentId||crypto.createHash('sha256').update(data).digest('hex'))+'|'+f.name;
+        const id='GMAILFIN-'+crypto.createHash('sha256').update(key).digest('hex').slice(0,40);
+        const sha=crypto.createHash('sha256').update(data).digest('hex');
+        await pool.query(
+          `INSERT INTO binary_files_v10(id,file_name,mime_type,file_size,sha256,file_data,source,kind,metadata,updated_at)
+           VALUES($1,$2,$3,$4,$5,$6,'gmail-finance','invoice-attachment',$7::jsonb,now())
+           ON CONFLICT(id) DO UPDATE SET file_name=EXCLUDED.file_name,mime_type=EXCLUDED.mime_type,
+             file_size=EXCLUDED.file_size,sha256=EXCLUDED.sha256,file_data=EXCLUDED.file_data,
+             source=EXCLUDED.source,kind=EXCLUDED.kind,metadata=EXCLUDED.metadata,updated_at=now()`,
+          [id,f.name,f.mime,data.length,sha,data,JSON.stringify({messageId:f.messageId,attachmentId:f.attachmentId||'',gmail:true})]
+        );
+        stored.push({fileId:id,name:f.name,mime:f.mime,size:data.length,url:financeFileUrl(id)});
+      }catch(e){
+        console.error('FINANCE_GMAIL attachment message='+f.messageId+' file='+f.name+' error='+e.message);
+        stored.push({name:f.name,mime:f.mime,size:f.size||0,error:true});
+      }
+    }
+    return stored;
+  }
+  async function backfillFinanceAttachments(token){
+    const q=await pool.query(
+      `SELECT message_id,attachments_json FROM finance_mail_v10
+        WHERE COALESCE(attachments_json,'')<>'' ORDER BY updated_at DESC LIMIT 300`
+    );
+    let updated=0,failed=0;
+    for(const row of q.rows){
+      let old=[];try{old=JSON.parse(String(row.attachments_json||'[]'));if(!Array.isArray(old))old=[];}catch(_e){old=[];}
+      if(!old.length||old.every(x=>x&&x.fileId&&x.url))continue;
+      try{
+        const msg=await api(token,'messages/'+encodeURIComponent(String(row.message_id||''))+'?format=full');
+        const files=await persistFinanceAttachments(token,msg);
+        await pool.query('UPDATE finance_mail_v10 SET attachments_json=$2,updated_at=now() WHERE message_id=$1',
+          [String(row.message_id||''),JSON.stringify(files)]);
+        updated++;
+      }catch(e){failed++;console.error('FINANCE_GMAIL attachment backfill message='+row.message_id+' error='+e.message);}
+    }
+    return {updated,failed};
+  }
   async function openInquiryByEmail(email){
     email=String(email||'').trim().toLowerCase();if(!email)return null;
     const q=await pool.query(
@@ -403,9 +482,9 @@ function createGmailDirect(opts){
       gmailUrl:'https://mail.google.com/mail/u/0/#all/'+encodeURIComponent(String(r.message_id||''))
     };
   }
-  async function storeFinanceMessage(msg,kind,labelName){
+  async function storeFinanceMessage(token,msg,kind,labelName){
     const h=headers(msg.payload||{}),from=sender(h.from),received=new Date(Number(msg.internalDate)||Date.now()).toISOString();
-    const att=attachments(msg.payload||{},msg.id).map(x=>({name:x.name,mime:x.mime,size:x.size,messageId:x.messageId,attachmentId:x.attachmentId}));
+    const att=await persistFinanceAttachments(token,msg);
     await pool.query(
       `INSERT INTO finance_mail_v10(message_id,thread_id,sender_email,sender_name,subject,received_at_text,category,status,attachments_json,gmail_label,updated_at)
        VALUES($1,$2,$3,$4,$5,$6,$7,'open',$8,$9,now())
@@ -413,7 +492,8 @@ function createGmailDirect(opts){
          thread_id=EXCLUDED.thread_id,sender_email=EXCLUDED.sender_email,sender_name=EXCLUDED.sender_name,
          subject=EXCLUDED.subject,received_at_text=EXCLUDED.received_at_text,
          category=CASE WHEN finance_mail_v10.status='open' THEN EXCLUDED.category ELSE finance_mail_v10.category END,
-         attachments_json=EXCLUDED.attachments_json,gmail_label=EXCLUDED.gmail_label,updated_at=now()`,
+         attachments_json=CASE WHEN EXCLUDED.attachments_json<>'[]' THEN EXCLUDED.attachments_json ELSE finance_mail_v10.attachments_json END,
+         gmail_label=EXCLUDED.gmail_label,updated_at=now()`,
       [String(msg.id||''),String(msg.threadId||''),String(from.email||''),String(from.name||''),String(h.subject||''),
        received,kind,JSON.stringify(att),labelName]
     );
@@ -439,12 +519,14 @@ function createGmailDirect(opts){
         const msg=await api(token,'messages/'+encodeURIComponent(id)+'?format=full');
         const kind=financeKind(msg);if(!kind){ignored++;continue;}
         const label=kind==='tax'?TAX_LABEL:FINANCE_LABEL;
-        await storeFinanceMessage(msg,kind,label);
+        await storeFinanceMessage(token,msg,kind,label);
         await moveToFinanceLabel(token,id,label);
         if(kind==='tax')tax++;else imported++;
       }catch(e){failed++;console.error('FINANCE_GMAIL message='+id+' error='+e.message);}
     }
-    const summary={at:new Date().toISOString(),scanned:ids.length,imported,tax,ignored,failed};
+    const attachmentBackfill=await backfillFinanceAttachments(token);
+    const summary={at:new Date().toISOString(),scanned:ids.length,imported,tax,ignored,failed,
+      attachmentBackfillUpdated:Number(attachmentBackfill.updated||0),attachmentBackfillFailed:Number(attachmentBackfill.failed||0)};
     await pool.query(`INSERT INTO app_meta(key,value) VALUES('finance_mail_last_sync_v10',$1::jsonb)
       ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,[JSON.stringify(summary)]);
     return Object.assign({ok:true,configured:true,connected:true,email:String(r.account_email||'')},summary);
