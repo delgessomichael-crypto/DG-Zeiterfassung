@@ -568,7 +568,7 @@ function createGmailDirect(opts){
   async function syncFinance(){
     if(!configured())return {ok:true,configured:false,connected:false,needsConfiguration:true,redirectUri};
     const r=await row();if(!r)return {ok:true,configured:true,connected:false,needsConnect:true,redirectUri};
-    if(!hasModifyScope(r))return {ok:true,configured:true,connected:true,needsReconnect:true,email:String(r.account_email||''),scope:String(r.scope||'')};
+    const canModify=hasModifyScope(r);
     const token=await accessToken(),query='in:inbox -category:promotions -category:social';
     let pageToken='',ids=[];
     for(let page=0;page<10;page++){
@@ -578,25 +578,42 @@ function createGmailDirect(opts){
       pageToken=String(list.nextPageToken||'');if(!pageToken)break;
     }
     ids=[...new Set(ids)];
-    let imported=0,tax=0,ignored=0,failed=0;
+    let imported=0,tax=0,ignored=0,failed=0,moved=0,moveFailed=0;
     for(const id of ids){
       try{
-        const known=await pool.query('SELECT status FROM finance_mail_v10 WHERE message_id=$1 LIMIT 1',[id]);
-        if(known.rowCount){ignored++;continue;}
+        const known=await pool.query('SELECT status,category FROM finance_mail_v10 WHERE message_id=$1 LIMIT 1',[id]);
+        if(known.rowCount){
+          // Bereits importierte Mails nach einer später erteilten Modify-Freigabe nachträglich
+          // aus dem Gmail-Posteingang verschieben.
+          if(canModify&&String(known.rows[0].status||'')==='open'){
+            const category=String(known.rows[0].category||'');
+            const label=category==='tax'?TAX_LABEL:category==='incoming'?FINANCE_LABEL:'';
+            if(label){
+              try{await moveToFinanceLabel(token,id,label);moved++;}catch(e){moveFailed++;console.error('FINANCE_GMAIL move known message='+id+' error='+e.message);}
+            }
+          }
+          ignored++;continue;
+        }
         const msg=await api(token,'messages/'+encodeURIComponent(id)+'?format=full');
         const kind=financeKind(msg);if(!kind){ignored++;continue;}
         const label=kind==='tax'?TAX_LABEL:FINANCE_LABEL;
+
+        // Der Import selbst braucht nur Gmail-Lesezugriff.
         await storeFinanceMessage(token,msg,kind,label);
-        await moveToFinanceLabel(token,id,label);
+        if(canModify){
+          try{await moveToFinanceLabel(token,id,label);moved++;}catch(e){moveFailed++;console.error('FINANCE_GMAIL move message='+id+' error='+e.message);}
+        }
         if(kind==='tax')tax++;else imported++;
       }catch(e){failed++;console.error('FINANCE_GMAIL message='+id+' error='+e.message);}
     }
     const attachmentBackfill=await backfillFinanceAttachments(token);
-    const summary={at:new Date().toISOString(),scanned:ids.length,imported,tax,ignored,failed,
+    const summary={at:new Date().toISOString(),scanned:ids.length,imported,tax,ignored,failed,moved,moveFailed,
+      modifyAuthorized:canModify,needsReconnect:!canModify,
       attachmentBackfillUpdated:Number(attachmentBackfill.updated||0),attachmentBackfillFailed:Number(attachmentBackfill.failed||0)};
     await pool.query(`INSERT INTO app_meta(key,value) VALUES('finance_mail_last_sync_v10',$1::jsonb)
       ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,[JSON.stringify(summary)]);
-    return Object.assign({ok:true,configured:true,connected:true,email:String(r.account_email||'')},summary);
+    console.log('FINANCE_GMAIL_SYNC '+JSON.stringify(summary));
+    return Object.assign({ok:true,configured:true,connected:true,email:String(r.account_email||''),scope:String(r.scope||'')},summary);
   }
   async function financeSyncForUser(actor){
     const r=await syncFinance();
