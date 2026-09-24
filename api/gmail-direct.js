@@ -368,10 +368,13 @@ function createGmailDirect(opts){
   function financeKind(msg){
     const h=headers(msg&&msg.payload||{}),from=sender(h.from),mail=String(from.email||'').toLowerCase();
     if(mail===TAX_MAIL)return 'tax';
-    const names=attachmentNames(msg&&msg.payload||{},msg&&msg.id||'').join(' ');
-    const hay=(String(h.subject||'')+' '+names).toLowerCase();
-    const invoice=/(^|[\\s_\\-])(rechnung(?:en)?|invoice|gutschrift|mahnung|zahlungserinnerung|honorar(?:rechnung)?|beleg)([\\s_.\\-]|$)/i.test(hay);
-    return invoice?'incoming':'';
+    const subject=String(h.subject||'').trim();
+    const names=attachmentNames(msg&&msg.payload||{},msg&&msg.id||'');
+    // Allgemeiner Rechnungseingang: echte Beleg-/Rechnungsindikatoren.
+    // Reine Kundenkorrespondenz wie "Klärung der Rechnung" darf nicht einsortiert werden.
+    const subjectInvoice=/^(?:re(?:\s*:)?\s*)?(?:rechnung(?:\s|$|[-_#:/])|invoice(?:\s|$|[-_#:/])|gutschrift(?:\s|$|[-_#:/])|mahnung(?:\s|$|[-_#:/])|zahlungserinnerung(?:\s|$|[-_#:/])|honorarrechnung(?:\s|$|[-_#:/])|beleg(?:\s|$|[-_#:/]))/i.test(subject);
+    const attachmentInvoice=names.some(name=>/(?:^|[\\s_\\-])(rechnung|invoice|gutschrift|mahnung|zahlungserinnerung|honorarrechnung|beleg)(?:[\\s_.\\-]|$)/i.test(String(name||'')));
+    return (subjectInvoice||attachmentInvoice)?'incoming':'';
   }
   async function gmailLabels(token){
     const x=await api(token,'labels');
