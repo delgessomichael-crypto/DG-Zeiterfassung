@@ -230,7 +230,7 @@
   if(!('serviceWorker' in navigator))return;
   window.addEventListener('load',function(){
     var start=function(){
-      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260924-1515-accounting-shell1',{updateViaCache:'none'})
+      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260924-1528-accounting-bundled1',{updateViaCache:'none'})
         .then(function(r){return r.update();})
         .catch(function(e){console.warn('DG Offline-Cache nicht bereit',e);});
     };
@@ -246,7 +246,7 @@
 <script defer fetchpriority="high" src="./core-9.0-final.js?v=20260924-1438-login-persist1"></script>
 <script defer fetchpriority="low" src="./customerflow-9.0-final.js?v=20260920-900-final1"></script>
 <script defer fetchpriority="low" src="./payroll-9.0-final.js?v=20260923-2240-v10-final"></script>
-<script defer fetchpriority="low" src="./ui-9.0-final.js?v=20260923-1620-v10-title-final"></script>
+<script defer fetchpriority="low" src="./ui-9.0-final.js?v=20260924-1528-accounting-bundled1"></script>
 <script defer src="./employee-controls-10.0.js?v=20260924-1100-signature-optional2"></script>
 <script>
 (function(){
@@ -398,6 +398,5 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 </script><script src="./inspection-quick-10.0.js?v=20260924-1425-inspection-time-speech2"></script>
 <script src="./day-total-display-10.0.js?v=20260924-1425-day-total-clear1"></script>
-<script src="./accounting-10.0.js?v=20260924-1515-accounting-shell1"></script>
 </body>
 </html>
