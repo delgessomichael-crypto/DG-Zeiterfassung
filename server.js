@@ -108,9 +108,12 @@ const server = http.createServer((req, res) => {
     const variant = chooseVariant(file, req.headers['accept-encoding']);
     const isHtml = rel.endsWith('.html');
     const isServiceWorker = rel === 'sw-9.0-final.js';
+    const isCode = rel.endsWith('.js') || rel.endsWith('.css');
     const cacheControl = isHtml || isServiceWorker
       ? 'no-cache, no-store, must-revalidate'
-      : 'public, max-age=31536000, immutable';
+      : isCode
+        ? 'no-cache, must-revalidate'
+        : 'public, max-age=31536000, immutable';
 
     const commonHeaders = {
       'Cache-Control': cacheControl,
