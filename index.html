@@ -230,7 +230,7 @@
   if(!('serviceWorker' in navigator))return;
   window.addEventListener('load',function(){
     var start=function(){
-      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260924-1815-finance-sync4',{updateViaCache:'none'})
+      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260924-1840-finance-delete5',{updateViaCache:'none'})
         .then(function(r){return r.update();})
         .catch(function(e){console.warn('DG Offline-Cache nicht bereit',e);});
     };
@@ -246,7 +246,7 @@
 <script defer fetchpriority="high" src="./core-9.0-final.js?v=20260924-1745-inquiry-attachments1"></script>
 <script defer fetchpriority="low" src="./customerflow-9.0-final.js?v=20260920-900-final1"></script>
 <script defer fetchpriority="low" src="./payroll-9.0-final.js?v=20260923-2240-v10-final"></script>
-<script defer fetchpriority="low" src="./ui-9.0-final.js?v=20260924-1815-finance-sync4"></script>
+<script defer fetchpriority="low" src="./ui-9.0-final.js?v=20260924-1840-finance-delete5"></script>
 <script defer src="./employee-controls-10.0.js?v=20260924-1100-signature-optional2"></script>
 <script>
 (function(){
