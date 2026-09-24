@@ -1,0 +1,85 @@
+name: DG App 10 Production Audit
+on:
+  push:
+    branches: ['v10-railway-migration']
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check JavaScript syntax
+        run: |
+          for f in server.js core-9.0-final.js customerflow-9.0-final.js payroll-9.0-final.js ui-9.0-final.js employee-controls-10.0.js inspection-quick-10.0.js day-total-display-10.0.js accounting-10.0.js sw-9.0-final.js api/server.js api/gmail-direct.js api/calendar-direct.js
+          do
+            node --check "$f"
+          done
+      - name: Validate production assets and handlers
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          html=Path('index.html').read_text(encoding='utf-8')
+          server=Path('server.js').read_text(encoding='utf-8')
+          sw=Path('sw-9.0-final.js').read_text(encoding='utf-8')
+          runtime='\n'.join(Path(p).read_text(encoding='utf-8') for p in [
+            'core-9.0-final.js','customerflow-9.0-final.js','payroll-9.0-final.js',
+            'ui-9.0-final.js','employee-controls-10.0.js','inspection-quick-10.0.js',
+            'day-total-display-10.0.js','accounting-10.0.js'
+          ])
+
+          assets=sorted(set(re.findall(r'(?:src|href)="\./([^"?]+\.(?:js|css|png|json))(?:\?[^"]*)?"',html)))
+          missing_routes=[p for p in assets if ("'/"+p+"'") not in server]
+          if missing_routes:
+              raise SystemExit('Assets loaded by index but not served: '+repr(missing_routes))
+
+          cacheable=[p for p in assets if p!='sw-9.0-final.js']
+          uncached=[p for p in cacheable if ("./"+p) not in sw]
+          if uncached:
+              raise SystemExit('Production assets missing from service worker: '+repr(uncached))
+
+          ids=re.findall(r'\bid="([^"]+)"',html)
+          dup=sorted({x for x in ids if ids.count(x)>1})
+          if dup:
+              raise SystemExit('Duplicate static IDs: '+repr(dup))
+
+          ignore={
+            'if','for','while','switch','catch','function','Math','String','Number','Boolean',
+            'Array','Object','JSON','Date','Promise','setTimeout','clearTimeout',
+            'encodeURIComponent','decodeURIComponent','parseInt','parseFloat','confirm','alert',
+            'preventDefault','stopPropagation','getElementById','querySelector','querySelectorAll'
+          }
+          funcs=set()
+          sources=html+'\n'+runtime
+          for code in re.findall(r'\bonclick\s*=\s*["\'](.*?)["\']',sources,re.S):
+              funcs.update(x for x in re.findall(r'\b([A-Za-z_$][\w$]*)\s*\(',code) if x not in ignore)
+
+          def defined(name):
+              e=re.escape(name)
+              pats=[
+                rf'\b(?:async\s+)?function\s+{e}\s*\(',
+                rf'\bwindow\s*\.\s*{e}\s*=',
+                rf'\bglobalThis\s*\.\s*{e}\s*=',
+                rf'\b(?:const|let|var)\s+{e}\s*='
+              ]
+              return any(re.search(p,runtime) for p in pats)
+
+          dead=sorted(x for x in funcs if not defined(x))
+          if dead:
+              raise SystemExit('Dead onclick handlers: '+repr(dead))
+
+          loader_names=set(re.findall(r'loader\s*:\s*["\']([^"\']+)["\']',runtime))
+          loader_dead=sorted(x for x in loader_names if not defined(x))
+          if loader_dead:
+              raise SystemExit('Missing loader functions: '+repr(loader_dead))
+
+          print('DG App 10 audit OK')
+          print('assets:',len(assets),'onclick handlers:',len(funcs),'loaders:',len(loader_names))
+          PY
