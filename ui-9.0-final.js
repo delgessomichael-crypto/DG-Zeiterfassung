@@ -3547,7 +3547,7 @@ setTimeout(applyVersion10,3200);
 /* DG App 10 - Rechnungswesen / Gmail workflow */
 (function(){
 'use strict';
-const V='20260924-1715-finance-routing3';
+const V='20260924-1810-finance-sync4';
 const q=id=>document.getElementById(id);
 const MONTHS=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
 const state={incoming:[],tax:[],syncing:false};
@@ -3628,22 +3628,32 @@ function mailHtml(x,kind){
  if(kind==='tax')actions+='<button class="btn success" data-tax-invoice="'+esc(x.messageId)+'">Als Rechnung markieren</button><button class="btn secondary" data-tax-archive="'+esc(x.messageId)+'">Archivieren</button>';
  return '<div class="dg10-fin-mail"><div class="dg10-fin-head"><div><div class="dg10-fin-subject">'+esc(x.subject||'(ohne Betreff)')+'</div><div class="dg10-fin-meta">'+esc(x.senderName||x.senderEmail||'')+(x.senderEmail?' · '+esc(x.senderEmail):'')+'</div></div><strong>'+esc(de(x.receivedAt))+'</strong></div>'+(files?'<div class="dg10-fin-files"><div class="muted small" style="margin-bottom:6px"><strong>Anhänge</strong></div><div class="dg10-fin-actions">'+files+'</div></div>':'')+'<div class="dg10-fin-actions">'+actions+'</div></div>';
 }
+function googleReconnectHtml(url){
+  return '<div class="status warn"><strong>Google-Freigabe muss einmalig aktualisiert werden.</strong><br>'+
+    'Die bisherige Verbindung kann Gmail lesen, darf Nachrichten aber noch nicht verschieben oder mit Labels versehen.'+
+    '<div style="margin-top:10px"><a class="btn primary" href="'+esc(url)+'" target="_blank" rel="noopener">Google-Freigabe aktualisieren</a></div></div>';
+}
 async function handleSync(area){
- if(state.syncing)return false;state.syncing=true;
+ if(state.syncing)return false;
+ state.syncing=true;
+ const target=area==='tax'?q('dg10TaxStatus'):q('dg10IncomingStatus');
+ if(target)target.innerHTML='<div class="status info">Gmail wird synchronisiert …</div>';
  try{
    const r=await req({action:'syncFinanceGmailV10'});
-   if(r&&r.needsReconnect&&r.authUrl){
-     const w=window.open(r.authUrl,'dgGmailFinanceConnect','width=720,height=820');if(!w)location.href=r.authUrl;
-     const msg='Für das automatische Verschieben in Gmail ist einmalig die erweiterte Gmail-Freigabe erforderlich.';
-     if(q('dg10IncomingStatus'))q('dg10IncomingStatus').innerHTML='<div class="status warn">'+esc(msg)+'</div>';
-     if(q('dg10TaxStatus'))q('dg10TaxStatus').innerHTML='<div class="status warn">'+esc(msg)+'</div>';
+   if(r&&(r.needsReconnect||r.needsConnect)&&r.authUrl){
+     const html=googleReconnectHtml(r.authUrl);
+     if(target)target.innerHTML=html;
      return false;
+   }
+   if(target){
+     target.innerHTML='<div class="status ok">Synchronisierung abgeschlossen: '+
+       Number(r&&r.imported||0)+' Rechnung(en), '+Number(r&&r.tax||0)+' Steuerberater-Mail(s), '+
+       Number(r&&r.failed||0)+' Fehler.</div>';
    }
    return true;
  }catch(e){
    const msg=e&&e.message?e.message:String(e);
-   const target=area==='tax'?q('dg10TaxStatus'):q('dg10IncomingStatus');
-   if(target)target.innerHTML='<div class="status error">'+esc(msg)+'</div>';
+   if(target)target.innerHTML='<div class="status error">Synchronisierung fehlgeschlagen: '+esc(msg)+'</div>';
    return false;
  }finally{state.syncing=false;}
 }
@@ -3665,13 +3675,13 @@ async function refreshTax(){
 }
 async function loadIncoming(sync){
  show('dg10InvoiceIncoming','Allgemeiner Rechnungseingang','Rechnungswesen');
- if(sync)await handleSync('incoming');
- await refreshIncoming();
+ const ok=sync?await handleSync('incoming'):true;
+ if(ok)await refreshIncoming();
 }
 async function loadTax(sync){
  show('dg10TaxAdvisor','Steuerberater – Frau Busse','Rechnungswesen');
- if(sync)await handleSync('tax');
- await refreshTax();
+ const ok=sync?await handleSync('tax'):true;
+ if(ok)await refreshTax();
 }
 async function loadArchive(kind){
  const y=Number(document.querySelector('[data-dg10-year="'+kind+'"]')?.value||year()),m=Number(document.querySelector('[data-dg10-month="'+kind+'"]')?.value||month());
@@ -3700,9 +3710,12 @@ function wireCards(){
  root.addEventListener('click',async e=>{
    const sync=e.target.closest('[data-dg10-sync]');if(sync){
      e.preventDefault();
+     sync.disabled=true;
      const area=String(sync.dataset.dg10Sync||'incoming');
-     await handleSync(area);
-     if(area==='tax')await refreshTax();else await refreshIncoming();
+     try{
+       const ok=await handleSync(area);
+       if(ok){if(area==='tax')await refreshTax();else await refreshIncoming();}
+     }finally{sync.disabled=false;}
      return;
    }
    const paid=e.target.closest('[data-paid]');if(paid){e.preventDefault();paid.disabled=true;try{await req({action:'markFinancePaidV10',messageId:paid.dataset.paid});await refreshIncoming();}finally{paid.disabled=false;}return;}
