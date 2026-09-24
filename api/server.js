@@ -30,6 +30,7 @@ const WHATSAPP_REVIEW_TEMPLATE_LANG = String(process.env.WHATSAPP_REVIEW_TEMPLAT
 const FINAL_CUTOVER = /^(1|true|yes|ja)$/i.test(String(process.env.FINAL_CUTOVER||'false'));
 const FINAL_FILE_IMPORT_KEY = String(process.env.FINAL_FILE_IMPORT_KEY||MIGRATION_UPLOAD_KEY||'');
 const DG_LEGACY_DELTA_KEY = String(process.env.DG_LEGACY_DELTA_KEY||'');
+const DG_LEGACY_DELTA_JSON = String(process.env.DG_LEGACY_DELTA_JSON||'').trim();
 const API_ORIGIN = String(process.env.API_ORIGIN || 'https://dg-app-10-api-production.up.railway.app').replace(/\/$/,'');
 
 
@@ -1313,6 +1314,12 @@ async function initDb() {
   await initRegieMetadataShadows();
   await bootstrapCompletedCustomerConsolidationV23();
   await initRegieAttachmentsShadow();
+  if(DG_LEGACY_DELTA_JSON){
+    let delta;
+    try{delta=JSON.parse(DG_LEGACY_DELTA_JSON);}catch(e){throw new Error('DG_LEGACY_DELTA_JSON ist ungültig: '+e.message);}
+    const dr=await importLegacyTimeDeltaV26(delta);
+    console.log('LEGACY_TIME_DELTA_BOOTSTRAP files='+Number(dr.filesInserted||0)+' new/'+Number(dr.filesExisting||0)+' existing entries='+Number(dr.entriesInserted||0)+' new/'+Number(dr.entriesExisting||0)+' existing closures='+Number(dr.closuresInserted||0)+' new/'+Number(dr.closuresExisting||0)+' existing');
+  }
   const finalDriveImport=await importDriveManifestsV25();
   await finalizeLocalFileReferencesV24();
   if(finalDriveImport.batches)console.log('FINAL_CUTOVER_AUDIT '+JSON.stringify(await finalCutoverAuditV24()));
