@@ -2976,7 +2976,7 @@ const PERF=window.DG51=window.DG51||{
   forceDay:false,forceCalendar:false,forceDashboard:false
 };
 const DAY_TTL=3600000,CALENDAR_TTL=3600000,DASHBOARD_TTL=3600000,AUTO_SYNC_TTL=3600000,EMPLOYEE_TTL=21600000,BACKEND_TTL=3600000;
-const READ_TTL51={getAbsenceOverview:3600000,getAbsences:3600000,getBossDayClosures:3600000,getBossMonthData:3600000,getCustomerInquiries:3600000,getDashboardSummary51:3600000,getDayData:3600000,getEmployeeAdminData:3600000,getEmployeeCalendarEvents:3600000,getEmployees:3600000,getInquiryReminders:3600000,getMaintenanceArchive:3600000,getMaintenanceAttachment:3600000,getMaintenanceContracts:3600000,getMaintenanceCustomer:3600000,getMaintenanceOverview:3600000,getManualOrders:3600000,getMinimumWage:3600000,getMonthData:3600000,getMonthPayrollAudit:3600000,getObjectInternalNote:3600000,getObjectInternalNotes:3600000,getObjectReports:3600000,getOfferReminders:3600000,getOfferReports:3600000,getOfferStatistics:3600000,getOwnReminders:3600000,getPayrollCycleState:3600000,getPlannerAvailability:3600000,getPlannerEvents:3600000,getPlannerWorkers:3600000,getRegieAttachments:3600000,getRegieReports:3600000,getSicknessAlerts:3600000,getTimeBankAccount:3600000,getVacationAccount:3600000,getVacationAccounts:3600000,getWeekData:3600000};
+const READ_TTL51={getAbsenceOverview:0,getAbsences:0,getBossDayClosures:0,getBossMonthData:0,getCustomerInquiries:3600000,getDashboardSummary51:3600000,getDayData:0,getEmployeeAdminData:3600000,getEmployeeCalendarEvents:3600000,getEmployees:3600000,getInquiryReminders:3600000,getMaintenanceArchive:3600000,getMaintenanceAttachment:3600000,getMaintenanceContracts:3600000,getMaintenanceCustomer:3600000,getMaintenanceOverview:3600000,getManualOrders:3600000,getMinimumWage:3600000,getMonthData:0,getMonthPayrollAudit:0,getObjectInternalNote:3600000,getObjectInternalNotes:3600000,getObjectReports:3600000,getOfferReminders:3600000,getOfferReports:3600000,getOfferStatistics:3600000,getOwnReminders:3600000,getPayrollCycleState:0,getPlannerAvailability:3600000,getPlannerEvents:3600000,getPlannerWorkers:3600000,getRegieAttachments:3600000,getRegieReports:3600000,getSicknessAlerts:0,getTimeBankAccount:3600000,getVacationAccount:0,getVacationAccounts:0,getWeekData:0};
 
 function jget51(key){try{return JSON.parse(localStorage.getItem(key)||'null');}catch(_e){return null;}}
 function jset51(key,value){try{localStorage.setItem(key,JSON.stringify(value));}catch(_e){}}
@@ -5936,6 +5936,26 @@ function installAC(){
   }
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(installAC,0),{once:true});else setTimeout(installAC,0);
+})();
+
+
+/* ===== DG APP 10 EMPLOYEE/PAYROLL LIVE READS ===== */
+(function(){
+'use strict';
+const LIVE_ACTIONS10=new Set([
+  'getBossDayClosures','getMonthPayrollAudit','getPayrollCycleState',
+  'getBossMonthData','getMonthData','getDayData','getWeekData',
+  'getAbsences','getAbsenceOverview','getVacationAccount','getVacationAccounts','getSicknessAlerts'
+]);
+try{if(window.DG51&&DG51.readCache&&typeof DG51.readCache.clear==='function')DG51.readCache.clear();}catch(_e){}
+const liveBase10=window.api;
+if(typeof liveBase10==='function'){
+  window.api=api=async function(payload){
+    const p=payload&&typeof payload==='object'?Object.assign({},payload):payload;
+    if(p&&LIVE_ACTIONS10.has(String(p.action||'')))p.force=true;
+    return liveBase10.call(this,p);
+  };
+}
 })();
 
 /* ===== DG APP 10 FINAL RAILWAY HARDENING ===== */
