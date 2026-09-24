@@ -1318,7 +1318,7 @@ async function initDb() {
     let delta;
     try{delta=JSON.parse(DG_LEGACY_DELTA_JSON);}catch(e){throw new Error('DG_LEGACY_DELTA_JSON ist ungültig: '+e.message);}
     const dr=await importLegacyTimeDeltaV26(delta);
-    console.log('LEGACY_TIME_DELTA_BOOTSTRAP files='+Number(dr.filesInserted||0)+' new/'+Number(dr.filesExisting||0)+' existing entries='+Number(dr.entriesInserted||0)+' new/'+Number(dr.entriesExisting||0)+' existing closures='+Number(dr.closuresInserted||0)+' new/'+Number(dr.closuresExisting||0)+' existing');
+    console.log('LEGACY_TIME_DELTA_BOOTSTRAP files='+Number(dr.filesInserted||0)+' new/'+Number(dr.filesExisting||0)+' existing/'+Number(dr.filesFailed||0)+' failed entries='+Number(dr.entriesInserted||0)+' new/'+Number(dr.entriesExisting||0)+' existing closures='+Number(dr.closuresInserted||0)+' new/'+Number(dr.closuresExisting||0)+' existing audit_status='+Number(dr.audit&&dr.audit.statusRows&&dr.audit.statusRows.length||0)+' audit_closures='+Number(dr.audit&&dr.audit.closureRows&&dr.audit.closureRows.length||0)+' audit_entries='+Number(dr.audit&&dr.audit.entryRows&&dr.audit.entryRows.length||0));
   }
   const finalDriveImport=await importDriveManifestsV25();
   await finalizeLocalFileReferencesV24();
@@ -13967,24 +13967,30 @@ async function importLegacyTimeDeltaV26(body){
   const closures=Array.isArray(body&&body.closures)?body.closures:[];
   if(files.length>20||entries.length>100||closures.length>100)throw new Error('Legacy-Delta ist zu groß.');
   let filesInserted=0,filesExisting=0,entriesInserted=0,entriesExisting=0,closuresInserted=0,closuresExisting=0;
+  let filesFailed=0;
   for(const item of files){
-    const id=String(item&&item.id||'').trim(),sourceUrl=String(item&&item.sourceUrl||'').trim();
-    if(!id||!sourceUrl)throw new Error('Legacy-Datei-ID oder Quell-URL fehlt.');
-    const old=await pool.query('SELECT 1 FROM binary_files_v10 WHERE id=$1 LIMIT 1',[id]);
-    if(old.rowCount){filesExisting++;continue;}
-    let u;try{u=new URL(sourceUrl);}catch(_e){throw new Error('Ungültige Legacy-Datei-URL.');}
-    const host=String(u.hostname||'').toLowerCase();
-    if(u.protocol!=='https:'||!(host==='oaiusercontent.com'||host.endsWith('.oaiusercontent.com')))
-      throw new Error('Legacy-Datei-Host ist nicht freigegeben.');
-    const upstream=await fetch(u.toString(),{redirect:'follow'});
-    if(!upstream.ok)throw new Error('Legacy-Datei konnte nicht geladen werden: HTTP '+upstream.status);
-    const data=Buffer.from(await upstream.arrayBuffer());
-    await storeBinaryFileV24(pool,{
-      id,name:String(item.name||'Auftragsbild.jpg'),
-      mime:String(item.mime||upstream.headers.get('content-type')||'application/octet-stream'),
-      data,kind:'legacy-time-entry-photo',source:'google-drive-final-delta'
-    });
-    filesInserted++;
+    try{
+      const id=String(item&&item.id||'').trim(),sourceUrl=String(item&&item.sourceUrl||'').trim();
+      if(!id||!sourceUrl)throw new Error('Legacy-Datei-ID oder Quell-URL fehlt.');
+      const old=await pool.query('SELECT 1 FROM binary_files_v10 WHERE id=$1 LIMIT 1',[id]);
+      if(old.rowCount){filesExisting++;continue;}
+      let u;try{u=new URL(sourceUrl);}catch(_e){throw new Error('Ungültige Legacy-Datei-URL.');}
+      const host=String(u.hostname||'').toLowerCase();
+      if(u.protocol!=='https:'||!(host==='oaiusercontent.com'||host.endsWith('.oaiusercontent.com')))
+        throw new Error('Legacy-Datei-Host ist nicht freigegeben.');
+      const upstream=await fetch(u.toString(),{redirect:'follow'});
+      if(!upstream.ok)throw new Error('Legacy-Datei konnte nicht geladen werden: HTTP '+upstream.status);
+      const data=Buffer.from(await upstream.arrayBuffer());
+      await storeBinaryFileV24(pool,{
+        id,name:String(item.name||'Auftragsbild.jpg'),
+        mime:String(item.mime||upstream.headers.get('content-type')||'application/octet-stream'),
+        data,kind:'legacy-time-entry-photo',source:'google-drive-final-delta'
+      });
+      filesInserted++;
+    }catch(e){
+      filesFailed++;
+      console.error('LEGACY_TIME_DELTA file skipped id='+String(item&&item.id||'')+' error='+e.message);
+    }
   }
   for(const e of entries){
     const id=String(e&&e.id||'').trim(),employee=String(e&&e.employee||'').trim(),date=berlinDateOnly(e&&e.date||'');
@@ -14063,7 +14069,7 @@ async function importLegacyTimeDeltaV26(body){
     statusRows=s.rows;closureRows=d.rows;entryRows=e.rows;
   }
   console.log('LEGACY_TIME_DELTA_V26 files='+filesInserted+' new/'+filesExisting+' existing entries='+entriesInserted+' new/'+entriesExisting+' existing closures='+closuresInserted+' new/'+closuresExisting+' existing');
-  return {ok:true,filesInserted,filesExisting,entriesInserted,entriesExisting,closuresInserted,closuresExisting,
+  return {ok:true,filesInserted,filesExisting,filesFailed,entriesInserted,entriesExisting,closuresInserted,closuresExisting,
     audit:{employee:auditEmployee,dates:auditDates,statusRows,closureRows,entryRows},finalAudit:await finalCutoverAuditV24()};
 }
 
