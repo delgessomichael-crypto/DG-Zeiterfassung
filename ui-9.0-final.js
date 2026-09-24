@@ -910,7 +910,8 @@ async function dg80EmployeeStatsLoad(force){
       ['Unerlaubte Fehlzeiten '+d.year,Number(d.unexcusedDays||0)+' Tage',Number(d.unexcusedDays||0)>0?'warn':'']
     ];
     const cards=a=>a.map(x=>'<div class="dg80-empstats-card '+esc(x[2]||'')+'"><span>'+esc(x[0])+'</span><strong>'+esc(x[1])+'</strong></div>').join('');
-    out.innerHTML='<div class="dg80-empstats-period"><strong>'+esc(employee)+'</strong> · aktuelle Woche '+esc(empStatsDate(d.weekStart))+' bis '+esc(empStatsDate(d.weekEnd))+'</div>'
+    const cycleInfo=d.monthCycleStart&&d.monthCycleEnd?' · Monatszähler '+empStatsDate(d.monthCycleStart)+' bis '+empStatsDate(d.monthCycleEnd):'';
+    out.innerHTML='<div class="dg80-empstats-period"><strong>'+esc(employee)+'</strong> · aktuelle Woche '+esc(empStatsDate(d.weekStart))+' bis '+esc(empStatsDate(d.weekEnd))+esc(cycleInfo)+'</div>'
       +'<div class="dg80-empstats-section">Arbeitszeit</div><div class="dg80-empstats-grid">'+cards(work)+'</div>'
       +'<div class="dg80-empstats-section">Urlaub &amp; Abwesenheiten</div><div class="dg80-empstats-grid">'+cards(abs)+'</div>';
     if(st){st.className='status ok';st.textContent='Auswertung aktuell.';}
@@ -1339,7 +1340,7 @@ async function auditRows(rows){
       else if(net>8.0001)await addIssue(out,'warn','daily_over_8',name,d,'Mehr als 8 Stunden Arbeitszeit','Netto-Arbeitszeit '+net.toFixed(2).replace('.',',')+' Std.');
       if(!day.closed)await addIssue(out,'error','day_not_closed',name,d,'Tagesabschluss fehlt','Für diesen Arbeitstag wurde kein Tagesabschluss gefunden.');
       const req=net>9?0.75:(net>6?0.5:0);if(req&&pause+0.0001<req)await addIssue(out,'error','pause_short',name,d,'Pause zu kurz','Erfasst '+Math.round(pause*60)+' Min.; erforderlich mindestens '+Math.round(req*60)+' Min.');
-      if(day.status&&day.status!=='Arbeiten')await addIssue(out,day.status==='Feiertag'?'warn':'error','work_and_status',name,d,'Arbeitszeit und '+day.status+' am selben Tag','Es sind Arbeitsstunden erfasst und der Tag ist zugleich als '+day.status+' markiert.');
+      if(day.status&&day.status!=='Arbeiten'&&reports.some(r=>Number(r&&r.hours||0)>0.0001))await addIssue(out,day.status==='Feiertag'?'warn':'error','work_and_status',name,d,'Arbeitszeit und '+day.status+' am selben Tag','Es sind Arbeitsstunden erfasst und der Tag ist zugleich als '+day.status+' markiert.');
       for(const r of reports){const a=minutes(r.start),b=minutes(r.end);if(!(Number(r.hours)>0)||a===null||b===null)await addIssue(out,'error','invalid_entry',name,d,'Unplausibler Zeiteintrag',(r.customer||'Ohne Kunde')+' · '+(r.start||'?')+'–'+(r.end||'?'),String(r.id||''));}
       for(let i=0;i<reports.length;i++)for(let j=i+1;j<reports.length;j++)if(norm(reports[i].customer)===norm(reports[j].customer)&&reports[i].start===reports[j].start&&reports[i].end===reports[j].end)await addIssue(out,'warn','duplicate_entry',name,d,'Möglicher Doppeleintrag',(reports[i].customer||'Ohne Kunde')+' · '+reports[i].start+'–'+reports[i].end,String(reports[i].id||'')+'|'+String(reports[j].id||''));
       const ints=reports.map(r=>{let a=minutes(r.start),b=minutes(r.end);if(a===null||b===null)return null;if(b<a)b+=1440;return {a,b,r};}).filter(Boolean).sort((a,b)=>a.a-b.a);
