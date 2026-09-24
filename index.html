@@ -230,23 +230,10 @@
   if(!('serviceWorker' in navigator))return;
   window.addEventListener('load',function(){
     var start=function(){
-      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260924-2010-login-start-repair1',{updateViaCache:'none'})
-        .then(function(r){return r.update();})
-        .catch(function(e){console.warn('DG Offline-Cache nicht bereit',e);});
-    };
-    if('requestIdleCallback' in window){
-      requestIdleCallback(start,{timeout:5000});
-    }else{
-      setTimeout(start,2500);
-    }
-  },{once:true});
-})();
-</script>
-
-<script defer fetchpriority="high" src="./core-9.0-final.js?v=20260924-2010-login-start-repair1"></script>
+      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260924-2025-review-data-status1"high" src="./core-9.0-final.js?v=20260924-2010-login-start-repair1"></script>
 <script defer fetchpriority="low" src="./customerflow-9.0-final.js?v=20260920-900-final1"></script>
 <script defer fetchpriority="low" src="./payroll-9.0-final.js?v=20260923-2240-v10-final"></script>
-<script defer fetchpriority="low" src="./ui-9.0-final.js?v=20260924-1945-payroll-cycle1"></script>
+<script defer fetchpriority="low" src="./ui-9.0-final.js?v=20260924-2025-review-data-status1"></script>
 <script defer src="./employee-controls-10.0.js?v=20260924-1100-signature-optional2"></script>
 <script>
 (function(){
