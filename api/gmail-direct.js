@@ -225,10 +225,17 @@ function createGmailDirect(opts){
       if(/(?:no-?reply|noreply|mailer-daemon|postmaster|newsletter)/i.test(mail))return null;
       if(/@(vaillant\.(?:de|com)|gc-gruppe\.de|mail\.verivox\.de)$/i.test(mail))return null;
       const direct=directBody(text),all=(subject+'\n'+direct+'\n'+attNames.join(' ')).toLowerCase();
+      const platformHint=/\bmy\s*hammer\b/i.test(subject)?'MyHammer':(/\bblauarbeit\b/i.test(subject)?'Blauarbeit':'');
+      const explicitNewWork=/(neue|weiter(?:e|er)|zus(?:ä|a)tzlich(?:e|er)).{0,40}(anfrage|auftrag|arbeit|reparatur|austausch)/i.test(all);
       if(/\b(rechnung(?:_|\b)|lieferschein|gutschrift|mahnung|zahlungserinnerung|kredit|newsletter|rabattaktion|produktzusammenstellung|bewerbung|lebenslauf|kontoauszug|bestellbest(?:ä|a)tigung)\b/i.test(all))return null;
       if(/\b(nachbesserung|rechnungskl(?:ä|a)rung|zahlungserinnerung|angebot\s*(?:nr\.?|nummer)?\s*[0-9-]+.{0,80}(?:nehme|nehmen).{0,20}an|erteile.{0,30}auftrag.{0,60}angebot)\b/i.test(all))return null;
+      if(!explicitNewWork&&(
+        /^(?:re:|aw:|antwort:)?\s*ihr\s+angebot\b.*\b(?:blauarbeit|my\s*hammer)\b/i.test(subject)||
+        /\bangebot\s+angenommen\b/i.test(direct)||
+        /\bvielen\s+dank.{0,70}(?:f(?:ü|u)r).{0,50}(?:ihr|das)\s+angebot\b/i.test(direct)
+      ))return null;
       const known=await openInquiryByEmail(mail);
-      if(known&&/^(re:|aw:|antwort:)/i.test(subject)&&!/(neue|weiter(?:e|er)|zus(?:ä|a)tzlich(?:e|er)).{0,40}(anfrage|auftrag|arbeit|reparatur|austausch)/i.test(all))return null;
+      if(known&&/^(re:|aw:|antwort:)/i.test(subject)&&!explicitNewWork)return null;
       const subjectStrong=/\b(anfrage|angebot|reparatur|austausch|erneuerung|defekt|st(?:ö|o)rung|sanit(?:ä|a)r|heizung|klima|w(?:ä|a)rmepumpe|wc|toilette|dusche|bad|wasserhahn|zapfstelle|rohr|abfluss|wartung|montage|installation|therme|warmwasser|heizk(?:ö|o)rper|hauswasserstation|speicher|boiler)\b/i.test(subject);
       const requestPhrase=/\b(k(?:ö|o)nnten sie|k(?:ö|o)nnen sie|ich m(?:ö|o)chte|wir m(?:ö|o)chten|ich ben(?:ö|o)tige|wir ben(?:ö|o)tigen|ich brauche|wir brauchen|bitte um (?:ein )?angebot|bitte um termin|termin vereinbaren|haben sie kapazit(?:ä|a)ten|bitte um r(?:ü|u)ckmeldung|bitte melden|unterst(?:ü|u)tzung|k(?:ö|o)nnen sie sich das ansehen|was w(?:ü|u)rde .* kosten|preis(?:angebot)?|kostenvoranschlag)\b/i.test(all);
       const terms=all.match(/\b(reparatur|austausch|erneuer|defekt|kaputt|undicht|leck|verstopf|st(?:ö|o)rung|sanit(?:ä|a)r|heizung|therme|warmwasser|wasserhahn|zapfstelle|wc|toilette|dusche|bad|heizk(?:ö|o)rper|klimaanlage|klima|w(?:ä|a)rmepumpe|rohr|abfluss|enth(?:ä|a)rt|hauswasserstation|speicher|boiler|fu(?:ß|ss)bodenheizung|wartung|montage|installation|sp(?:ü|u)lkasten|armatur|waschtisch|badewanne)\b/ig)||[];
@@ -239,7 +246,7 @@ function createGmailDirect(opts){
       if(/@(gmail\.com|gmx\.(?:de|net)|t-online\.de|web\.de|outlook\.(?:de|com)|hotmail\.(?:de|com)|mail\.de|kabelmail\.de)$/i.test(mail))score+=1;
       if(known)score+=1;if(/^(re:|aw:|wg:|fwd:)/i.test(subject)&&!known)score-=2;
       if(!(subjectStrong&&requestPhrase)&&score<6)return null;
-      source='E-Mail direkt';customer=from.name||mail;email=mail;
+      source=platformHint||'E-Mail direkt';customer=from.name||mail;email=mail;
       phone=firstMatch(direct,/(?:Telefon|Mobil|Tel\.?|Handy)?[^+0-9]{0,12}(\+?[0-9][0-9 ()\/-]{6,})/i);
       const loc=direct.match(/\b(\d{5})\s+([A-Za-zÄÖÜäöüß\- ]{2,45})(?:[,\.\n]|$)/);postalCode=String(loc&&loc[1]||'');city=String(loc&&loc[2]||'').trim();
       externalUrl=msg.threadId?'https://mail.google.com/mail/u/0/#all/'+String(msg.threadId):'';
@@ -255,7 +262,7 @@ function createGmailDirect(opts){
   async function findMergeTarget(rec){
     if(!rec)return null;
     const openSql="COALESCE(status,'Neu') NOT IN ('Erledigt','Gelöscht','Übernommen','Archiviert')";
-    if(rec.source==='E-Mail direkt'&&rec.email&&/^(re:|aw:|antwort:)/i.test(String(rec.subject||''))){
+    if(['E-Mail direkt','MyHammer','Blauarbeit'].includes(rec.source)&&rec.email&&/^(re:|aw:|antwort:)/i.test(String(rec.subject||''))){
       const q=await pool.query(`SELECT * FROM customer_inquiries_shadow WHERE lower(COALESCE(email,''))=lower($1) AND ${openSql} ORDER BY received_at_text DESC NULLS LAST LIMIT 1`,[rec.email]);
       if(q.rowCount)return q.rows[0];
     }
