@@ -1311,6 +1311,7 @@ async function initDb() {
   await initDayClosuresShadow();
   await reconcileLegacyDayClosureDuplicatesV9();
   await initTimeEntriesShadow();
+  await repairOfficeAbsenceCreditsV27();
   await initRegieMetadataShadows();
   await bootstrapCompletedCustomerConsolidationV23();
   await initRegieAttachmentsShadow();
@@ -3321,6 +3322,64 @@ async function effectiveStatusCredit(employee,date,status,stored,missing){
   if(String(status||'')==='Feiertag'&&(String(p.employmentType||'')==='Aushilfe'||p.holidayCredit===false))return 0;
   return profileHoursForDate(p,date);
 }
+async function repairOfficeAbsenceCreditsV27(){
+  if(!pool)return {checked:0,repaired:0,closures:0};
+  const q=await pool.query(
+    `SELECT employee_name,status_date,status,source,reference,credited_hours,credited_hours_missing
+       FROM day_status_shadow
+      WHERE status_date>='2026-09-07'
+        AND status IN ('Urlaub','Krank','Schulung','Unerlaubte Abwesenheit','Unentschuldigte Abwesenheit')`
+  );
+  let checked=0,repaired=0,closures=0;
+  const refs=new Set();
+  for(const r of q.rows){
+    checked++;
+    const employee=String(r.employee_name||''),date=berlinDateOnly(r.status_date),status=String(r.status||'');
+    const source=String(r.source||''),profile=await employeeAutomationProfile(employee);
+    const target=Math.round(Number(profileHoursForDate(profile,date)||0)*100)/100;
+    let credit=Math.round(Number(await effectiveStatusCredit(employee,date,status,r.credited_hours,r.credited_hours_missing)||0)*100)/100;
+    if(['Unerlaubte Abwesenheit','Unentschuldigte Abwesenheit'].includes(status))credit=0;
+    else if(['Urlaub','Schulung'].includes(status)&&target>0)credit=target;
+    else if(status==='Krank'&&target>0&&!/Krankengeld|keine AG-Gutschrift/i.test(source)&&credit<=0)credit=target;
+    const stored=Math.round(Number(r.credited_hours||0)*100)/100;
+    if(Math.abs(stored-credit)>0.001||Boolean(r.credited_hours_missing)){
+      await pool.query(
+        `UPDATE day_status_shadow
+            SET credited_hours=$3,credited_hours_missing=false,shadow_updated_at=now()
+          WHERE employee_name=$1 AND status_date=$2`,
+        [employee,date,credit]
+      );
+      repaired++;
+    }
+    const before=await pool.query(
+      'SELECT gross_total,net_total FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 LIMIT 1',
+      [employee,date]
+    );
+    await pgAutoClosureForStatus(employee,date,status,credit,source);
+    const after=await pool.query(
+      'SELECT gross_total,net_total FROM day_closures_shadow WHERE employee_name=$1 AND closure_date=$2 LIMIT 1',
+      [employee,date]
+    );
+    if(after.rowCount&&(!before.rowCount||
+      Math.abs(Number(after.rows[0].gross_total||0)-Number(before.rows[0]?.gross_total||0))>0.001||
+      Math.abs(Number(after.rows[0].net_total||0)-Number(before.rows[0]?.net_total||0))>0.001))closures++;
+    if(String(r.reference||'').trim())refs.add(String(r.reference));
+  }
+  for(const ref of refs){
+    const sum=await pool.query('SELECT COALESCE(SUM(credited_hours),0)::numeric AS h FROM day_status_shadow WHERE reference=$1',[ref]);
+    await pool.query(
+      'UPDATE absences_shadow SET credited_hours=$2,shadow_updated_at=now() WHERE id=$1',
+      [ref,Math.round(Number(sum.rows[0]?.h||0)*100)/100]
+    );
+  }
+  if(repaired||closures){
+    await pool.query("DELETE FROM response_cache WHERE action IN ('getBossDayClosures','getDayData','getWeekData','getMonthData','getBossMonthData','getMonthPayrollAudit')");
+    await pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getMonthPayrollAudit','getPayrollCycleState','getDashboardSummary51')");
+    await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'day_data:%' OR shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'month_data:%' OR shadow_name LIKE 'boss_day_closures:%' OR shadow_name LIKE 'payroll_%'");
+  }
+  console.log('ABSENCE_CREDIT_REPAIR_V27 checked='+checked+' repaired='+repaired+' closures='+closures);
+  return {checked,repaired,closures};
+}
 
 async function upsertDayStatusShadow(employee,date,status,source,creditedHours,reference){
   if(!pool||!employee||!date)return;
@@ -3840,7 +3899,9 @@ async function postgresBossDayClosures(body){
     const d=ensure(employee,date);
     d.status=status;
     d.statusSource=String(r.source||'');
-    d.creditedHours=Math.round(Number(r.credited_hours||0)*100)/100;
+    d.creditedHours=Math.round(Number(await effectiveStatusCredit(
+      employee,date,status,r.credited_hours,r.credited_hours_missing
+    )||0)*100)/100;
     d.creditedHoursMissing=Boolean(r.credited_hours_missing);
   }
   const out=[];
@@ -4781,14 +4842,16 @@ async function pgRemoveAutoClosure(employee,date,status){
 async function pgSyncAutoClosures(year){
   year=Number(year)||0;
   const q=await pool.query(
-    `SELECT employee_name,status_date,status,source,credited_hours FROM day_status_shadow
+    `SELECT employee_name,status_date,status,source,credited_hours,credited_hours_missing FROM day_status_shadow
       WHERE status IN ('Urlaub','Krank','Schulung','Unerlaubte Abwesenheit','Unentschuldigte Abwesenheit','Feiertag') AND status_date>='2026-09-07'
         AND ($1::int=0 OR status_date LIKE ($1::text||'-%'))`,
     [year]
   );
-  for(const r of q.rows)await pgAutoClosureForStatus(
-    r.employee_name,berlinDateOnly(r.status_date),r.status,Number(r.credited_hours)||0,r.source
-  );
+  for(const r of q.rows){
+    const date=berlinDateOnly(r.status_date);
+    const credit=await effectiveStatusCredit(r.employee_name,date,r.status,r.credited_hours,r.credited_hours_missing);
+    await pgAutoClosureForStatus(r.employee_name,date,r.status,credit,r.source);
+  }
 }
 async function mirrorHolidayYear(year){
   year=Number(year)||0;if(!year)return;
