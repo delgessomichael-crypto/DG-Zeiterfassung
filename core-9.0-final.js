@@ -5829,7 +5829,18 @@ const API='https://dg-app-10-api-production.up.railway.app/';
 const VERSION='10.0';
 function clearLegacyVersionNotices(){
   const n=document.getElementById('d3Notice');
-  if(n&&/(Google-GS|Google-Backend|App 5\.|App 7\.|App 9\.|Versionsstand stimmt nicht)/i.test(String(n.textContent||'')))n.remove();
+  if(n&&/(Google-GS|Google-Backend|App 5\.|App 7\.|App 9\.|Versionsstand stimmt nicht|Bereitstellungs-Link)/i.test(String(n.textContent||'')))n.remove();
+}
+const legacyNotice10=window.d3Notice;
+if(typeof legacyNotice10==='function'){
+  window.d3Notice=d3Notice=function(msg,type){
+    const text=String(msg||'');
+    if(/Google-GS|Google-Backend|App 5\.|App 7\.|App 9\.|Bereitstellungs-Link/i.test(text)){
+      clearLegacyVersionNotices();
+      return;
+    }
+    return legacyNotice10.apply(this,arguments);
+  };
 }
 async function railwayBackendCheck10(force){
   try{
@@ -5865,7 +5876,9 @@ window.d3CheckBackend=railwayBackendCheck10;
 try{d3CheckBackend=railwayBackendCheck10;}catch(_e){}
 window.DG_APP_VERSION=VERSION;
 window.DG_RELEASE=VERSION;
+document.title='DG Zeiterfassung 10.0';
 document.querySelectorAll('.login-card .muted.small').forEach(x=>{if(/^Version\s+/i.test(String(x.textContent||'').trim()))x.textContent='Version '+VERSION;});
+document.querySelectorAll('.hero strong').forEach(x=>{if(/Zeiterfassung/i.test(String(x.textContent||'')))x.textContent='Zeiterfassung - '+VERSION;});
 clearLegacyVersionNotices();
 setTimeout(()=>railwayBackendCheck10(false),200);
 const mo=new MutationObserver(()=>clearLegacyVersionNotices());
