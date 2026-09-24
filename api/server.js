@@ -3913,10 +3913,17 @@ async function postgresBossDayClosures(body){
   const round=x=>Math.round(Number(x||0)*100)/100;
   for(const [employee,daysMap] of byEmployee){
     const days=[...daysMap.values()].sort((a,b)=>a.date.localeCompare(b.date)).map(d=>{
-      const gross=round(d.hours),pause=gross>=6?1:0;
-      d.grossHours=gross;d.pauseHours=round(pause);d.hours=round(Math.max(0,gross-pause));
+      const gross=round(d.hours),pause=gross>=6?1:0,workNet=round(Math.max(0,gross-pause));
+      d.grossHours=gross;
+      d.pauseHours=round(pause);
+      d.workGrossHours=gross;
+      d.workPauseHours=round(pause);
+      d.workHours=workNet;
+      d.hours=workNet;
       d.status=d.status||statusMap.get(employee+'|'+d.date)||'Arbeiten';
       d.statusOnly=d.status!=='Arbeiten'&&Number(d.entryCount||0)===0;
+      d.creditedHours=round(Number(d.creditedHours||0));
+      d.displayHours=d.status!=='Arbeiten'?d.creditedHours:d.workHours;
       d.reports.sort((a,b)=>String(a.start||'').localeCompare(String(b.start||'')));
       return d;
     });
@@ -9213,24 +9220,25 @@ async function postgresPayrollAuditNative(body){
     for(const st of r.statuses||[])statusByDate[st.date]=st;
     const profile=await employeeAutomationProfile(r.employee);
     for(const d of Object.keys(byDate).sort()){
-      const es=byDate[d],gross=pgRound2(es.reduce((a,e)=>a+Number(e.hours||0),0)),net=pgAuditNet(gross),closure=closures.get(r.employee+'|'+d);
+      const es=byDate[d],st=statusByDate[d];
+      const workEntries=es.filter(e=>Number(e.hours||0)>0.0001);
+      const gross=pgRound2(workEntries.reduce((a,e)=>a+Number(e.hours||0),0)),net=pgAuditNet(gross),closure=closures.get(r.employee+'|'+d);
       if(net>10.0001)addIssue('error','daily_over_10',r,d,'Mehr als 10 Stunden Arbeitszeit','Netto-Arbeitszeit '+pgAuditHours(net)+' Std. (Bruttozeit '+pgAuditHours(gross)+' Std.).');
       else if(net>8.0001)addIssue('warn','daily_over_8',r,d,'Mehr als 8 Stunden Arbeitszeit','Netto-Arbeitszeit '+pgAuditHours(net)+' Std.');
-      if(!closure)addIssue('error','day_not_closed',r,d,'Tagesabschluss fehlt','Für diesen Arbeitstag wurde kein Tagesabschluss gefunden.');
-      else {const req=pgAuditPause(net);if(req>0&&Number(closure.pauseMinutes||0)<req)addIssue('error','pause_short',r,d,'Pause zu kurz','Erfasst '+Number(closure.pauseMinutes||0)+' Min.; erforderlich mindestens '+req+' Min.');}
-      const st=statusByDate[d];
-      if(st&&st.status&&st.status!=='Arbeiten'&&net>0.0001&&es.some(e=>Number(e.hours||0)>0.0001))
-        addIssue(st.status==='Feiertag'?'warn':'error','work_and_status',r,d,'Arbeitszeit und '+st.status+' am selben Tag','Es sind '+pgAuditHours(net)+' Arbeitsstunden erfasst und der Tag ist zugleich als '+st.status+' markiert.');
-      if(r.entryDate&&d<r.entryDate)addIssue('error','before_entry',r,d,'Arbeitszeit vor Eintrittsdatum','Eintrittsdatum: '+pgAuditDate(r.entryDate)+'.');
-      if(r.exitDate&&d>r.exitDate)addIssue('error','after_exit',r,d,'Arbeitszeit nach Austrittsdatum','Austrittsdatum: '+pgAuditDate(r.exitDate)+'.');
-      if(r.active===false)addIssue('warn','inactive_time',r,d,'Arbeitszeit bei inaktivem Mitarbeiter','Mitarbeiter ist aktuell als inaktiv gekennzeichnet.');
-      for(const e of es){
+      if(workEntries.length&&!closure)addIssue('error','day_not_closed',r,d,'Tagesabschluss fehlt','Für diesen Arbeitstag wurde kein Tagesabschluss gefunden.');
+      else if(workEntries.length&&closure){const req=pgAuditPause(net);if(req>0&&Number(closure.pauseMinutes||0)<req)addIssue('error','pause_short',r,d,'Pause zu kurz','Erfasst '+Number(closure.pauseMinutes||0)+' Min.; erforderlich mindestens '+req+' Min.');}
+      if(st&&st.status&&st.status!=='Arbeiten'&&workEntries.length&&net>0.0001)
+        addIssue(st.status==='Feiertag'?'warn':'error','work_and_status',r,d,'Arbeitszeit und '+st.status+' am selben Tag','Es sind '+pgAuditHours(net)+' echte Arbeitsstunden erfasst und der Tag ist zugleich als '+st.status+' markiert.');
+      if(workEntries.length&&r.entryDate&&d<r.entryDate)addIssue('error','before_entry',r,d,'Arbeitszeit vor Eintrittsdatum','Eintrittsdatum: '+pgAuditDate(r.entryDate)+'.');
+      if(workEntries.length&&r.exitDate&&d>r.exitDate)addIssue('error','after_exit',r,d,'Arbeitszeit nach Austrittsdatum','Austrittsdatum: '+pgAuditDate(r.exitDate)+'.');
+      if(workEntries.length&&r.active===false)addIssue('warn','inactive_time',r,d,'Arbeitszeit bei inaktivem Mitarbeiter','Mitarbeiter ist aktuell als inaktiv gekennzeichnet.');
+      for(const e of workEntries){
         const sm=pgTimeToMinutes(e.start),em=pgTimeToMinutes(e.end);
-        if(!(Number(e.hours)>0)||sm===null||em===null)addIssue('error','invalid_entry',r,d,'Unplausibler Zeiteintrag',(e.customer||'Ohne Kunde')+' · '+(e.start||'?')+'–'+(e.end||'?')+' · '+pgAuditHours(e.hours)+' Std.',{entryId:e.id,start:e.start,end:e.end,customer:e.customer,key:e.id});
+        if(sm===null||em===null)addIssue('error','invalid_entry',r,d,'Unplausibler Zeiteintrag',(e.customer||'Ohne Kunde')+' · '+(e.start||'?')+'–'+(e.end||'?')+' · '+pgAuditHours(e.hours)+' Std.',{entryId:e.id,start:e.start,end:e.end,customer:e.customer,key:e.id});
       }
-      for(let i=0;i<es.length;i++)for(let j=i+1;j<es.length;j++){
-        if(shadowObjectKey(es[i].customer)===shadowObjectKey(es[j].customer)&&es[i].start===es[j].start&&es[i].end===es[j].end){
-          addIssue('warn','duplicate_entry',r,d,'Möglicher Doppeleintrag',(es[i].customer||'Ohne Kunde')+' · '+es[i].start+'–'+es[i].end,{entryId:es[j].id,start:es[j].start,end:es[j].end,customer:es[j].customer,key:es[i].id+'|'+es[j].id});
+      for(let i=0;i<workEntries.length;i++)for(let j=i+1;j<workEntries.length;j++){
+        if(shadowObjectKey(workEntries[i].customer)===shadowObjectKey(workEntries[j].customer)&&workEntries[i].start===workEntries[j].start&&workEntries[i].end===workEntries[j].end){
+          addIssue('warn','duplicate_entry',r,d,'Möglicher Doppeleintrag',(workEntries[i].customer||'Ohne Kunde')+' · '+workEntries[i].start+'–'+workEntries[i].end,{entryId:workEntries[j].id,start:workEntries[j].start,end:workEntries[j].end,customer:workEntries[j].customer,key:workEntries[i].id+'|'+workEntries[j].id});
         }
       }
       const target=profileHoursForDate(profile,d);
