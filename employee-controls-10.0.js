@@ -200,6 +200,7 @@ async function transfer(){
     const s=el('entryStatus');
     const ok=!!(s&&s.classList.contains('ok'));
     if(ok){
+      setNoCustomer(false);
       showTransferConfirmation();
     }else if(s&&String(s.textContent||'')===before){
       status('❌ Übertragung wurde nicht bestätigt. Bitte Eingaben prüfen.','error');
