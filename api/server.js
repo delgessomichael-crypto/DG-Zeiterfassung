@@ -9451,8 +9451,8 @@ async function directEmployeeWorkOverviewV10(body){
   const employee=String(body&&body.targetEmployee||'').trim();if(!employee)throw new Error('Mitarbeiter fehlt.');
   const today=berlinTodayIso(),year=Number(today.slice(0,4)),month=Number(today.slice(5,7));
   let weekStart=today;while(isoWeekday(weekStart)!==1)weekStart=isoAddDays(weekStart,-1);
-  const weekEnd=isoAddDays(weekStart,6),monthStart=String(year)+'-'+String(month).padStart(2,'0')+'-01',
-        monthEnd=String(year)+'-'+String(month).padStart(2,'0')+'-'+String(new Date(Date.UTC(year,month,0)).getUTCDate()).padStart(2,'0'),
+  const weekEnd=isoAddDays(weekStart,6),activeCycle=pgActivePayrollCycle(today),
+        monthStart=activeCycle.start,monthEnd=today<activeCycle.end?today:activeCycle.end,
         yearStart=String(year)+'-01-01',yearEnd=String(year)+'-12-31';
   async function work(start,end){
     const sql="WITH w AS (SELECT entry_date AS d,hours::numeric AS h FROM time_entries_shadow WHERE employee_name=$1 AND entry_date>=$2 AND entry_date<=$3 UNION ALL SELECT t.entry_date AS d,a.hours::numeric AS h FROM assignments_shadow a JOIN time_entries_shadow t ON t.id=a.source_entry_id WHERE a.employee_name=$1 AND COALESCE(a.status,'Zugeordnet')<>'Ersetzt' AND t.entry_date>=$2 AND t.entry_date<=$3), daily AS (SELECT d,COALESCE(SUM(h),0) gross FROM w GROUP BY d) SELECT COALESCE(SUM(GREATEST(gross-CASE WHEN gross>=6 THEN 1 ELSE 0 END,0)),0)::numeric AS h FROM daily";
@@ -9464,8 +9464,9 @@ async function directEmployeeWorkOverviewV10(body){
   const sq=await pool.query("SELECT status,COUNT(DISTINCT status_date)::int n FROM day_status_shadow WHERE employee_name=$1 AND status_date>=$2 AND status_date<=$3 GROUP BY status",[employee,yearStart,yearEnd]);
   const sc={};for(const r of sq.rows)sc[String(r.status||'')]=Number(r.n||0);
   const values=await Promise.all([work(weekStart,weekEnd),work(monthStart,monthEnd),work(yearStart,yearEnd)]);
-  return {employee,year,weekStart,weekEnd,weekHours:values[0],weeklyTarget:pgRound2(p.weeklyHours||0),month,monthHours:values[1],yearHours:values[2],
-    vacationEntitlement:pgRound2(annual.vacationEntitlement||0),vacationUsed:pgRound2(annual.vacationUsed||0),
+  return {employee,year,weekStart,weekEnd,weekHours:values[0],weeklyTarget:pgRound2(p.weeklyHours||0),month,
+    monthHours:values[1],monthCycleStart:monthStart,monthCycleEnd:activeCycle.end,payrollDueDate:activeCycle.dueDate,
+    yearHours:values[2],vacationEntitlement:pgRound2(annual.vacationEntitlement||0),vacationUsed:pgRound2(annual.vacationUsed||0),
     vacationRemaining:pgRound2(annual.vacationRemaining||0),sickDays:Number(sc.Krank||0),trainingDays:Number(sc.Schulung||0),
     unexcusedDays:Number(sc['Unerlaubte Abwesenheit']||0)+Number(sc['Unentschuldigte Abwesenheit']||0)};
 }
