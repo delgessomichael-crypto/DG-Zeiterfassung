@@ -1,5 +1,5 @@
 /* DG Zeiterfassung 10.0 - Railway migration cache */
-const CACHE='dg-zeiterfassung-10.0-inquiry-finance-attachments-20260924-1745';
+const CACHE='dg-zeiterfassung-10.0-finance-sync-20260924-1815';
 const STATIC=[
   './index.html',
   './app-5.0.css?v=20260924-1130-inspection-quick1',
@@ -9,7 +9,7 @@ const STATIC=[
   './day-total-display-10.0.js?v=20260924-1425-day-total-clear1',
   './customerflow-9.0-final.js?v=20260920-900-final1',
   './payroll-9.0-final.js?v=20260923-2240-v10-final',
-  './ui-9.0-final.js?v=20260924-1745-inquiry-finance-attachments1',
+  './ui-9.0-final.js?v=20260924-1815-finance-sync4',
   './dg_icon_192.png',
   './dg_icon_512.png',
   './manifest.json'
