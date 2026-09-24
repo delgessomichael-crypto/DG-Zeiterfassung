@@ -1366,7 +1366,10 @@ function renderReviews(rows){
       const name=String(emp.employee||''),box=employeeBox(name);if(!box)continue;
       const list=issues.filter(x=>x.employee===name),open=list.filter(x=>!x.reviewed);
       let panel=box.querySelector(':scope > .dg80-review-panel');if(!panel){panel=document.createElement('div');panel.className='dg80-review-panel';const head=box.querySelector(':scope > .dg521-employee-head');if(head)head.insertAdjacentElement('afterend',panel);else box.prepend(panel);}
-      panel.innerHTML='<div class="dg80-review-title">Schnellprüfung '+esc(name)+'</div><div class="dg80-review-note">Rot und Orange bitte bewusst kontrollieren. Die vollständige Lohn-/Monatsprüfung erfolgt zusätzlich im Monatsabschluss.</div>'
+      const latestDay=(emp.days||[]).map(x=>String(x.date||'')).filter(Boolean).sort().pop()||'';
+      panel.innerHTML='<div class="dg80-review-title">Schnellprüfung '+esc(name)+'</div>'
+        +(latestDay?'<div class="muted small" style="margin:4px 0 8px"><strong>Datenstand bis '+esc(de(latestDay))+'</strong></div>':'')
+        +'<div class="dg80-review-note">Rot und Orange bitte bewusst kontrollieren. Die vollständige Lohn-/Monatsprüfung erfolgt zusätzlich im Monatsabschluss.</div>'
         +(!list.length?'<div class="status ok">🟢 Keine Auffälligkeiten in den übertragenen Tagesabschlüssen.</div>':'<div class="muted small">'+list.length+' Prüfposition'+(list.length===1?'':'en')+': '+open.length+' offen · '+(list.length-open.length)+' geprüft.</div><div class="dg80-review-list">'+list.map(issueHtml).join('')+'</div>'+(open.length?'<div style="margin-top:10px"><button class="btn success" type="button" data-review-all="'+esc(encodeURIComponent(name))+'" style="width:100%">✓ Alle Auffälligkeiten geprüft – Mitarbeiter freigeben</button></div>':'<div class="status ok" style="margin-top:10px">✓ Mitarbeiter geprüft / freigegeben</div>'));
     }
   }).catch(e=>console.warn('DG Tagesabschluss-Prüfung',e));
