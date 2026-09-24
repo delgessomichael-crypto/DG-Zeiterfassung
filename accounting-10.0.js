@@ -1,7 +1,7 @@
 /* DG App 10 - Rechnungswesen / Gmail workflow */
 (function(){
 'use strict';
-const V='20260924-1615-finance-mail2';
+const V='20260924-1715-finance-routing3';
 const q=id=>document.getElementById(id);
 const MONTHS=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
 const state={incoming:[],tax:[],syncing:false};
@@ -47,8 +47,8 @@ function filterHtml(key){return '<div class="dg10-account-filter"><div><label>Ja
 function ensureCards(){
  const r=boss();if(!r)return;
  const specs=[
- ['dg10InvoiceIncoming','Rechnungseingang','<h2>Rechnungseingang</h2><div class="dg10-fin-toolbar"><button class="btn secondary" data-dg10-sync>Jetzt synchronisieren</button></div><div id="dg10IncomingStatus" class="dg10-fin-status"></div><div id="dg10IncomingList" class="dg10-fin-list"></div>'],
- ['dg10TaxAdvisor','Steuerberater','<h2>Steuerberater</h2><div class="dg10-fin-toolbar"><button class="btn secondary" data-dg10-sync>Jetzt synchronisieren</button></div><div id="dg10TaxStatus" class="dg10-fin-status"></div><div id="dg10TaxList" class="dg10-fin-list"></div>'],
+ ['dg10InvoiceIncoming','Allgemeiner Rechnungseingang','<h2>Allgemeiner Rechnungseingang</h2><div class="muted small">Alle erkannten Eingangsrechnungen aus Gmail – ausgenommen Nachrichten von Frau Busse.</div><div class="dg10-fin-toolbar"><button class="btn secondary" data-dg10-sync="incoming">Jetzt synchronisieren</button></div><div id="dg10IncomingStatus" class="dg10-fin-status"></div><div id="dg10IncomingList" class="dg10-fin-list"></div>'],
+ ['dg10TaxAdvisor','Steuerberater – Frau Busse','<h2>Steuerberater – Frau Busse</h2><div class="muted small">Ausschließlich Nachrichten von kontakt@buchhaltung-busse.de.</div><div class="dg10-fin-toolbar"><button class="btn secondary" data-dg10-sync="tax">Jetzt synchronisieren</button></div><div id="dg10TaxStatus" class="dg10-fin-status"></div><div id="dg10TaxList" class="dg10-fin-list"></div>'],
  ['dg10FinanceArchive','Rechnungsarchiv','<h2>Rechnungsarchiv</h2><div class="muted small">Archiv immer nach Monat und Jahr.</div><div class="dg10-account-archive-menu"><button data-dg10-archive="created">Erstellte Rechnungen</button><button data-dg10-archive="paid">Bezahlte Rechnungen</button><button data-dg10-archive="tax">Steuerberater</button></div>'],
  ['dg10ArchiveCreated','Erstellte Rechnungen','<button class="btn secondary dg10-account-back" data-back>← Rechnungsarchiv</button><h2>Erstellte Rechnungen</h2>'+filterHtml('created')+'<div id="dg10ArchiveCreatedList" class="dg10-fin-list"></div>'],
  ['dg10ArchivePaid','Bezahlte Rechnungen','<button class="btn secondary dg10-account-back" data-back>← Rechnungsarchiv</button><h2>Bezahlte Rechnungen</h2>'+filterHtml('paid')+'<div id="dg10ArchivePaidList" class="dg10-fin-list"></div>'],
@@ -74,8 +74,8 @@ function mailHtml(x,kind){
  if(kind==='tax')actions+='<button class="btn success" data-tax-invoice="'+esc(x.messageId)+'">Als Rechnung markieren</button><button class="btn secondary" data-tax-archive="'+esc(x.messageId)+'">Archivieren</button>';
  return '<div class="dg10-fin-mail"><div class="dg10-fin-head"><div><div class="dg10-fin-subject">'+esc(x.subject||'(ohne Betreff)')+'</div><div class="dg10-fin-meta">'+esc(x.senderName||x.senderEmail||'')+(x.senderEmail?' · '+esc(x.senderEmail):'')+'</div></div><strong>'+esc(de(x.receivedAt))+'</strong></div>'+(files?'<div class="dg10-fin-files">Anhänge: '+files+'</div>':'')+'<div class="dg10-fin-actions">'+actions+'</div></div>';
 }
-async function handleSync(){
- if(state.syncing)return;state.syncing=true;
+async function handleSync(area){
+ if(state.syncing)return false;state.syncing=true;
  try{
    const r=await req({action:'syncFinanceGmailV10'});
    if(r&&r.needsReconnect&&r.authUrl){
@@ -83,25 +83,41 @@ async function handleSync(){
      const msg='Für das automatische Verschieben in Gmail ist einmalig die erweiterte Gmail-Freigabe erforderlich.';
      if(q('dg10IncomingStatus'))q('dg10IncomingStatus').innerHTML='<div class="status warn">'+esc(msg)+'</div>';
      if(q('dg10TaxStatus'))q('dg10TaxStatus').innerHTML='<div class="status warn">'+esc(msg)+'</div>';
-     return;
+     return false;
    }
-   await Promise.all([loadIncoming(false),loadTax(false)]);
+   return true;
  }catch(e){
    const msg=e&&e.message?e.message:String(e);
-   if(q('dg10IncomingStatus'))q('dg10IncomingStatus').innerHTML='<div class="status error">'+esc(msg)+'</div>';
+   const target=area==='tax'?q('dg10TaxStatus'):q('dg10IncomingStatus');
+   if(target)target.innerHTML='<div class="status error">'+esc(msg)+'</div>';
+   return false;
  }finally{state.syncing=false;}
 }
-async function loadIncoming(sync){
- show('dg10InvoiceIncoming','Rechnungseingang','Rechnungswesen');
- if(sync)await handleSync();
+async function refreshIncoming(){
  const host=q('dg10IncomingList'),st=q('dg10IncomingStatus');if(!host)return;
- try{const rows=await req({action:'getFinanceInboxV10'});state.incoming=rows||[];host.innerHTML=state.incoming.map(x=>mailHtml(x,'incoming')).join('')||'<div class="status ok">Keine offenen Eingangsrechnungen.</div>';if(st)st.innerHTML='<div class="status ok">'+state.incoming.length+' offene Rechnung(en).</div>';}catch(e){if(st)st.innerHTML='<div class="status error">'+esc(e.message)+'</div>';}
+ try{
+   const rows=await req({action:'getFinanceInboxV10'});state.incoming=rows||[];
+   host.innerHTML=state.incoming.map(x=>mailHtml(x,'incoming')).join('')||'<div class="status ok">Keine offenen Eingangsrechnungen.</div>';
+   if(st)st.innerHTML='<div class="status ok">'+state.incoming.length+' offene Rechnung(en) im allgemeinen Rechnungseingang.</div>';
+ }catch(e){if(st)st.innerHTML='<div class="status error">'+esc(e.message)+'</div>';}
+}
+async function refreshTax(){
+ const host=q('dg10TaxList'),st=q('dg10TaxStatus');if(!host)return;
+ try{
+   const rows=await req({action:'getTaxAdvisorInboxV10'});state.tax=rows||[];
+   host.innerHTML=state.tax.map(x=>mailHtml(x,'tax')).join('')||'<div class="status ok">Keine offenen Nachrichten von Frau Busse.</div>';
+   if(st)st.innerHTML='<div class="status ok">'+state.tax.length+' Nachricht(en) von Frau Busse.</div>';
+ }catch(e){if(st)st.innerHTML='<div class="status error">'+esc(e.message)+'</div>';}
+}
+async function loadIncoming(sync){
+ show('dg10InvoiceIncoming','Allgemeiner Rechnungseingang','Rechnungswesen');
+ if(sync)await handleSync('incoming');
+ await refreshIncoming();
 }
 async function loadTax(sync){
- show('dg10TaxAdvisor','Steuerberater','Rechnungswesen');
- if(sync)await handleSync();
- const host=q('dg10TaxList'),st=q('dg10TaxStatus');if(!host)return;
- try{const rows=await req({action:'getTaxAdvisorInboxV10'});state.tax=rows||[];host.innerHTML=state.tax.map(x=>mailHtml(x,'tax')).join('')||'<div class="status ok">Keine offenen Nachrichten von Frau Busse.</div>';if(st)st.innerHTML='<div class="status ok">'+state.tax.length+' Nachricht(en) von Frau Busse.</div>';}catch(e){if(st)st.innerHTML='<div class="status error">'+esc(e.message)+'</div>';}
+ show('dg10TaxAdvisor','Steuerberater – Frau Busse','Rechnungswesen');
+ if(sync)await handleSync('tax');
+ await refreshTax();
 }
 async function loadArchive(kind){
  const y=Number(document.querySelector('[data-dg10-year="'+kind+'"]')?.value||year()),m=Number(document.querySelector('[data-dg10-month="'+kind+'"]')?.value||month());
@@ -125,15 +141,23 @@ function openArchive(kind){
  else {show('dg10ArchiveTax','Steuerberater','Rechnungsarchiv');setTimeout(()=>loadArchive('tax'),0);}
 }
 function wireCards(){
- boss()?.addEventListener('click',async e=>{
-   const sync=e.target.closest('[data-dg10-sync]');if(sync){e.preventDefault();await handleSync();return;}
-   const paid=e.target.closest('[data-paid]');if(paid){e.preventDefault();paid.disabled=true;try{await req({action:'markFinancePaidV10',messageId:paid.dataset.paid});await loadIncoming(false);}finally{paid.disabled=false;}return;}
-   const ti=e.target.closest('[data-tax-invoice]');if(ti){e.preventDefault();ti.disabled=true;try{await req({action:'markTaxMailAsInvoiceV10',messageId:ti.dataset.taxInvoice});await loadTax(false);}finally{ti.disabled=false;}return;}
-   const ta=e.target.closest('[data-tax-archive]');if(ta){e.preventDefault();ta.disabled=true;try{await req({action:'archiveTaxAdvisorMailV10',messageId:ta.dataset.taxArchive});await loadTax(false);}finally{ta.disabled=false;}return;}
+ const root=boss();if(!root||root.dataset.dg10FinanceWired)return;
+ root.dataset.dg10FinanceWired='1';
+ root.addEventListener('click',async e=>{
+   const sync=e.target.closest('[data-dg10-sync]');if(sync){
+     e.preventDefault();
+     const area=String(sync.dataset.dg10Sync||'incoming');
+     await handleSync(area);
+     if(area==='tax')await refreshTax();else await refreshIncoming();
+     return;
+   }
+   const paid=e.target.closest('[data-paid]');if(paid){e.preventDefault();paid.disabled=true;try{await req({action:'markFinancePaidV10',messageId:paid.dataset.paid});await refreshIncoming();}finally{paid.disabled=false;}return;}
+   const ti=e.target.closest('[data-tax-invoice]');if(ti){e.preventDefault();ti.disabled=true;try{await req({action:'markTaxMailAsInvoiceV10',messageId:ti.dataset.taxInvoice});await refreshTax();}finally{ti.disabled=false;}return;}
+   const ta=e.target.closest('[data-tax-archive]');if(ta){e.preventDefault();ta.disabled=true;try{await req({action:'archiveTaxAdvisorMailV10',messageId:ta.dataset.taxArchive});await refreshTax();}finally{ta.disabled=false;}return;}
    const ar=e.target.closest('[data-dg10-archive]');if(ar){e.preventDefault();openArchive(ar.dataset.dg10Archive);return;}
    if(e.target.closest('[data-back]')){e.preventDefault();show('dg10FinanceArchive','Rechnungsarchiv','Archive & Auswertung');return;}
  },{capture:false});
- boss()?.addEventListener('change',e=>{const k=e.target?.dataset?.dg10Year||e.target?.dataset?.dg10Month;if(k)loadArchive(k);});
+ root.addEventListener('change',e=>{const k=e.target?.dataset?.dg10Year||e.target?.dataset?.dg10Month;if(k)loadArchive(k);});
 }
 function tile(key,label,count,extra){return '<button type="button" class="d3-tile dg10-accounting-tile '+(extra||'')+'" data-dg10-account="'+esc(key)+'"><span>'+esc(label)+'</span><strong>'+esc(count||'›')+'</strong></button>';}
 function installSection(){
