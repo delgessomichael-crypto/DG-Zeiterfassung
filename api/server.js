@@ -1333,7 +1333,11 @@ async function initDb() {
   await bootstrapTimeBankReadinessV6();
   await bootstrapVacationReadinessV7();
   await bootstrapCurrentPeriodReadinessV8();
-  await bootstrapMonthDataFromLegacyV20();
+  if(!FINAL_CUTOVER){
+    await bootstrapMonthDataFromLegacyV20();
+  }else{
+    console.log('FINAL_CUTOVER legacy month bootstrap disabled; PostgreSQL remains authoritative.');
+  }
   await bootstrapDayAndBossClosureReadinessV10();
   await bootstrapAbsenceAndPlannerReadinessV11();
   await bootstrapPayrollCycleNativeV13();
@@ -1341,8 +1345,12 @@ async function initDb() {
   await bootstrapOfferNativeV15();
   await bootstrapObjectReportsV16();
   await bootstrapDashboardNativeV17();
-  await bootstrapBossMonthComparisonV18();
-  await bootstrapPayrollAuditComparisonV19();
+  if(!FINAL_CUTOVER){
+    await bootstrapBossMonthComparisonV18();
+    await bootstrapPayrollAuditComparisonV19();
+  }else{
+    console.log('FINAL_CUTOVER legacy Google parity comparisons disabled.');
+  }
   await bootstrapProductionReadinessV21();
   if(FINAL_CUTOVER){
     await pool.query("DELETE FROM shadow_verify_stats WHERE mismatches<>0");
