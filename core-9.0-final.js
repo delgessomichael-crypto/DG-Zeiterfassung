@@ -47,7 +47,8 @@ function dgError(message,type){const e=new Error(message);e.dgType=type;return e
 
 function api(payload){return d3Api(payload);}
 
-function loginEnter(ev){if(ev&&ev.key==='Enter'){ev.preventDefault();ev.stopPropagation();loginEmployee();}}
+function loginEnter(ev){if(ev&&ev.key==='Enter'){ev.preventDefault();ev.stopPropagation();return loginEmployee();}}
+window.loginEnter=loginEnter;
 
 async function loginEmployee(){const employee=$('loginEmployee').value,pin=$('loginPin').value;if(!employee){setMessage('loginStatus','Bitte Mitarbeiter auswählen.','error');return}if(!pin){setMessage('loginStatus','Bitte PIN eingeben.','error');return}if(!navigator.onLine){setMessage('loginStatus','Die erste Anmeldung muss online erfolgen.','error');return}try{setMessage('loginStatus','Anmeldung wird geprüft ...','info');const res=await api({action:'employeeLogin',employee,pin});localStorage.setItem('dg_employee',res.employee||employee);sessionStorage.setItem('dg_employee_pin',pin);localStorage.setItem('dg_chef_access',res.chefAccess?'1':'0');openMain()}catch(e){setMessage('loginStatus',e.message,'error')}}
 
