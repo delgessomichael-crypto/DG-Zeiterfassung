@@ -1,9 +1,9 @@
 /* DG Zeiterfassung 10.0 - Railway migration cache */
-const CACHE='dg-zeiterfassung-10.0-absence-credit-20260924-0640';
+const CACHE='dg-zeiterfassung-10.0-absence-direct-20260924-0650';
 const STATIC=[
   './index.html',
   './app-5.0.css?v=20260918-800-prod1',
-  './core-9.0-final.js?v=20260924-0640-absence-credit-fix',
+  './core-9.0-final.js?v=20260924-0650-absence-direct-render',
   './customerflow-9.0-final.js?v=20260920-900-final1',
   './payroll-9.0-final.js?v=20260923-2240-v10-final',
   './ui-9.0-final.js?v=20260923-1620-v10-title-final',
