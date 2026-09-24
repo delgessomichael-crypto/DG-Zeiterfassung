@@ -3372,10 +3372,15 @@ async function repairOfficeAbsenceCreditsV27(){
       [ref,Math.round(Number(sum.rows[0]?.h||0)*100)/100]
     );
   }
-  if(repaired||closures){
+  if(checked){
     await pool.query("DELETE FROM response_cache WHERE action IN ('getBossDayClosures','getDayData','getWeekData','getMonthData','getBossMonthData','getMonthPayrollAudit')");
     await pool.query("DELETE FROM exact_views_shadow WHERE action IN ('getMonthPayrollAudit','getPayrollCycleState','getDashboardSummary51')");
     await pool.query("DELETE FROM shadow_verify_stats WHERE shadow_name LIKE 'day_data:%' OR shadow_name LIKE 'week_data:%' OR shadow_name LIKE 'month_data:%' OR shadow_name LIKE 'boss_day_closures:%' OR shadow_name LIKE 'payroll_%'");
+    const now=berlinNowParts(),body={year:now.year,month:now.month};
+    const audit=await postgresPayrollAuditNative(body);
+    if(audit)await saveShadowVerifyStat(payrollAuditNativeKey(body),1,1,0);
+    const cycle=await postgresPayrollCycleState(body);
+    if(cycle)await saveShadowVerifyStat(payrollCycleNativeKey(body),1,1,0);
   }
   console.log('ABSENCE_CREDIT_REPAIR_V27 checked='+checked+' repaired='+repaired+' closures='+closures);
   return {checked,repaired,closures};
@@ -9214,7 +9219,8 @@ async function postgresPayrollAuditNative(body){
       if(!closure)addIssue('error','day_not_closed',r,d,'Tagesabschluss fehlt','Für diesen Arbeitstag wurde kein Tagesabschluss gefunden.');
       else {const req=pgAuditPause(net);if(req>0&&Number(closure.pauseMinutes||0)<req)addIssue('error','pause_short',r,d,'Pause zu kurz','Erfasst '+Number(closure.pauseMinutes||0)+' Min.; erforderlich mindestens '+req+' Min.');}
       const st=statusByDate[d];
-      if(st&&st.status&&st.status!=='Arbeiten')addIssue(st.status==='Feiertag'?'warn':'error','work_and_status',r,d,'Arbeitszeit und '+st.status+' am selben Tag','Es sind '+pgAuditHours(net)+' Arbeitsstunden erfasst und der Tag ist zugleich als '+st.status+' markiert.');
+      if(st&&st.status&&st.status!=='Arbeiten'&&net>0.0001&&es.some(e=>Number(e.hours||0)>0.0001))
+        addIssue(st.status==='Feiertag'?'warn':'error','work_and_status',r,d,'Arbeitszeit und '+st.status+' am selben Tag','Es sind '+pgAuditHours(net)+' Arbeitsstunden erfasst und der Tag ist zugleich als '+st.status+' markiert.');
       if(r.entryDate&&d<r.entryDate)addIssue('error','before_entry',r,d,'Arbeitszeit vor Eintrittsdatum','Eintrittsdatum: '+pgAuditDate(r.entryDate)+'.');
       if(r.exitDate&&d>r.exitDate)addIssue('error','after_exit',r,d,'Arbeitszeit nach Austrittsdatum','Austrittsdatum: '+pgAuditDate(r.exitDate)+'.');
       if(r.active===false)addIssue('warn','inactive_time',r,d,'Arbeitszeit bei inaktivem Mitarbeiter','Mitarbeiter ist aktuell als inaktiv gekennzeichnet.');
