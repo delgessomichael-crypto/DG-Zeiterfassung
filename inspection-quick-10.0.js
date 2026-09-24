@@ -2,7 +2,7 @@
 (function(){
 'use strict';
 
-const V='20260924-1252-inspection-start-safe1';
+const V='20260924-1425-inspection-time-speech2';
 const $=id=>document.getElementById(id);
 const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -65,6 +65,38 @@ function eventLabel(e){
   const d=[e.startDate||'',e.startTime||''].filter(Boolean).join(' ');
   return [d,e.title||e.customer||'',e.location||''].filter(Boolean).join(' · ');
 }
+function localDateIso(){
+  const d=new Date(),y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');
+  return y+'-'+m+'-'+day;
+}
+function timeMinutes(v){
+  const m=String(v||'').match(/^(\d{1,2}):(\d{2})$/);
+  if(!m)return null;
+  const h=Number(m[1]),min=Number(m[2]);
+  return h>=0&&h<=23&&min>=0&&min<=59?h*60+min:null;
+}
+function updateTimeHours(){
+  const start=timeMinutes($('inspectionTimeStart')?.value),end=timeMinutes($('inspectionTimeEnd')?.value);
+  const out=$('inspectionTimeHours');
+  const hours=start!==null&&end!==null&&end>start?Math.round(((end-start)/60)*100)/100:0;
+  if(out)out.value=hours>0?hours.toFixed(2).replace('.',','):'';
+  return hours;
+}
+function timeCaptureActive(){
+  const p=$('inspectionTimePanel');
+  return !!(p&&!p.classList.contains('hidden'));
+}
+function toggleTimeCapture(){
+  const p=$('inspectionTimePanel'),b=$('inspectionTimeBtn');if(!p||!b)return;
+  const enable=p.classList.contains('hidden');
+  p.classList.toggle('hidden',!enable);
+  b.textContent=enable?'Zeit erfassen aktiv':'Zeit erfassen';
+  if(enable){
+    if(!$('inspectionTimeDate').value)$('inspectionTimeDate').value=localDateIso();
+    const ev=selectedCalendarEvent();if(ev)fillFromEvent(ev,false);
+    updateTimeHours();
+  }
+}
 function fillFromEvent(e,overwrite){
   if(!e)return;
   const text=[e.title,e.description,e.location].filter(Boolean).join('\n');
@@ -84,6 +116,10 @@ function fillFromEvent(e,overwrite){
   set('inspectionMobile',String(e.mobile||e.phone||contact.phone1||''));
   set('inspectionLandline',String(e.landline||contact.phone2||''));
   set('inspectionDescription',String(e.description||''));
+  set('inspectionTimeDate',String(e.startDate||''));
+  set('inspectionTimeStart',String(e.startTime||'').slice(0,5));
+  set('inspectionTimeEnd',String(e.endTime||'').slice(0,5));
+  updateTimeHours();
   const hidden=$('inspectionCalendarEventId');if(hidden)hidden.value=String(e.id||'');
 }
 function renderCalendarSelect(){
@@ -97,8 +133,10 @@ function renderCalendarSelect(){
   }
 }
 function clearForm(){
-  ['inspectionLastName','inspectionFirstName','inspectionStreet','inspectionPostalCode','inspectionCity','inspectionEmail','inspectionMobile','inspectionLandline','inspectionDescription','inspectionCalendarEventId'].forEach(id=>{if($(id))$(id).value='';});
+  ['inspectionLastName','inspectionFirstName','inspectionStreet','inspectionPostalCode','inspectionCity','inspectionEmail','inspectionMobile','inspectionLandline','inspectionDescription','inspectionCalendarEventId','inspectionTimeDate','inspectionTimeStart','inspectionTimeEnd','inspectionTimeHours'].forEach(id=>{if($(id))$(id).value='';});
   if($('inspectionCalendarSelect'))$('inspectionCalendarSelect').value='';
+  const p=$('inspectionTimePanel');if(p)p.classList.add('hidden');
+  const b=$('inspectionTimeBtn');if(b)b.textContent='Zeit erfassen';
   notice('','info');
 }
 function closeModal(){
@@ -132,20 +170,26 @@ function toggleSpeech(){
     return;
   }
   recognition=new SR();
-  recognition.lang='de-DE';recognition.continuous=true;recognition.interimResults=true;
-  let base=String($('inspectionDescription')?.value||'').trim();
+  recognition.lang='de-DE';
+  recognition.continuous=true;
+  // Nur bestätigte Ergebnisse übernehmen. Android/Samsung liefert Zwischenresultate
+  // mehrfach; diese dürfen nicht dauerhaft in den Text geschrieben werden.
+  recognition.interimResults=false;
+  const initial=String($('inspectionDescription')?.value||'').trim();
+  const committed=new Map();
   recognition.onstart=()=>{speechActive=true;if($('inspectionSpeechBtn'))$('inspectionSpeechBtn').textContent='⏹ Spracheingabe stoppen';notice('Spracheingabe läuft …','info');};
   recognition.onresult=ev=>{
-    let finalText='',interim='';
     for(let i=ev.resultIndex;i<ev.results.length;i++){
-      const t=String(ev.results[i][0].transcript||'').trim();
-      if(ev.results[i].isFinal)finalText+=(finalText?' ':'')+t;else interim+=(interim?' ':'')+t;
+      if(!ev.results[i].isFinal)continue;
+      const t=String(ev.results[i][0].transcript||'').replace(/\s+/g,' ').trim();
+      if(t)committed.set(i,t);
     }
-    if(finalText)base=(base?base+' ':'')+finalText;
-    const ta=$('inspectionDescription');if(ta)ta.value=(base+(interim?' '+interim:'')).trim();
+    const spoken=[...committed.keys()].sort((a,b)=>a-b).map(i=>committed.get(i)).filter(Boolean).join(' ');
+    const ta=$('inspectionDescription');
+    if(ta)ta.value=[initial,spoken].filter(Boolean).join(initial&&spoken?' ':'').trim();
   };
   recognition.onerror=ev=>{notice('Spracheingabe: '+String(ev.error||'Fehler'),'warn');stopSpeech();};
-  recognition.onend=()=>{if(speechActive){speechActive=false;const b=$('inspectionSpeechBtn');if(b)b.textContent='🎤 Spracheingabe';}};
+  recognition.onend=()=>{speechActive=false;recognition=null;const b=$('inspectionSpeechBtn');if(b)b.textContent='🎤 Spracheingabe';};
   recognition.start();
 }
 async function submit(){
@@ -160,10 +204,19 @@ async function submit(){
     mobile:String($('inspectionMobile')?.value||'').trim(),
     landline:String($('inspectionLandline')?.value||'').trim(),
     description:String($('inspectionDescription')?.value||'').trim(),
-    calendarEventId:String($('inspectionCalendarEventId')?.value||'').trim()
+    calendarEventId:String($('inspectionCalendarEventId')?.value||'').trim(),
+    captureTime:timeCaptureActive(),
+    timeDate:String($('inspectionTimeDate')?.value||'').trim(),
+    timeStart:String($('inspectionTimeStart')?.value||'').trim(),
+    timeEnd:String($('inspectionTimeEnd')?.value||'').trim(),
+    timeHours:updateTimeHours()
   };
   if(!item.lastName&&!item.firstName){notice('Bitte Name oder Vorname eintragen.','error');$('inspectionLastName')?.focus();return;}
   if(!item.description){notice('Bitte Auftragsbeschreibung eintragen.','error');$('inspectionDescription')?.focus();return;}
+  if(item.captureTime){
+    if(!item.timeDate){notice('Bitte Datum für die Zeiterfassung eintragen.','error');$('inspectionTimeDate')?.focus();return;}
+    if(!(item.timeHours>0)){notice('Bitte gültige Von-/Bis-Zeit für die Zeiterfassung eintragen.','error');$('inspectionTimeStart')?.focus();return;}
+  }
   const btn=$('inspectionSubmitBtn');
   if(btn){btn.disabled=true;btn.textContent='Wird übertragen …';}
   stopSpeech();
@@ -171,7 +224,9 @@ async function submit(){
     const fn=typeof window.api==='function'?window.api:null;
     if(!fn)throw new Error('API ist noch nicht bereit.');
     const r=await fn(apiPayload({action:'createEmployeeInspectionRequestV10',item}));
-    notice('✅ Besichtigung wurde an das Büro übertragen und steht unter „Angebote zu erstellen“.','ok');
+    notice(item.captureTime
+      ?'✅ Besichtigung übertragen. '+String(item.timeHours).replace('.',',')+' Std. wurden zusätzlich als Arbeitszeit erfasst.'
+      :'✅ Besichtigung wurde an das Büro übertragen und steht unter „Angebote zu erstellen“.','ok');
     if(item.calendarEventId){
       try{
         if(typeof window.removeCalendarEventLocally==='function')window.removeCalendarEventLocally(item.calendarEventId);
@@ -181,6 +236,7 @@ async function submit(){
       }catch(_e){}
     }
     if(typeof window.dg60RefreshOfferCounts==='function')window.dg60RefreshOfferCounts(true).catch(()=>{});
+    if(item.captureTime&&typeof window.loadDay==='function')window.loadDay().catch(()=>{});
     if(typeof window.loadCalendarEvents==='function')window.loadCalendarEvents().catch(()=>{});
     setTimeout(()=>{closeModal();clearForm();},1400);
     return r;
@@ -208,12 +264,21 @@ function buildModal(){
       <label>Auftragsbeschreibung</label>
       <textarea id="inspectionDescription" class="inspection-description" placeholder="Auftragsbeschreibung einsprechen oder eintippen"></textarea>
       <button type="button" class="btn secondary" id="inspectionSpeechBtn" style="width:100%;margin-top:8px">🎤 Spracheingabe</button>
+      <button type="button" class="btn danger" id="inspectionTimeBtn" style="width:100%;margin-top:14px">Zeit erfassen</button>
+      <div id="inspectionTimePanel" class="hidden" style="margin-top:10px;padding:10px;border:1px solid #cbd5e1;border-radius:10px">
+        <div class="grid2"><div><label>Datum</label><input id="inspectionTimeDate" type="date"></div><div><label>Stunden</label><input id="inspectionTimeHours" readonly></div></div>
+        <div class="grid2"><div><label>Von</label><input id="inspectionTimeStart" type="time"></div><div><label>Bis</label><input id="inspectionTimeEnd" type="time"></div></div>
+        <div class="muted small">Optional. Die erfasste Zeit erscheint bei „Einträge des Tages“ und fließt mit der hinterlegten automatischen Pausenregel in Stundenkonto und Monatsabrechnung ein.</div>
+      </div>
       <button type="button" class="btn success" id="inspectionSubmitBtn" style="width:100%;margin-top:14px">Übertragen</button>
       <div id="inspectionQuickStatus"></div>
     </div>`;
   document.body.appendChild(m);
   $('inspectionCloseBtn').addEventListener('click',closeModal);
   $('inspectionSpeechBtn').addEventListener('click',toggleSpeech);
+  $('inspectionTimeBtn').addEventListener('click',toggleTimeCapture);
+  $('inspectionTimeStart').addEventListener('input',updateTimeHours);
+  $('inspectionTimeEnd').addEventListener('input',updateTimeHours);
   $('inspectionSubmitBtn').addEventListener('click',submit);
   $('inspectionCalendarSelect').addEventListener('change',()=>{
     const v=$('inspectionCalendarSelect').value;
