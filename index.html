@@ -28,9 +28,9 @@
 <h2 class="center">Mitarbeiter-Anmeldung</h2><div class="center muted small" style="margin-top:-8px;margin-bottom:10px">Version 10.0</div>
 <div class="status" id="loginNet"></div>
 <label for="loginEmployee">Mitarbeiter</label>
-<select id="loginEmployee" onkeydown="loginEnter(event)"><option value="">Mitarbeiter werden geladen ...</option></select>
+<select id="loginEmployee"><option value="">Mitarbeiter werden geladen ...</option></select>
 <label for="loginPin">PIN</label>
-<input id="loginPin" inputmode="numeric" maxlength="10" onkeydown="loginEnter(event)" placeholder="PIN" type="password"/>
+<input id="loginPin" inputmode="numeric" maxlength="10" placeholder="PIN" type="password"/>
 <button class="btn primary" data-enter-default="" onclick="loginEmployee()" style="width:100%;margin-top:16px">Anmelden</button>
 <div id="loginStatus"></div>
 </div>
@@ -230,7 +230,20 @@
   if(!('serviceWorker' in navigator))return;
   window.addEventListener('load',function(){
     var start=function(){
-      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260924-1945-payroll-cycle1"high" src="./core-9.0-final.js?v=20260924-1945-payroll-cycle1"></script>
+      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260924-2010-login-start-repair1',{updateViaCache:'none'})
+        .then(function(r){return r.update();})
+        .catch(function(e){console.warn('DG Offline-Cache nicht bereit',e);});
+    };
+    if('requestIdleCallback' in window){
+      requestIdleCallback(start,{timeout:5000});
+    }else{
+      setTimeout(start,2500);
+    }
+  },{once:true});
+})();
+</script>
+
+<script defer fetchpriority="high" src="./core-9.0-final.js?v=20260924-2010-login-start-repair1"></script>
 <script defer fetchpriority="low" src="./customerflow-9.0-final.js?v=20260920-900-final1"></script>
 <script defer fetchpriority="low" src="./payroll-9.0-final.js?v=20260923-2240-v10-final"></script>
 <script defer fetchpriority="low" src="./ui-9.0-final.js?v=20260924-1945-payroll-cycle1"></script>
@@ -370,11 +383,13 @@ function install(){
     btn.dataset.dgIndexLogin='1';
     btn.addEventListener('click',function(e){e.preventDefault();e.stopImmediatePropagation();directLogin();},true);
   }
-  var pin=el('loginPin');
-  if(pin&&!pin.dataset.dgIndexLogin){
-    pin.dataset.dgIndexLogin='1';
-    pin.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();e.stopImmediatePropagation();directLogin();}},true);
-  }
+  var pin=el('loginPin'),employeeSelect=el('loginEmployee');
+  [pin,employeeSelect].forEach(function(field){
+    if(field&&!field.dataset.dgIndexLogin){
+      field.dataset.dgIndexLogin='1';
+      field.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();e.stopImmediatePropagation();directLogin();}},true);
+    }
+  });
   try{sessionStorage.removeItem('dg_employee_pin');}catch(_e){}
   var login=el('loginScreen'),main=el('mainScreen');
   if(main)main.classList.add('hidden');
