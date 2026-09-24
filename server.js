@@ -16,6 +16,7 @@ const FILES = new Map([
   ['/app-5.0.css', 'app-5.0.css'],
   ['/core-9.0-final.js', 'core-9.0-final.js'],
   ['/employee-controls-10.0.js', 'employee-controls-10.0.js'],
+  ['/inspection-quick-10.0.js', 'inspection-quick-10.0.js'],
   ['/customerflow-9.0-final.js', 'customerflow-9.0-final.js'],
   ['/payroll-9.0-final.js', 'payroll-9.0-final.js'],
   ['/ui-9.0-final.js', 'ui-9.0-final.js'],
