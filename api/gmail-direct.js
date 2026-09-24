@@ -510,6 +510,29 @@ function createGmailDirect(opts){
     return financeRow(q.rows[0]);
   }
 
+  async function archiveInquiryMessages(inquiryId,actor){
+    inquiryId=String(inquiryId||'').trim();if(!inquiryId)return {ok:true,archived:0,messageIds:[]};
+    const q=await pool.query('SELECT gmail_ids FROM customer_inquiries_shadow WHERE id=$1 LIMIT 1',[inquiryId]);
+    if(!q.rowCount)return {ok:true,archived:0,messageIds:[]};
+    const ids=[...new Set(String(q.rows[0].gmail_ids||'').split('|').map(x=>x.trim()).filter(Boolean))];
+    if(!ids.length)return {ok:true,archived:0,messageIds:[]};
+    const oauth=await row();
+    if(!oauth||!hasModifyScope(oauth))return {ok:false,archived:0,messageIds:ids,needsReconnect:true};
+    const token=await accessToken();let archived=0,failed=0;
+    for(const id of ids){
+      try{
+        await apiJson(token,'POST','messages/'+encodeURIComponent(id)+'/modify',{removeLabelIds:['INBOX']});
+        archived++;
+      }catch(e){failed++;console.error('GMAIL_INQUIRY_ARCHIVE inquiry='+inquiryId+' message='+id+' error='+e.message);}
+    }
+    await pool.query(
+      `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+       ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
+      ['gmail_inquiry_archive:'+inquiryId,JSON.stringify({inquiryId,actor:String(actor||''),messageIds:ids,archived,failed,at:new Date().toISOString()})]
+    );
+    return {ok:failed===0,archived,failed,messageIds:ids};
+  }
+
   async function sync(){
     if(syncing)return {ok:true,skipped:true,reason:'busy'};
     if(!configured())return {ok:true,configured:false,connected:false,needsConfiguration:true,redirectUri};
@@ -590,7 +613,7 @@ function createGmailDirect(opts){
     setTimeout(()=>scheduledSync().catch(e=>console.error('GMAIL startup sync failed',e.message)),15000);
   }
 
-  return {init,start,status,syncForUser,financeSyncForUser,financeList,financeOverview,financeArchive,markPaid,archiveTax,callback,authUrl,configured,calendarApi,googleConnection,accessToken};
+  return {init,start,status,syncForUser,financeSyncForUser,financeList,financeOverview,financeArchive,markPaid,archiveTax,archiveInquiryMessages,callback,authUrl,configured,calendarApi,googleConnection,accessToken};
 }
 
 module.exports={createGmailDirect};
