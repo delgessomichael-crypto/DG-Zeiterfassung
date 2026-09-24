@@ -3613,12 +3613,20 @@ function show(id,title,parent){
  else if(q('dg80OfficeTitle'))q('dg80OfficeTitle').textContent=(parent?parent+' > ':'')+title;
  setTimeout(()=>q('dg80OfficeToolbar')?.scrollIntoView({behavior:'smooth',block:'start'}),20);
 }
+function financeFilesHtml(files){
+ return (Array.isArray(files)?files:[]).map(a=>{
+   const name=String(a&&a.name||'Datei'),mime=String(a&&a.mime||''),url=String(a&&a.url||'');
+   const label=/^image\//i.test(mime)?'🖼 '+name:(/pdf/i.test(mime)?'📄 '+name:'📎 '+name);
+   if(url)return '<a class="btn secondary" target="_blank" rel="noopener" href="'+esc(url)+'">'+esc(label)+'</a>';
+   return '<span class="btn secondary" style="opacity:.65;cursor:default">'+esc(label)+'</span>';
+ }).join('');
+}
 function mailHtml(x,kind){
- const files=(x.attachments||[]).map(a=>esc(a.name||'Datei')).join(' · ');
+ const files=financeFilesHtml(x.attachments);
  let actions='<a class="btn secondary" target="_blank" rel="noopener" href="'+esc(x.gmailUrl||'#')+'">In Gmail öffnen</a>';
  if(kind==='incoming')actions+='<button class="btn success" data-paid="'+esc(x.messageId)+'">Als bezahlt markieren</button>';
  if(kind==='tax')actions+='<button class="btn success" data-tax-invoice="'+esc(x.messageId)+'">Als Rechnung markieren</button><button class="btn secondary" data-tax-archive="'+esc(x.messageId)+'">Archivieren</button>';
- return '<div class="dg10-fin-mail"><div class="dg10-fin-head"><div><div class="dg10-fin-subject">'+esc(x.subject||'(ohne Betreff)')+'</div><div class="dg10-fin-meta">'+esc(x.senderName||x.senderEmail||'')+(x.senderEmail?' · '+esc(x.senderEmail):'')+'</div></div><strong>'+esc(de(x.receivedAt))+'</strong></div>'+(files?'<div class="dg10-fin-files">Anhänge: '+files+'</div>':'')+'<div class="dg10-fin-actions">'+actions+'</div></div>';
+ return '<div class="dg10-fin-mail"><div class="dg10-fin-head"><div><div class="dg10-fin-subject">'+esc(x.subject||'(ohne Betreff)')+'</div><div class="dg10-fin-meta">'+esc(x.senderName||x.senderEmail||'')+(x.senderEmail?' · '+esc(x.senderEmail):'')+'</div></div><strong>'+esc(de(x.receivedAt))+'</strong></div>'+(files?'<div class="dg10-fin-files"><div class="muted small" style="margin-bottom:6px"><strong>Anhänge</strong></div><div class="dg10-fin-actions">'+files+'</div></div>':'')+'<div class="dg10-fin-actions">'+actions+'</div></div>';
 }
 async function handleSync(area){
  if(state.syncing)return false;state.syncing=true;
@@ -3678,7 +3686,7 @@ async function loadArchive(kind){
  const host=q(kind==='paid'?'dg10ArchivePaidList':'dg10ArchiveTaxList');if(!host)return;
  try{
    const rows=await req({action:'getFinanceArchiveV10',kind,year:y,month:m});
-   host.innerHTML=(rows||[]).map(x=>'<div class="dg10-fin-mail"><div class="dg10-fin-subject">'+esc(x.subject||'(ohne Betreff)')+'</div><div class="dg10-fin-meta">'+esc(x.senderName||x.senderEmail||'')+' · '+esc(kind==='paid'?'Bezahlt: '+de(x.paidAt):'Archiviert: '+de(x.archivedAt))+'</div><div class="dg10-fin-actions"><a class="btn secondary" target="_blank" rel="noopener" href="'+esc(x.gmailUrl||'#')+'">In Gmail öffnen</a></div></div>').join('')||'<div class="status ok">Keine Einträge in '+MONTHS[m-1]+' '+y+'.</div>';
+   host.innerHTML=(rows||[]).map(x=>'<div class="dg10-fin-mail"><div class="dg10-fin-subject">'+esc(x.subject||'(ohne Betreff)')+'</div><div class="dg10-fin-meta">'+esc(x.senderName||x.senderEmail||'')+' · '+esc(kind==='paid'?'Bezahlt: '+de(x.paidAt):'Archiviert: '+de(x.archivedAt))+'</div>'+(financeFilesHtml(x.attachments)?'<div class="dg10-fin-files"><div class="muted small" style="margin:8px 0 6px"><strong>Anhänge</strong></div><div class="dg10-fin-actions">'+financeFilesHtml(x.attachments)+'</div></div>':'')+'<div class="dg10-fin-actions"><a class="btn secondary" target="_blank" rel="noopener" href="'+esc(x.gmailUrl||'#')+'">In Gmail öffnen</a></div></div>').join('')||'<div class="status ok">Keine Einträge in '+MONTHS[m-1]+' '+y+'.</div>';
  }catch(e){host.innerHTML='<div class="status error">'+esc(e.message)+'</div>';}
 }
 function openArchive(kind){
