@@ -14,7 +14,7 @@
 <link rel="preconnect" href="https://dg-app-10-api-production.up.railway.app"/>
 <link rel="dns-prefetch" href="//dg-app-10-api-production.up.railway.app"/>
 <link rel="preload" href="./app-5.0.css?v=20260924-1032-signature-final" as="style"/>
-<link rel="preload" href="./core-9.0-final.js?v=20260924-1032-signature-final" as="script" fetchpriority="high"/>
+<link rel="preload" href="./core-9.0-final.js?v=20260924-1045-final-controls1" as="script" fetchpriority="high"/>
 <link rel="manifest" href="manifest.json"/>
 <link href="dg_icon_192.png" rel="icon"/>
 <link href="dg_icon_192.png" rel="apple-touch-icon"/>
@@ -85,8 +85,8 @@
 <div class="radio-row"><strong>Auftrag abgeschlossen?</strong><label><input name="jobCompleted" type="radio" value="no"/>Nein</label><label><input checked="" name="jobCompleted" type="radio" value="yes"/>Ja</label></div>
 <h3 style="margin-top:20px">Kundenunterschrift</h3><div class="muted small">Bei vorhandener Unterschrift wird der Auftrag nach der Übertragung automatisch ans Büro gesendet.</div>
 <div class="signature-wrap" id="customerSignatureWrap"><canvas id="customerSignature"></canvas><div class="signature-lock">Zum Unterschreiben einmal tippen</div></div><div class="signature-hint">Zum Unterschreiben Feld einmal antippen. Beim Scrollen bleibt es gesperrt.</div>
-<div class="button-row"><button class="btn danger" onclick="clearCustomerSignature()">Unterschrift löschen</button><button class="btn success" onclick="markNoCustomer()">Kein Kunde vor Ort</button></div>
-<button class="btn primary" data-enter-default="" onclick="saveEntry()" style="width:100%;margin-top:14px">An Büro übertragen</button><div id="entryStatus"></div>
+<div class="button-row"><button class="btn danger" id="clearCustomerSignatureBtn" type="button">Unterschrift löschen</button><button class="btn success" id="noCustomerBtn" type="button" aria-pressed="false">Kein Kunde vor Ort</button></div>
+<button class="btn primary" data-enter-default="" id="transferToOfficeBtn" type="button" style="width:100%;margin-top:14px">An Büro übertragen</button><div id="entryStatus"></div><div class="hidden" id="officeTransferConfirm"></div>
 </div>
 <div class="card"><h2>Einträge des Tages</h2><div class="muted" id="entries">Noch keine Tagesdaten geladen.</div><div class="day-balance bad" id="dayTotal">Heute: 0,00 Std.</div><div class="day-balance good" id="employeeMonthlyHours">Geleistete Monatsstunden: werden geladen ...</div><button class="btn secondary" onclick="loadDay()" style="width:100%">Tag aktualisieren</button></div>
 <div class="card" id="dayCloseCard">
@@ -230,7 +230,7 @@
   if(!('serviceWorker' in navigator))return;
   window.addEventListener('load',function(){
     var start=function(){
-      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260924-1032-signature-final',{updateViaCache:'none'})
+      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260924-1045-final-controls1',{updateViaCache:'none'})
         .then(function(r){return r.update();})
         .catch(function(e){console.warn('DG Offline-Cache nicht bereit',e);});
     };
@@ -243,10 +243,11 @@
 })();
 </script>
 
-<script defer fetchpriority="high" src="./core-9.0-final.js?v=20260924-1032-signature-final"></script>
+<script defer fetchpriority="high" src="./core-9.0-final.js?v=20260924-1045-final-controls1"></script>
 <script defer fetchpriority="low" src="./customerflow-9.0-final.js?v=20260920-900-final1"></script>
 <script defer fetchpriority="low" src="./payroll-9.0-final.js?v=20260923-2240-v10-final"></script>
 <script defer fetchpriority="low" src="./ui-9.0-final.js?v=20260923-1620-v10-title-final"></script>
+<script defer src="./employee-controls-10.0.js?v=20260924-1045-final-controls1"></script>
 <script>
 (function(){
 'use strict';
