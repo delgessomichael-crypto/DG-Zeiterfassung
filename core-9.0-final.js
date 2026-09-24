@@ -672,12 +672,59 @@ function d3Visible(e){return !!(e&&e.getClientRects().length);}
 function d3Notice(msg,type='info'){let e=$('d3Notice');if(!e){e=document.createElement('div');e.id='d3Notice';document.querySelector('#mainScreen .tabs').after(e);}e.className='status '+type;e.textContent=msg;}
 function d3Button(text,fn,args=[],kind='primary'){return '<button type="button" class="btn '+kind+'" data-d3-fn="'+esc(fn)+'" data-d3-args="'+esc(JSON.stringify(args))+'">'+esc(text)+'</button>';}
 async function d3CheckBackend(){try{const r=await api({action:'ping'});DG3.backend=String(r.version||'');if(!/^(?:3\.|5\.)/.test(DG3.backend))d3Notice('App 5.0: Bitte zuerst Google-GS 5.0 bereitstellen. Backend: '+DG3.backend+'. Speichern ist gesperrt.','warn');else $('d3Notice')?.remove();return /^(?:3\.|5\.)/.test(DG3.backend);}catch(e){d3Notice('Verbindungspruefung fehlgeschlagen: '+e.message,'warn');return false;}}
-async function d3Api(payload){const action=String(payload.action||''),read=/^(get|check)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload);if(action!=='ping'&&!/^(?:3\.|5\.)/.test(DG3.backend)){await d3CheckBackend();if(!/^(?:3\.|5\.)/.test(DG3.backend))throw dgError('Google-Backend 5.0 noch nicht bereitgestellt.','version');}if(read&&DG3.reads.has(key))return DG3.reads.get(key);const promise=(async()=>{if(!read)DG3.pending++;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);try{let response;try{response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...payload,clientVersion:'5.2.5'}),signal:controller.signal});}catch(e){throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Anlegen zuerst Daten neu laden.':'Keine Serververbindung.','network');}if(!response.ok)throw dgError('HTTP '+response.status,'network');let data;try{data=JSON.parse(await response.text());}catch(e){throw dgError('Ungueltige Serverantwort.','server');}if(!data.ok)throw dgError(data.error||'Serverfehler.','server');return data.data!==undefined?data.data:data;}finally{clearTimeout(timer);if(!read)DG3.pending--;}})();if(read)DG3.reads.set(key,promise);try{return await promise;}finally{if(read&&DG3.reads.get(key)===promise)DG3.reads.delete(key);}}
+async function d3Api(payload){
+  const action=String(payload.action||''),read=/^(get|check)/.test(action)||['ping','employeeLogin','systemHealthCheck'].includes(action),key=JSON.stringify(payload);
+  const backendOk=()=>/^(?:3\.|5\.|10\.)/.test(String(DG3.backend||''));
+  if(action!=='ping'&&!backendOk()){
+    await d3CheckBackend();
+    if(!backendOk())throw dgError('Railway-Backend ist noch nicht bereit.','version');
+  }
+  if(read&&DG3.reads.has(key))return DG3.reads.get(key);
+  const promise=(async()=>{
+    if(!read)DG3.pending++;
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);
+    try{
+      let response;
+      try{
+        response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...payload,clientVersion:'10.0'}),signal:controller.signal});
+      }catch(e){
+        throw dgError(e.name==='AbortError'?'Serverantwort dauert zu lange. Vor erneutem Anlegen zuerst Daten neu laden.':'Keine Serververbindung.','network');
+      }
+      let text='',data=null;
+      try{text=await response.text();data=text?JSON.parse(text):{};}catch(_e){
+        if(!response.ok)throw dgError('HTTP '+response.status,'network');
+        throw dgError('Ungültige Serverantwort.','server');
+      }
+      if(!response.ok)throw dgError((data&&data.error)||('HTTP '+response.status),response.status>=500?'server':'request');
+      if(!data||!data.ok)throw dgError((data&&data.error)||'Serverfehler.','server');
+      return data.data!==undefined?data.data:data;
+    }finally{
+      clearTimeout(timer);
+      if(!read)DG3.pending--;
+    }
+  })();
+  if(read)DG3.reads.set(key,promise);
+  try{return await promise;}finally{if(read&&DG3.reads.get(key)===promise)DG3.reads.delete(key);}
+}
 document.addEventListener('click',e=>{const b=e.target.closest?.('button');if(!b)return;const fn=b.dataset.d3Fn,handler=fn?window[fn]:b.getAttribute('onclick')?b.onclick:null;if(typeof handler!=='function')return;e.preventDefault();e.stopImmediatePropagation();if(b.dataset.d3Busy)return;try{const r=handler.apply(b,fn?JSON.parse(b.dataset.d3Args||'[]'):[e]);if(r&&typeof r.then==='function'){b.dataset.d3Busy='1';b.disabled=true;b.setAttribute('aria-busy','true');Promise.resolve(r).catch(err=>d3Notice(err.message,'error')).finally(()=>{delete b.dataset.d3Busy;b.disabled=false;b.removeAttribute('aria-busy');});}}catch(err){d3Notice(err.message,'error');}},true);
 function d3Dirty(){return !!(document.activeElement?.matches('input,textarea,select')||document.querySelector('[data-d3-busy]')||[...document.querySelectorAll('[id$="Modal"],.regie-merge-select:checked')].some(d3Visible)||(($('customer')?.value||'').trim())||(($('activity')?.value||'').trim())||(typeof preparedPhotos!=='undefined'&&preparedPhotos.length));}
 async function d3Sync(){if(DG3.syncing||DG3.pending||document.hidden||!navigator.onLine||!DG3.ready||!auth().employee||d3Dirty())return;DG3.syncing=true;try{await syncQueue(false);if(d3Visible($('employeeView'))){await loadDay();await loadCalendarEvents();}else{if(DG3.loaders[DG3.open])await DG3.loaders[DG3.open]();await d3Dashboard();}if($('d3Sync'))$('d3Sync').textContent='Aktualisierung angefordert: '+new Date().toLocaleTimeString('de-DE')+' - Ergebnis im jeweiligen Bereich.';}catch(e){if($('d3Sync'))$('d3Sync').textContent='Aktualisierung fehlgeschlagen: '+e.message;}finally{DG3.syncing=false;}}
 function d3Element(tag,cls='',html=''){const e=document.createElement(tag);e.className=cls;e.innerHTML=html;return e;}
-function d3Download(r,type){let raw=String(r&&r.base64||'').trim();if(!raw)throw new Error('Download-Daten fehlen.');const m=raw.match(/^data:[^;]+;base64,(.*)$/s);if(m)raw=m[1];raw=raw.replace(/\s+/g,'').replace(/-/g,'+').replace(/_/g,'/');while(raw.length%4)raw+='=';let decoded;try{decoded=atob(raw);}catch(_e){throw new Error('Download-Datei war nicht korrekt codiert. Bitte erneut versuchen.');}const b=Uint8Array.from(decoded,c=>c.charCodeAt(0)),mime=(r&&r.mime)||type||'application/octet-stream',u=URL.createObjectURL(new Blob([b],{type:mime})),a=document.createElement('a');a.href=u;a.download=(r&&r.fileName)||'Download';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),30000);}
+function d3Download(r,type,targetWindow){
+  let raw=String(r&&r.base64||'').trim();if(!raw)throw new Error('Download-Daten fehlen.');
+  const m=raw.match(/^data:[^;]+;base64,(.*)$/s);if(m)raw=m[1];
+  raw=raw.replace(/\s+/g,'').replace(/-/g,'+').replace(/_/g,'/');while(raw.length%4)raw+='=';
+  let decoded;try{decoded=atob(raw);}catch(_e){throw new Error('Download-Datei war nicht korrekt codiert. Bitte erneut versuchen.');}
+  const fileName=String(r&&r.fileName||'Download');
+  let mime=String(r&&r.mime||type||'application/octet-stream');
+  if(/\.zip$/i.test(fileName))mime='application/zip';
+  else if(/\.pdf$/i.test(fileName))mime='application/pdf';
+  const bytes=Uint8Array.from(decoded,ch=>ch.charCodeAt(0)),url=URL.createObjectURL(new Blob([bytes],{type:mime}));
+  if(targetWindow&&!targetWindow.closed){
+    try{targetWindow.location.replace(url);setTimeout(()=>URL.revokeObjectURL(url),120000);return true;}catch(_e){}
+  }
+  const a=document.createElement('a');a.href=url;a.download=fileName;a.rel='noopener';a.style.display='none';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),120000);return true;
+}
 function d3Form(title,fields,values,save){$('d3FormModal')?.remove();const modal=d3Element('div','d3-modal','<form class="d3-form"><h2></h2><div class="d3-fields"></div><div role="status" class="d3-message"></div><div class="report-actions"><button type="submit" class="btn success">Speichern</button><button type="button" class="btn secondary" data-cancel>Abbrechen</button></div></form>');modal.id='d3FormModal';modal.querySelector('h2').textContent=title;const form=modal.querySelector('form'),host=modal.querySelector('.d3-fields'),status=modal.querySelector('.d3-message');fields.forEach(f=>{const label=d3Element('label','',esc(f.label));let input;if(f.type==='workers'){input=d3Element('div','d3-workers');f.options.forEach(w=>{const l=d3Element('label','d3-selection','<input type="checkbox" name="'+esc(f.name)+'" value="'+esc(w.value)+'"> '+esc(w.label));l.querySelector('input').checked=(values[f.name]||[]).includes(w.value);input.append(l);});}else{input=document.createElement(f.type==='textarea'?'textarea':f.type==='select'?'select':'input');if(f.type!=='textarea'&&f.type!=='select')input.type=f.type||'text';if(f.type==='select')f.options.forEach(o=>{const p=typeof o==='string'?{value:o,label:o}:o,x=d3Element('option','',esc(p.label));x.value=p.value;input.append(x);});input.name=f.name;input.id='d3Field-'+f.name;input.value=values[f.name]??'';input.required=!!f.required;label.htmlFor=input.id;}host.append(label,input);});modal.querySelector('[data-cancel]').addEventListener('click',()=>{if(!form.dataset.busy)modal.remove();});form.addEventListener('submit',async e=>{e.preventDefault();if(form.dataset.busy||!form.reportValidity())return;const v={};fields.forEach(f=>v[f.name]=f.type==='workers'?[...form.querySelectorAll('input[name="'+f.name+'"]:checked')].map(x=>x.value):form.elements[f.name].value);form.dataset.busy='1';form.querySelectorAll('button').forEach(x=>x.disabled=true);status.className='status info';status.textContent='Wird gespeichert ...';try{await save(v);modal.remove();}catch(err){status.className='status error';status.textContent=err.message;}finally{delete form.dataset.busy;form.querySelectorAll('button').forEach(x=>x.disabled=false);}});document.body.append(modal);return modal;}
 
 
@@ -1449,7 +1496,26 @@ function d3ReportCard(g,view,index){const billed=view==='Abgerechnet',ids=[...ne
  const b=[d3Button('Bericht bearbeiten','dgRequestGroupEdit',[key])];if(!billed){b.push(d3Button(view==='Laufend'?'Übergabe an Rechnung zu erstellen':'Auf laufend zurücksetzen','setRegieObjectJobStatus',[ids.join(','),view==='Laufend'?'Abgeschlossen':'Laufend'],view==='Laufend'?'danger':'success'));if(view==='Abgeschlossen')b.push(d3Button('Als abgerechnet markieren','markRegieObjectBilled',[ids.join(',')],'success'));b.push(d3Button('Angebot zu erstellen','d3MoveOffer',[reports.map(x=>x.id)]));}b.push(d3Button('Interner Vermerk','d3Note',[ids[0],g.customer]));if(!billed)b.push(d3Button('Ausgew\u00e4hlte zusammenf\u00fchren','requestMergeSelectedRegieReports',[view],'success'));c.append(d3Element('div','report-actions',b.join('')));if(billed)c.append(d3Element('div','status info','Abgerechnet am '+esc(g.billedAt||'')+' von '+esc(g.billedBy||'')));c.querySelector('.regie-merge-select')?.addEventListener('change',()=>updateRegieMergeButton(view));return c;}
 function d3Merge(view){const root=d3ReportRoot(view);if(!d3Visible(root))return;const checked=[...root.querySelectorAll('.regie-merge-select:checked')];if(checked.length<2)return alert('Mindestens zwei unterschiedliche Kundenkarten markieren.');const groups=checked.map(x=>DG3.reports[view][+x.dataset.index]),ids=[...new Set(groups.flatMap(g=>g.objectIds||[g.objectId]))].filter(Boolean);if(ids.length<2)return alert('Auswahl enthaelt nur ein gemeinsames Objekt.');DG3.merge={view,ids};$('regieMergeConfirmText').textContent='Diese '+groups.length+' Kundenkarten zusammenfuehren?\n\n'+groups.map(g=>g.customer).join('\n')+'\n\nEinzelberichte und Stunden bleiben erhalten.';$('regieMergeConfirmModal').classList.remove('hidden');}
 async function d3ConfirmMerge(){if(DG3.merging||!DG3.merge)return;DG3.merging=true;const {view,ids}=DG3.merge;try{await api(chefPayload({action:'mergeRegieObjects',objectIds:ids}));closeRegieMergeConfirm();await d3Reports(view);setMessage(view==='Laufend'?'d3RunningStatus':'regieStatus','Ausgewaehlte Berichte zusammengefuehrt.','ok');}catch(e){alert('Zusammenfuehren fehlgeschlagen: '+e.message);}finally{DG3.merging=false;}}
-async function d3Export(view,index){const g=DG3.reports[view]?.[index];if(!g)throw new Error('Bitte Berichte neu laden.');const card=d3ReportRoot(view).querySelector('.report-card[data-index="'+index+'"]'),st=card.querySelector('.d3-export-status');st.className='status info';st.textContent='Export wird erstellt ...';try{const r=await api(chefPayload({action:'createRegieReportZip',objectIds:g.objectIds||[g.objectId],entryIds:g.reports.map(x=>x.id),fileIds:[...card.querySelectorAll('.d3-photo:checked')].map(x=>x.value),customer:g.customer}));d3Download(r,r.mime||'application/pdf');st.className='status ok';st.textContent=r.reportCount+' Berichte exportiert.';}catch(e){st.className='status error';st.textContent=e.message;}}
+async function d3Export(view,index){
+  const g=DG3.reports[view]?.[index];if(!g)throw new Error('Bitte Berichte neu laden.');
+  const card=d3ReportRoot(view).querySelector('.report-card[data-index="'+index+'"]'),st=card.querySelector('.d3-export-status');
+  let mobileTarget=null;
+  if(/Android|iPhone|iPad|Mobile/i.test(String(navigator.userAgent||''))){
+    try{
+      mobileTarget=window.open('about:blank','_blank');
+      if(mobileTarget&&mobileTarget.document){mobileTarget.document.title='DG Export';mobileTarget.document.body.innerHTML='<p style="font-family:sans-serif;padding:24px">Bericht wird erstellt ...</p>';}
+    }catch(_e){mobileTarget=null;}
+  }
+  st.className='status info';st.textContent='Export wird erstellt ...';
+  try{
+    const r=await api(chefPayload({action:'createRegieReportZip',objectIds:g.objectIds||[g.objectId],entryIds:g.reports.map(x=>x.id),fileIds:[...card.querySelectorAll('.d3-photo:checked')].map(x=>x.value),customer:g.customer}));
+    d3Download(r,r.mime||'application/zip',mobileTarget);
+    st.className='status ok';st.textContent=r.reportCount+' Berichte exportiert.';
+  }catch(e){
+    try{if(mobileTarget&&!mobileTarget.closed)mobileTarget.close();}catch(_e){}
+    st.className='status error';st.textContent=e.message;
+  }
+}
 async function d3JobStatus(ids,status){const msg=status==='Abgeschlossen'?'Diesen Auftrag an „Rechnung zu erstellen“ übergeben?':'Auftrag auf '+status+' setzen?';if(!confirm(msg))return;const view=DG3.active;for(const objectId of ids.split(',').filter(Boolean))await api(chefPayload({action:'setRegieObjectJobStatus',objectId,jobStatus:status}));await d3Reports(view);if(typeof d3Dashboard==='function')await d3Dashboard();}
 async function d3Bill(ids){
   const objectIds=ids.split(',').filter(Boolean),
