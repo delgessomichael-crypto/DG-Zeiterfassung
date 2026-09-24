@@ -245,6 +245,72 @@ function createGmailDirect(opts){
     }
     return stored;
   }
+  async function persistInquiryAttachments(token,msg){
+    const files=financePartFiles(msg&&msg.payload||{},msg&&msg.id||'');
+    const stored=[];
+    for(const f of files){
+      try{
+        let data=Buffer.alloc(0);
+        if(f.attachmentId){
+          const x=await api(token,'messages/'+encodeURIComponent(f.messageId)+'/attachments/'+encodeURIComponent(f.attachmentId));
+          data=b64buf(x&&x.data||'');
+        }else if(f.inlineData)data=b64buf(f.inlineData);
+        if(!data.length)continue;
+        if(data.length>25*1024*1024){
+          stored.push({messageId:f.messageId,attachmentId:f.attachmentId,name:f.name,mime:f.mime,size:data.length,tooLarge:true});
+          continue;
+        }
+        const key=f.messageId+'|'+(f.attachmentId||crypto.createHash('sha256').update(data).digest('hex'))+'|'+f.name;
+        const id='GMAILINQ-'+crypto.createHash('sha256').update(key).digest('hex').slice(0,40);
+        const sha=crypto.createHash('sha256').update(data).digest('hex');
+        await pool.query(
+          `INSERT INTO binary_files_v10(id,file_name,mime_type,file_size,sha256,file_data,source,kind,metadata,updated_at)
+           VALUES($1,$2,$3,$4,$5,$6,'gmail-inquiry','inquiry-attachment',$7::jsonb,now())
+           ON CONFLICT(id) DO UPDATE SET file_name=EXCLUDED.file_name,mime_type=EXCLUDED.mime_type,
+             file_size=EXCLUDED.file_size,sha256=EXCLUDED.sha256,file_data=EXCLUDED.file_data,
+             source=EXCLUDED.source,kind=EXCLUDED.kind,metadata=EXCLUDED.metadata,updated_at=now()`,
+          [id,f.name,f.mime,data.length,sha,data,JSON.stringify({messageId:f.messageId,attachmentId:f.attachmentId||'',gmail:true})]
+        );
+        stored.push({
+          fileId:id,messageId:f.messageId,attachmentId:f.attachmentId||'',
+          name:f.name,mime:f.mime,size:data.length,url:financeFileUrl(id)
+        });
+      }catch(e){
+        console.error('INQUIRY_GMAIL attachment message='+f.messageId+' file='+f.name+' error='+e.message);
+        stored.push({messageId:f.messageId,attachmentId:f.attachmentId||'',name:f.name,mime:f.mime,size:f.size||0,error:true});
+      }
+    }
+    return stored;
+  }
+  async function backfillInquiryAttachments(token){
+    const q=await pool.query(
+      `SELECT id,gmail_ids,attachments_json FROM customer_inquiries_shadow
+        WHERE COALESCE(gmail_ids,'')<>'' ORDER BY shadow_updated_at DESC LIMIT 500`
+    );
+    let updated=0,failed=0;
+    for(const row of q.rows){
+      let current=[];try{current=JSON.parse(String(row.attachments_json||'[]'));if(!Array.isArray(current))current=[];}catch(_e){current=[];}
+      const ids=[...new Set(String(row.gmail_ids||'').split('|').map(x=>x.trim()).filter(Boolean))];
+      if(!ids.length)continue;
+      let merged=current,changed=false;
+      for(const id of ids){
+        const hasStored=current.some(x=>String(x.messageId||'')===id&&x.fileId&&x.url);
+        if(hasStored)continue;
+        try{
+          const msg=await api(token,'messages/'+encodeURIComponent(id)+'?format=full');
+          const files=await persistInquiryAttachments(token,msg);
+          if(files.length){merged=mergeAttachments(merged,files);changed=true;}
+        }catch(e){failed++;console.error('INQUIRY_GMAIL attachment backfill message='+id+' error='+e.message);}
+      }
+      if(changed){
+        await pool.query('UPDATE customer_inquiries_shadow SET attachments_json=$2,shadow_updated_at=now() WHERE id=$1',
+          [String(row.id||''),JSON.stringify(merged)]);
+        updated++;
+      }
+    }
+    return {updated,failed};
+  }
+
   async function backfillFinanceAttachments(token){
     const q=await pool.query(
       `SELECT message_id,attachments_json FROM finance_mail_v10
@@ -390,11 +456,12 @@ function createGmailDirect(opts){
     for(const x of (newList||[])){const k=String(x.messageId||'')+'|'+String(x.attachmentId||'');if(!seen.has(k)){seen.add(k);a.push(x);}}
     return a.slice(0,50);
   }
-  async function importMessage(msg){
+  async function importMessage(msg,token){
     const id=String(msg.id||'');if(!id)return {ignored:true};
     const seen=await pool.query('SELECT inquiry_id FROM gmail_import_messages_v10 WHERE message_id=$1',[id]);
     if(seen.rowCount)return {duplicate:true,inquiryId:String(seen.rows[0].inquiry_id||'')};
-    const h=headers(msg.payload||{}),rec=await parseInquiry(msg),received=new Date(Number(msg.internalDate)||Date.now()).toISOString(),att=attachments(msg.payload||{},id);
+    const h=headers(msg.payload||{}),rec=await parseInquiry(msg),received=new Date(Number(msg.internalDate)||Date.now()).toISOString();
+    const att=rec?await persistInquiryAttachments(token,msg):[];
     if(!rec){
       await pool.query('INSERT INTO gmail_import_messages_v10(message_id,thread_id,sender,subject,received_at_text) VALUES($1,$2,$3,$4,$5) ON CONFLICT(message_id) DO NOTHING',[id,String(msg.threadId||''),String(h.from||''),String(h.subject||''),received]);
       return {ignored:true};
@@ -642,13 +709,16 @@ function createGmailDirect(opts){
       let imported=0,updated=0,ignored=0,duplicates=known.size,failed=0;const sources={};
       for(const id of pending){
         try{
-          const msg=await api(token,'messages/'+encodeURIComponent(id)+'?format=full'),x=await importMessage(msg);
+          const msg=await api(token,'messages/'+encodeURIComponent(id)+'?format=full'),x=await importMessage(msg,token);
           if(x.imported){imported++;sources[x.source]=(sources[x.source]||0)+1;}
           else if(x.updated){updated++;sources[x.source]=(sources[x.source]||0)+1;}
           else if(x.duplicate)duplicates++;else ignored++;
         }catch(e){failed++;console.error('GMAIL_IMPORT message='+id+' error='+e.message);}
       }
-      const summary={at:new Date().toISOString(),scanned:ids.length,pending:pending.length,imported,updated,ignored,duplicates,failed,sources};
+      const inquiryAttachmentBackfill=await backfillInquiryAttachments(token);
+      const summary={at:new Date().toISOString(),scanned:ids.length,pending:pending.length,imported,updated,ignored,duplicates,failed,sources,
+        attachmentBackfillUpdated:Number(inquiryAttachmentBackfill.updated||0),
+        attachmentBackfillFailed:Number(inquiryAttachmentBackfill.failed||0)};
       await pool.query(`INSERT INTO app_meta(key,value) VALUES('gmail_last_sync_v10',$1::jsonb) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,[JSON.stringify(summary)]);
       return Object.assign({ok:true,configured:true,connected:true,email:String(r.account_email||'')},summary);
     }finally{syncing=false;}
