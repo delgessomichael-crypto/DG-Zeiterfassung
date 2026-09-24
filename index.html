@@ -13,13 +13,13 @@
 <meta content="yes" name="mobile-web-app-capable"/>
 <link rel="preconnect" href="https://dg-app-10-api-production.up.railway.app"/>
 <link rel="dns-prefetch" href="//dg-app-10-api-production.up.railway.app"/>
-<link rel="preload" href="./app-5.0.css?v=20260924-1025-employee-transfer-fix" as="style"/>
-<link rel="preload" href="./core-9.0-final.js?v=20260924-1025-employee-transfer-fix" as="script" fetchpriority="high"/>
+<link rel="preload" href="./app-5.0.css?v=20260924-1032-signature-final" as="style"/>
+<link rel="preload" href="./core-9.0-final.js?v=20260924-1032-signature-final" as="script" fetchpriority="high"/>
 <link rel="manifest" href="manifest.json"/>
 <link href="dg_icon_192.png" rel="icon"/>
 <link href="dg_icon_192.png" rel="apple-touch-icon"/>
 <title>DG Zeiterfassung 10.0</title>
-<link href="./app-5.0.css?v=20260924-1025-employee-transfer-fix" rel="stylesheet"/></head>
+<link href="./app-5.0.css?v=20260924-1032-signature-final" rel="stylesheet"/></head>
 <body>
 <div class="screen" id="loginScreen">
 <div class="login-wrap">
@@ -230,7 +230,7 @@
   if(!('serviceWorker' in navigator))return;
   window.addEventListener('load',function(){
     var start=function(){
-      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260924-1025-employee-transfer-fix',{updateViaCache:'none'})
+      navigator.serviceWorker.register('./sw-9.0-final.js?v=20260924-1032-signature-final',{updateViaCache:'none'})
         .then(function(r){return r.update();})
         .catch(function(e){console.warn('DG Offline-Cache nicht bereit',e);});
     };
@@ -243,7 +243,7 @@
 })();
 </script>
 
-<script defer fetchpriority="high" src="./core-9.0-final.js?v=20260924-1025-employee-transfer-fix"></script>
+<script defer fetchpriority="high" src="./core-9.0-final.js?v=20260924-1032-signature-final"></script>
 <script defer fetchpriority="low" src="./customerflow-9.0-final.js?v=20260920-900-final1"></script>
 <script defer fetchpriority="low" src="./payroll-9.0-final.js?v=20260923-2240-v10-final"></script>
 <script defer fetchpriority="low" src="./ui-9.0-final.js?v=20260923-1620-v10-title-final"></script>
