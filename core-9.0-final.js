@@ -312,6 +312,16 @@ function renderCalendarEvents(events){
   window.__dgCalendarEvents=events;
 }
 
+function removeCalendarEventLocally(eventId){
+  eventId=String(eventId||'').trim();if(!eventId)return;
+  const events=(window.__dgCalendarEvents||[]).filter(e=>String(e&&e.id||'')!==eventId);
+  window.__dgCalendarEvents=events;
+  try{
+    const a=auth();if(a.employee)localStorage.setItem('dg_calendar_'+a.employee,JSON.stringify(events));
+  }catch(_e){}
+  renderCalendarEvents(events);
+}
+
 function takeCalendarEvent(index){
   const events=window.__dgCalendarEvents||[];
   const event=events[index];
@@ -385,7 +395,64 @@ async function addPhotos(files,inputId){const list=Array.from(files||[]);if(!lis
 
 function resizeImage(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onerror=reject;r.onload=()=>{const img=new Image();img.onerror=reject;img.onload=()=>{const max=1200;let w=img.width,h=img.height;if(w>max||h>max){const f=Math.min(max/w,max/h);w=Math.round(w*f);h=Math.round(h*f)}const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);resolve(c.toDataURL('image/jpeg',0.68))};img.src=r.result};r.readAsDataURL(file)})}
 
-function initPad(id){const canvas=$(id),ctx=canvas.getContext('2d'),wrap=$(id+'Wrap');let drawing=false,signed=false,active=false,lastTap=0;function setActive(v){active=!!v;if(wrap)wrap.classList.toggle('active',active)}function resize(){const ratio=devicePixelRatio||1,rect=canvas.getBoundingClientRect();canvas.width=Math.max(1,Math.round(rect.width*ratio));canvas.height=Math.round(180*ratio);ctx.setTransform(ratio,0,0,ratio,0,0);ctx.lineWidth=2;ctx.lineCap='round';ctx.strokeStyle='#111827'}function pt(ev){const r=canvas.getBoundingClientRect(),p=ev.touches?ev.touches[0]:ev;return{x:p.clientX-r.left,y:p.clientY-r.top}}function start(ev){if(!active)return;drawing=true;signed=true;const p=pt(ev);ctx.beginPath();ctx.moveTo(p.x,p.y);ev.preventDefault()}function move(ev){if(!drawing||!active)return;const p=pt(ev);ctx.lineTo(p.x,p.y);ctx.stroke();ev.preventDefault()}function end(ev){if(!drawing)return;drawing=false;if(ev)ev.preventDefault()}canvas.addEventListener('mousedown',start);canvas.addEventListener('mousemove',move);window.addEventListener('mouseup',end);canvas.addEventListener('touchstart',start,{passive:false});canvas.addEventListener('touchmove',move,{passive:false});canvas.addEventListener('touchend',end,{passive:false});if(wrap){const lock=wrap.querySelector('.signature-lock');const tap=ev=>{const now=Date.now();if(ev.type==='dblclick'||now-lastTap<550){setActive(true);lastTap=0;if(ev.preventDefault)ev.preventDefault()}else lastTap=now};lock.addEventListener('dblclick',tap);lock.addEventListener('touchend',tap,{passive:false});lock.addEventListener('click',tap)}resize();setActive(false);return{resize,lock(){setActive(false)},clear(){ctx.clearRect(0,0,canvas.getBoundingClientRect().width,180);signed=false;setActive(false)},hasSignature(){return signed},dataUrl(){return signed?canvas.toDataURL('image/png'):''}}}
+function initPad(id){
+  const canvas=$(id),ctx=canvas.getContext('2d'),wrap=$(id+'Wrap');
+  let drawing=false,signed=false,active=false,pointerId=null;
+  const hint=wrap&&wrap.nextElementSibling&&wrap.nextElementSibling.classList&&wrap.nextElementSibling.classList.contains('signature-hint')?wrap.nextElementSibling:null;
+  function setActive(v){
+    active=!!v;
+    if(wrap)wrap.classList.toggle('active',active);
+    if(hint)hint.textContent=active?'Unterschrift aktiv – bitte jetzt im Feld unterschreiben.':'Zum Unterschreiben Feld einmal antippen. Beim Scrollen bleibt es gesperrt.';
+  }
+  function resize(){
+    const rect=canvas.getBoundingClientRect(),w=Math.max(1,Math.round(rect.width)),ratio=window.devicePixelRatio||1;
+    let snapshot='';
+    if(signed&&canvas.width>1&&canvas.height>1){try{snapshot=canvas.toDataURL('image/png');}catch(_e){}}
+    canvas.width=Math.max(1,Math.round(w*ratio));canvas.height=Math.round(180*ratio);
+    ctx.setTransform(ratio,0,0,ratio,0,0);ctx.lineWidth=2;ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#111827';
+    if(snapshot){const img=new Image();img.onload=()=>{try{ctx.drawImage(img,0,0,w,180);}catch(_e){}};img.src=snapshot;}
+  }
+  function point(ev){const r=canvas.getBoundingClientRect();return{x:ev.clientX-r.left,y:ev.clientY-r.top};}
+  function start(ev){
+    if(!active)return;
+    drawing=true;signed=true;pointerId=ev.pointerId!==undefined?ev.pointerId:null;
+    try{if(pointerId!==null&&canvas.setPointerCapture)canvas.setPointerCapture(pointerId);}catch(_e){}
+    const p=point(ev);ctx.beginPath();ctx.moveTo(p.x,p.y);ev.preventDefault();
+  }
+  function move(ev){
+    if(!drawing||!active)return;
+    if(pointerId!==null&&ev.pointerId!==undefined&&ev.pointerId!==pointerId)return;
+    const p=point(ev);ctx.lineTo(p.x,p.y);ctx.stroke();ev.preventDefault();
+  }
+  function end(ev){
+    if(!drawing)return;drawing=false;
+    try{if(pointerId!==null&&canvas.releasePointerCapture)canvas.releasePointerCapture(pointerId);}catch(_e){}
+    pointerId=null;if(ev&&ev.preventDefault)ev.preventDefault();
+  }
+  if(window.PointerEvent){
+    canvas.addEventListener('pointerdown',start,{passive:false});
+    canvas.addEventListener('pointermove',move,{passive:false});
+    canvas.addEventListener('pointerup',end,{passive:false});
+    canvas.addEventListener('pointercancel',end,{passive:false});
+  }else{
+    const legacyPoint=ev=>{const p=ev.touches&&ev.touches[0]?ev.touches[0]:ev;return{clientX:p.clientX,clientY:p.clientY,preventDefault:()=>ev.preventDefault()};};
+    canvas.addEventListener('mousedown',start);canvas.addEventListener('mousemove',move);window.addEventListener('mouseup',end);
+    canvas.addEventListener('touchstart',ev=>start(legacyPoint(ev)),{passive:false});
+    canvas.addEventListener('touchmove',ev=>move(legacyPoint(ev)),{passive:false});
+    canvas.addEventListener('touchend',end,{passive:false});
+  }
+  if(wrap){
+    const lock=wrap.querySelector('.signature-lock');
+    const unlock=ev=>{setActive(true);if(ev&&ev.preventDefault)ev.preventDefault();};
+    if(lock){lock.addEventListener('pointerup',unlock,{passive:false});lock.addEventListener('click',unlock);}
+  }
+  resize();setActive(false);
+  return{
+    resize,lock(){setActive(false)},
+    clear(){ctx.clearRect(0,0,canvas.getBoundingClientRect().width,180);signed=false;setActive(false)},
+    hasSignature(){return signed},dataUrl(){return signed?canvas.toDataURL('image/png'):''}
+  };
+}
 
 function clearCustomerSignature(){customerPad.clear();noCustomerPresent=false}
 
@@ -417,9 +484,13 @@ async function saveEntry(){
   if(!navigator.onLine){await queuePut(item);setMessage('entryStatus','🟠 Offline gespeichert. Automatische Übertragung folgt bei Internetverbindung.','warn');resetEntry();await refreshQueueCount();return}
   try{
     setMessage('entryStatus','Eintrag wird übertragen ...','info');
+    const completedCalendarEventId=String(selectedCalendarEventId||'');
     const day=await api(item.payload);
-    lastDayData=day;renderDay();resetEntry();await loadCalendarEvents();
-    setMessage('entryStatus','✅ Eintrag gespeichert. Der Auftrag steht jetzt im Chefbereich unter Regieberichte.','ok');
+    lastDayData=day;renderDay();
+    removeCalendarEventLocally(completedCalendarEventId);
+    resetEntry();
+    loadCalendarEvents().catch(()=>{});
+    setMessage('entryStatus','✅ An Büro übertragen. Der Auftrag ist im Büro angekommen und der übernommene Kundentermin wurde aus deiner Terminliste entfernt.','ok');
   }catch(e){
     if(e&&e.dgType==='network'){
       await queuePut(item);
@@ -445,6 +516,7 @@ function renderDay(){
   else{
     $('entries').innerHTML=entries.map(e=>`<div class="entry">
       <strong>${esc(e.customer)}</strong>${e.isAdditionalAssignment?' <span class="badge">BEREITS ERFASST · Mitarbeit</span>':''}<br>
+      ${!e.isAdditionalAssignment&&e.transmittedDate?`<div class="status ok dg-transfer-state">✅ An Büro übertragen · ${esc(e.transmittedDate)}</div>`:''}
       ${esc(e.start)} - ${esc(e.end)} · <strong>${formatHours(e.hours)} Std.</strong><br>
       ${e.isAdditionalAssignment?`<div class="status ${e.assignmentStatus==='Abweichung'?'warn':e.assignmentStatus==='Bestätigt'?'ok':'info'}">Diese Stunden sind bereits deinem Stundenkonto zugeordnet.<br>Eingetragen von ${esc(e.assignedBy||'')} · Status: ${esc(e.assignmentStatus||'Zugeordnet')}${e.assignmentNote?'<br>Hinweis: '+esc(e.assignmentNote):''}</div>`:''}
       <span class="muted">${esc(e.activity)}</span><br>
@@ -489,7 +561,7 @@ async function confirmCloseDay(){cancelCloseDay();await performCloseDay()}
 
 async function performCloseDay(){const a=auth(),date=$('date').value;const item={type:'closeDay',createdAt:Date.now(),payload:{action:'closeDay',employee:a.employee,pin:a.pin,date,signatureDataUrl:'',pauseHours:Number($('pauseHours').value)||0}};if(!navigator.onLine){await queuePut(item);setMessage('closeStatus','🟠 Tagesabschluss offline gespeichert. Wird automatisch übertragen.','warn');await refreshQueueCount();return}try{const res=await api(item.payload);setMessage('closeStatus',res.alreadyClosed?'Tag war bereits abgeschlossen.':'✅ Tag abgeschlossen. Der Abschluss ist im Chefbereich verfügbar.','ok');await loadDay()}catch(e){await queuePut(item);setMessage('closeStatus','🟠 Tagesabschluss wurde offline vorgemerkt.','warn');await refreshQueueCount()}}
 
-async function loadMonth(){const a=auth();if(!navigator.onLine){setMessage('monthStatus','Monatsübersicht benötigt Internet.','warn');return}try{const data=await api({action:'getMonthData',employee:a.employee,pin:a.pin,year:Number($('empYear').value),month:Number($('empMonth').value)});const ms=data.monthSummary||{},ys=data.yearSummary||{};let html='<div class="total">Gesamt: '+formatHours(data.total)+' Std.</div><div class="status info">Dieser Monat: Urlaub '+Number(ms.vacationDays||0)+' Tag(e) · Krank '+Number(ms.sickDays||0)+' Tag(e) · Schulung '+Number(ms.trainingDays||0)+' Tag(e) · Unerlaubte Abwesenheit '+Number(ms.unexcusedDays||0)+' Tag(e) · Feiertage '+Number(ms.holidayDays||0)+' Tag(e)</div><div class="status info">Jahr '+Number(ys.year||$('empYear').value)+': Urlaub '+Number(ys.vacationUsed||0)+' Tag(e) · Krank '+Number(ys.sickDays||0)+' Tag(e) · Urlaub zustehend '+formatHours(ys.vacationEntitlement)+' · Resturlaub '+formatHours(ys.vacationRemaining)+' Tage</div>';const days={};(data.rows||[]).forEach(r=>{const d=r.date||'';if(!days[d])days[d]={date:d,total:0,rows:[],closed:true};days[d].total+=Number(r.hours)||0;days[d].rows.push(r);if(!r.closed)days[d].closed=false});html+=Object.keys(days).sort().map(d=>{const x=days[d];const details=x.rows.map(r=>'<div class="entry" style="margin:8px 0 0"><strong>'+esc(r.customer)+'</strong> · '+formatHours(r.hours)+' Std. '+(r.closed?'✓':'(offen)')+(r.isAdditionalAssignment?' <span class="muted">· Mitarbeit, eingetragen von '+esc(r.assignedBy||'')+' · '+esc(r.assignmentStatus||'Zugeordnet')+'</span>':'')+'</div>').join('');const resend=x.closed?'':' <button type="button" class="btn primary" style="padding:8px 10px;margin-left:8px" onclick="return event.preventDefault();event.stopPropagation();transmitOpenDay(\''+esc(x.date)+'\')">Jetzt übermitteln</button>';const light=x.closed?'🟢':'🔴';const state=x.closed?'übermittelt':'offen';return '<details class="entry"><summary style="cursor:pointer"><span style="font-size:18px;margin-right:5px" aria-label="'+state+'">'+light+'</span><strong>'+formatDateDE(x.date)+'</strong> · <strong>'+formatHours(x.total)+' Std.</strong> <span class="muted">('+state+')</span>'+resend+'</summary><div style="margin-top:8px">'+details+'</div></details>'}).join('');if((data.statuses||[]).length){html+='<h3 style="margin-top:16px">Urlaub / Krank / Schulung / Unerlaubte Abwesenheit / Feiertag</h3>';html+=(data.statuses||[]).map(s=>'<div class="entry"><strong>'+formatDateDE(s.date)+'</strong> · '+esc(s.status)+' · '+formatHours(s.creditedHours||0)+' Std. Gutschrift'+'</div>').join('')}$('monthResult').innerHTML=html;clearMessage('monthStatus')}catch(e){setMessage('monthStatus',e.message,'error')}}
+async function loadMonth(){const a=auth();if(!navigator.onLine){setMessage('monthStatus','Monatsübersicht benötigt Internet.','warn');return}try{const data=await api({action:'getMonthData',employee:a.employee,pin:a.pin,year:Number($('empYear').value),month:Number($('empMonth').value)});const ms=data.monthSummary||{},ys=data.yearSummary||{};let html='<div class="total">Gesamt: '+formatHours(data.total)+' Std.</div><div class="status info">Dieser Monat: Urlaub '+Number(ms.vacationDays||0)+' Tag(e) · Krank '+Number(ms.sickDays||0)+' Tag(e) · Schulung '+Number(ms.trainingDays||0)+' Tag(e) · Unerlaubte Abwesenheit '+Number(ms.unexcusedDays||0)+' Tag(e) · Feiertage '+Number(ms.holidayDays||0)+' Tag(e)</div><div class="status info">Jahr '+Number(ys.year||$('empYear').value)+': Urlaub '+Number(ys.vacationUsed||0)+' Tag(e) · Krank '+Number(ys.sickDays||0)+' Tag(e) · Urlaub zustehend '+formatHours(ys.vacationEntitlement)+' · Resturlaub '+formatHours(ys.vacationRemaining)+' Tage</div>';const days={};(data.rows||[]).forEach(r=>{const d=r.date||'';if(!days[d])days[d]={date:d,total:0,rows:[],closed:true};days[d].total+=Number(r.hours)||0;days[d].rows.push(r);if(!r.closed)days[d].closed=false});html+=Object.keys(days).sort().map(d=>{const x=days[d];const details=x.rows.map(r=>'<div class="entry" style="margin:8px 0 0"><strong>'+esc(r.customer)+'</strong> · '+formatHours(r.hours)+' Std. '+(r.closed?'✓':'(offen)')+(r.transmittedDate?' <span class="dg-transfer-pill">✅ An Büro übertragen · '+esc(r.transmittedDate)+'</span>':'')+(r.isAdditionalAssignment?' <span class="muted">· Mitarbeit, eingetragen von '+esc(r.assignedBy||'')+' · '+esc(r.assignmentStatus||'Zugeordnet')+'</span>':'')+'</div>').join('');const resend=x.closed?'':' <button type="button" class="btn primary" style="padding:8px 10px;margin-left:8px" onclick="return event.preventDefault();event.stopPropagation();transmitOpenDay(\''+esc(x.date)+'\')">Jetzt übermitteln</button>';const light=x.closed?'🟢':'🔴';const state=x.closed?'übermittelt':'offen';return '<details class="entry"><summary style="cursor:pointer"><span style="font-size:18px;margin-right:5px" aria-label="'+state+'">'+light+'</span><strong>'+formatDateDE(x.date)+'</strong> · <strong>'+formatHours(x.total)+' Std.</strong> <span class="muted">('+state+')</span>'+resend+'</summary><div style="margin-top:8px">'+details+'</div></details>'}).join('');if((data.statuses||[]).length){html+='<h3 style="margin-top:16px">Urlaub / Krank / Schulung / Unerlaubte Abwesenheit / Feiertag</h3>';html+=(data.statuses||[]).map(s=>'<div class="entry"><strong>'+formatDateDE(s.date)+'</strong> · '+esc(s.status)+' · '+formatHours(s.creditedHours||0)+' Std. Gutschrift'+'</div>').join('')}$('monthResult').innerHTML=html;clearMessage('monthStatus')}catch(e){setMessage('monthStatus',e.message,'error')}}
 
 async function transmitOpenDay(date){if(!navigator.onLine){setMessage('monthStatus','🟠 Keine Internetverbindung. Bitte später erneut versuchen.','warn');return}if(!confirm('Tag '+formatDateDE(date)+' jetzt ans Büro übermitteln?'))return;const a=auth();try{setMessage('monthStatus','Tag '+formatDateDE(date)+' wird übermittelt ...','info');const q=(await queueAll().catch(()=>[])).sort((x,y)=>x.createdAt-y.createdAt);const sameDay=q.filter(item=>{const p=item&&item.payload||{},e=p.entry||{};return (item.type==='saveEntry'&&e.date===date)||(item.type==='closeDay'&&p.date===date)});for(const item of sameDay){await api(item.payload);await queueDelete(item.id)}const hadClose=sameDay.some(item=>item.type==='closeDay');if(!hadClose)await api({action:'closeDay',employee:a.employee,pin:a.pin,date:date,signatureDataUrl:'',pauseHours:0});await refreshQueueCount();setMessage('monthStatus','✅ Tag '+formatDateDE(date)+' wurde ans Büro übermittelt.','ok');await loadMonth();if($('date').value===date)await loadDay()}catch(e){setMessage('monthStatus','Übermittlung nicht möglich: '+(e&&e.message?e.message:'Unbekannter Fehler.'),'error')}}
 
@@ -643,7 +715,7 @@ async function refreshQueueCount(){
 
 async function retryQueueItem(id){const item=(await queueAll()).find(x=>Number(x.id)===Number(id));if(!item)return;delete item.error;await queuePut(item);await syncQueue(true);}
 
-async function syncQueue(show){if(DG3.queueBusy||!navigator.onLine)return;const a=auth();if(!a.employee||!a.pin)return;DG3.queueBusy=true;let sent=0,failed=0;const blocked=new Set();try{for(const item of (await queueAll()).sort((a,b)=>a.createdAt-b.createdAt)){if(auth().employee!==a.employee)break;const date=queuedItemInfo(item).date;if((item.type==='closeDay'&&blocked.has(date))||(item.error&&!show)){blocked.add(date);failed++;continue;}try{const payload={...item.payload,employee:a.employee,pin:a.pin,employeePin:a.pin};if(payload.entry)payload.entry={...payload.entry,employeePin:a.pin};await api(payload);await queueDelete(item.id);sent++;}catch(e){failed++;blocked.add(date);if(['network','version'].includes(e.dgType))break;item.error=e.message;await queuePut(item);}}await refreshQueueCount();if(sent)await loadDay();if(show)setMessage('entryStatus',sent+' uebertragen, '+failed+' noch offen. Details pruefen.',failed?'warn':'ok');}finally{DG3.queueBusy=false;}}
+async function syncQueue(show){if(DG3.queueBusy||!navigator.onLine)return;const a=auth();if(!a.employee||!a.pin)return;DG3.queueBusy=true;let sent=0,failed=0;const blocked=new Set(),completedCalendarIds=[];try{for(const item of (await queueAll()).sort((a,b)=>a.createdAt-b.createdAt)){if(auth().employee!==a.employee)break;const date=queuedItemInfo(item).date;if((item.type==='closeDay'&&blocked.has(date))||(item.error&&!show)){blocked.add(date);failed++;continue;}try{const payload={...item.payload,employee:a.employee,pin:a.pin,employeePin:a.pin};if(payload.entry)payload.entry={...payload.entry,employeePin:a.pin};await api(payload);if(item.type==='saveEntry'&&payload.entry&&payload.entry.sourceCalendarEventId)completedCalendarIds.push(String(payload.entry.sourceCalendarEventId));await queueDelete(item.id);sent++;}catch(e){failed++;blocked.add(date);if(['network','version'].includes(e.dgType))break;item.error=e.message;await queuePut(item);}}await refreshQueueCount();if(sent)await loadDay();if(completedCalendarIds.length){completedCalendarIds.forEach(removeCalendarEventLocally);loadCalendarEvents().catch(()=>{});}if(show)setMessage('entryStatus',sent+' übertragen, '+failed+' noch offen. Details prüfen.',failed?'warn':'ok');}finally{DG3.queueBusy=false;}}
 
 function initEnterSupport(){
   document.addEventListener('keydown',function(ev){
