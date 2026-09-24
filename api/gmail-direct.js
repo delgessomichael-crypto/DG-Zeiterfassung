@@ -662,6 +662,43 @@ function createGmailDirect(opts){
     return financeRow(q.rows[0]);
   }
 
+  async function deleteFinanceMail(messageId,actor){
+    messageId=String(messageId||'').trim();if(!messageId)throw new Error('E-Mail fehlt.');
+    const q=await pool.query('SELECT attachments_json FROM finance_mail_v10 WHERE message_id=$1 LIMIT 1',[messageId]);
+    if(!q.rowCount)throw new Error('E-Mail wurde in der App nicht gefunden.');
+    const oauth=await row();
+    if(!oauth||!hasModifyScope(oauth)){
+      const e=new Error('Google-Freigabe zum Löschen fehlt. Bitte Gmail-Verbindung aktualisieren.');
+      e.needsReconnect=true;
+      throw e;
+    }
+    const token=await accessToken();
+    // Gmail-Nachricht in den Papierkorb verschieben. Sie verschwindet aus Posteingang/Labels,
+    // bleibt dort aber gemäß Gmail-Aufbewahrung noch wiederherstellbar.
+    await apiJson(token,'POST','messages/'+encodeURIComponent(messageId)+'/trash');
+
+    let attachments=[];try{attachments=JSON.parse(String(q.rows[0].attachments_json||'[]'));if(!Array.isArray(attachments))attachments=[];}catch(_e){attachments=[];}
+    const fileIds=[...new Set(attachments.map(x=>String(x&&x.fileId||'').trim()).filter(Boolean))];
+    const client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      await client.query('DELETE FROM finance_mail_v10 WHERE message_id=$1',[messageId]);
+      if(fileIds.length){
+        await client.query("DELETE FROM binary_files_v10 WHERE id=ANY($1::text[]) AND source='gmail-finance'",[fileIds]);
+      }
+      await client.query(
+        `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+         ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
+        ['finance_last_action_v10',JSON.stringify({action:'delete_mail',messageId,actor:String(actor||''),fileIds,at:new Date().toISOString()})]
+      );
+      await client.query('COMMIT');
+    }catch(e){
+      try{await client.query('ROLLBACK');}catch(_e){}
+      throw e;
+    }finally{client.release();}
+    return {ok:true,messageId,deleted:true,trashedInGmail:true,deletedFiles:fileIds.length};
+  }
+
   async function archiveInquiryMessages(inquiryId,actor){
     inquiryId=String(inquiryId||'').trim();if(!inquiryId)return {ok:true,archived:0,messageIds:[]};
     const q=await pool.query('SELECT gmail_ids FROM customer_inquiries_shadow WHERE id=$1 LIMIT 1',[inquiryId]);
@@ -768,7 +805,7 @@ function createGmailDirect(opts){
     setTimeout(()=>scheduledSync().catch(e=>console.error('GMAIL startup sync failed',e.message)),15000);
   }
 
-  return {init,start,status,syncForUser,financeSyncForUser,financeList,financeOverview,financeArchive,markPaid,archiveTax,archiveInquiryMessages,callback,authUrl,configured,calendarApi,googleConnection,accessToken};
+  return {init,start,status,syncForUser,financeSyncForUser,financeList,financeOverview,financeArchive,markPaid,archiveTax,deleteFinanceMail,archiveInquiryMessages,callback,authUrl,configured,calendarApi,googleConnection,accessToken};
 }
 
 module.exports={createGmailDirect};
