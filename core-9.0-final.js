@@ -1752,8 +1752,15 @@ async function d3Dashboard(){if(!canAccessBoss()||!navigator.onLine)return;const
 
 function d32InquiryCard(r,i,archive=false){
   const note=r.internalNote?'<div class="status info">Interne Notiz: '+esc(r.internalNote)+'</div>':'';
+  const attachments=(Array.isArray(r.attachments)?r.attachments:[]).map(a=>{
+    const name=String(a&&a.name||'Anhang'),url=String(a&&a.url||'');
+    const label=/^image\//i.test(String(a&&a.mime||''))?'🖼 '+name:(/pdf/i.test(String(a&&a.mime||''))?'📄 '+name:'📎 '+name);
+    if(url)return '<a class="btn secondary" target="_blank" rel="noopener" href="'+esc(url)+'">'+esc(label)+'</a>';
+    return '<span class="btn secondary" style="opacity:.65;cursor:default">'+esc(label)+'</span>';
+  }).join('');
+  const files=attachments?'<div class="dg32-inquiry-files"><div class="muted small" style="margin:8px 0 6px"><strong>Anhänge</strong></div><div class="report-actions">'+attachments+'</div></div>':'';
   const actions=archive?'':d3Button('Termin wurde vereinbart','d3InquiryArchive',[r.id],'success')+d3Button('Reminder','d3InquiryReminder',[r.id],'primary')+d3Button('Interne Notiz','d3InquiryNote',[r.id])+d3Button('Ablehnen','d3RejectInquiry',[r.id],'danger');
-  return '<div class="report-card'+(i%2?' d3-alt':'')+'"><div class="d3-head"><strong>'+esc(r.customer)+'</strong><span class="badge">'+esc(r.source)+'</span></div><div class="report-meta">'+esc(r.receivedAt)+' - '+esc(r.status)+'</div><div>'+esc(d3Address(r))+'</div><div><a href="tel:'+esc(r.phone)+'">'+esc(r.phone)+'</a> <a href="mailto:'+esc(r.email)+'">'+esc(r.email)+'</a></div><div>'+esc(r.description||r.subject)+'</div>'+note+(archive&&r.doneReason?'<div class="muted small">Archiviert: '+esc(r.doneReason)+'</div>':'')+(actions?'<div class="report-actions">'+actions+'</div>':'')+'</div>';
+  return '<div class="report-card'+(i%2?' d3-alt':'')+'"><div class="d3-head"><strong>'+esc(r.customer)+'</strong><span class="badge">'+esc(r.source)+'</span></div><div class="report-meta">'+esc(r.receivedAt)+' - '+esc(r.status)+'</div><div>'+esc(d3Address(r))+'</div><div><a href="tel:'+esc(r.phone)+'">'+esc(r.phone)+'</a> <a href="mailto:'+esc(r.email)+'">'+esc(r.email)+'</a></div><div>'+esc(r.description||r.subject)+'</div>'+files+note+(archive&&r.doneReason?'<div class="muted small">Archiviert: '+esc(r.doneReason)+'</div>':'')+(actions?'<div class="report-actions">'+actions+'</div>':'')+'</div>';
 }
 async function d3Inquiries(){
   setMessage('d3InquiryStatus','Anfragen werden geladen ...','info');
