@@ -5097,7 +5097,8 @@ async function verifySicknessAlertsShadow(data){
   await saveShadowVerifyStat('sickness_alerts',a.count,b.count,mismatches);
 }
 async function directSicknessAlertsRead(body){
-  const session=await localSessionForBody(body,true);if(!session)return null;
+  const anySession=await localSessionForBody(body,false);if(!anySession)return null;
+  if(!anySession.chefAccess)return {count:0,alerts:[],checkedAt:berlinDateOnly(new Date())};
   return postgresSicknessAlerts();
 }
 
@@ -5201,9 +5202,13 @@ async function verifyAbsenceOverviewShadow(data,body){
   await saveShadowVerifyStat(key,1,1,mismatches);
 }
 async function directAbsenceOverviewRead(body){
-  const session=await localSessionForBody(body,true);if(!session)return null;
+  const anySession=await localSessionForBody(body,false);if(!anySession)return null;
   const employee=String(body.targetEmployee||'').trim(),year=Number(body.year)||0;
   if(!employee||!year)return null;
+  if(!anySession.chefAccess)return {
+    employee,year,vacationEntitlement:0,vacationUsed:0,vacationRemaining:0,
+    sickWorkDays:0,sickCalendarDays:0,sicknessCases:[],warnings:[]
+  };
   return postgresAbsenceOverview(employee,year);
 }
 
@@ -9358,7 +9363,15 @@ async function directPayrollAuditViewRead(body){
   const key=payrollAuditViewKey(body);return key?readExactViewShadow(key):null;
 }
 async function directPayrollCycleViewRead(body){
-  const session=await localSessionForBody(body,true);if(!session)return null;
+  const anySession=await localSessionForBody(body,false);if(!anySession)return null;
+  if(!anySession.chefAccess){
+    const year=Number(body&&body.year)||0,month=Number(body&&body.month)||0;
+    if(!year||month<1||month>12)return null;
+    const range=pgPayrollCycleRange(year,month),next=pgNextPayrollCycle(year,month);
+    return {year,month,cycleStart:range.start,cycleEnd:range.end,dueDate:pgPayrollDueDate(year,month),
+      state:{status:'Nicht verfügbar'},lastCompleted:null,nextYear:next.year,nextMonth:next.month,
+      nextDueDate:next.dueDate,nextCycleStart:next.range.start,nextCycleEnd:next.range.end,counterStart:range.start};
+  }
   const key=payrollCycleNativeKey(body);if(!key||!(await shadowReadyForDirectRead(key)))return null;
   return postgresPayrollCycleState(body);
 }
