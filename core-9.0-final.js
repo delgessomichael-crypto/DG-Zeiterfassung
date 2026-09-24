@@ -734,9 +734,36 @@ function initEnterSupport(){
   });
 }
 
-function fillMonths(id){const n=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];$(id).innerHTML=n.map((x,i)=>'<option value="'+(i+1)+'">'+x+'</option>').join('')}
+function fillMonths(id){
+  const el=$(id);if(!el)return;
+  const n=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+  el.innerHTML=n.map((x,i)=>'<option value="'+(i+1)+'">'+x+'</option>').join('');
+}
 
-function init(){initEnterSupport();fillMonths('empMonth');fillMonths('bossMonth');fillMonths('regieMonth');$('regieMonth').insertAdjacentHTML('afterbegin','<option value="0">Alle Monate</option>');const d=new Date();loadEmployeeDirectory();$('empYear').value=d.getFullYear();$('bossYear').value=d.getFullYear();$('regieYear').value=d.getFullYear();$('empMonth').value=String(d.getMonth()+1);$('bossMonth').value=String(d.getMonth()+1);$('regieMonth').value=String(d.getMonth()+1);$('holidayYear').value=d.getFullYear();if($('vacationYear'))$('vacationYear').value=d.getFullYear();$('absenceStart').value=localDate();$('absenceEnd').value=localDate();clearEmployeeAdminForm();customerPad=initPad('customerSignature');employeePad=null;toggleMaterial();togglePhotos();updateConnection();sessionStorage.removeItem('dg_employee_pin');$('mainScreen')?.classList.add('hidden');$('loginScreen')?.classList.remove('hidden');if(navigator.onLine)syncQueue()}
+function init(){
+  initEnterSupport();
+  ['empMonth','bossMonth','regieMonth'].forEach(fillMonths);
+  const regieMonth=$('regieMonth');
+  if(regieMonth&&!regieMonth.querySelector('option[value="0"]'))regieMonth.insertAdjacentHTML('afterbegin','<option value="0">Alle Monate</option>');
+  const d=new Date(),today=localDate();
+  loadEmployeeDirectory();
+  const values={
+    empYear:d.getFullYear(),bossYear:d.getFullYear(),regieYear:d.getFullYear(),
+    empMonth:String(d.getMonth()+1),bossMonth:String(d.getMonth()+1),regieMonth:String(d.getMonth()+1),
+    holidayYear:d.getFullYear(),vacationYear:d.getFullYear(),absenceStart:today,absenceEnd:today
+  };
+  Object.entries(values).forEach(([id,value])=>{const el=$(id);if(el)el.value=value;});
+  try{clearEmployeeAdminForm();}catch(e){console.warn('Mitarbeiterformular beim Start übersprungen',e);}
+  try{customerPad=initPad('customerSignature');}catch(e){customerPad=null;console.warn('Unterschriftfeld beim Start übersprungen',e);}
+  employeePad=null;
+  try{toggleMaterial();}catch(_e){}
+  try{togglePhotos();}catch(_e){}
+  updateConnection();
+  sessionStorage.removeItem('dg_employee_pin');
+  $('mainScreen')?.classList.add('hidden');
+  $('loginScreen')?.classList.remove('hidden');
+  if(navigator.onLine)syncQueue();
+}
 
 /* DG 3.0: one request coordinator and one synchronization clock. */
 window.DG3={version:'5.2.5',backend:'',pending:0,reads:new Map(),reports:{},active:'Abgeschlossen',loaders:{},ready:false};window.DG_APP_VERSION='5.2.5';
