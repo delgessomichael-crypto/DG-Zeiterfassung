@@ -395,6 +395,12 @@ function markNoCustomer(){customerPad.clear();noCustomerPresent=true;setMessage(
 
 async function saveEntry(){
   const a=auth(),date=$('date').value,customer=$('customer').value.trim(),activity=$('activity').value.trim(),materialUsed=document.querySelector('input[name="materialUsed"]:checked').value==='yes',material=$('material').value.trim(),jobCompleted=document.querySelector('input[name="jobCompleted"]:checked').value==='yes';
+  const currentStatus=String((lastDayData&&lastDayData.status)||'Arbeiten');
+  if(currentStatus!=='Arbeiten'){
+    applyDayStatus(currentStatus);
+    setMessage('entryStatus','Dieser Tag ist als '+currentStatus+' durch das Büro gesperrt. Es können keine Arbeitsstunden übertragen werden.','warn');
+    return;
+  }
   const startMinutes=timeInputMinutes('start'),endMinutes=timeInputMinutes('end');
   if(!customer){setMessage('entryStatus','Bitte Kunde / Baustelle eintragen.','error');return}
   if(startMinutes===null||endMinutes===null){setMessage('entryStatus','Bitte gültige Von-/Bis-Zeit eintragen.','error');return}
@@ -420,7 +426,11 @@ async function saveEntry(){
       setMessage('entryStatus','🟠 Keine Serververbindung. Auftrag wurde lokal gespeichert und ist unter „Ausstehende Übertragungen“ sichtbar.','warn');
       resetEntry();await refreshQueueCount();
     }else{
-      setMessage('entryStatus','❌ Auftrag nicht gespeichert: '+(e&&e.message?e.message:'Unbekannter Serverfehler.'),'error');
+      const msg=(e&&e.message?e.message:'Unbekannter Serverfehler.');
+      setMessage('entryStatus','❌ Auftrag nicht gespeichert: '+msg,'error');
+      if(/fest hinterlegt|vollständig gesperrt|als .* gesperrt/i.test(msg)){
+        try{await loadDay();}catch(_e){}
+      }
     }
   }
 }
@@ -3498,7 +3508,7 @@ async function buildLocalIssues522(rows){
       else if(net>8.0001)await addIssue522(out,'warn','daily_over_8',name,d,'Mehr als 8 Stunden Arbeitszeit','Netto-Arbeitszeit '+net.toFixed(2).replace('.',',')+' Std.');
       if(!day.closed)await addIssue522(out,'error','day_not_closed',name,d,'Tagesabschluss fehlt','Für diesen Arbeitstag wurde kein Tagesabschluss gefunden.');
       const req=net>9?0.75:(net>6?0.5:0);if(req&&pause+0.0001<req)await addIssue522(out,'error','pause_short',name,d,'Pause zu kurz','Erfasst '+Math.round(pause*60)+' Min.; erforderlich mindestens '+Math.round(req*60)+' Min.');
-      if(day.status&&day.status!=='Arbeiten')await addIssue522(out,day.status==='Feiertag'?'warn':'error','work_and_status',name,d,'Arbeitszeit und '+day.status+' am selben Tag','Es sind Arbeitsstunden erfasst und der Tag ist zugleich als '+day.status+' markiert.');
+      if(day.status&&day.status!=='Arbeiten'&&reports.length>0&&gross>0.0001)await addIssue522(out,day.status==='Feiertag'?'warn':'error','work_and_status',name,d,'Arbeitszeit und '+day.status+' am selben Tag','Es sind Arbeitsstunden erfasst und der Tag ist zugleich als '+day.status+' markiert.');
       for(const r of reports){const sm=minutes522(r.start),em=minutes522(r.end);if(!(Number(r.hours)>0)||sm===null||em===null)await addIssue522(out,'error','invalid_entry',name,d,'Unplausibler Zeiteintrag',(r.customer||'Ohne Kunde')+' · '+(r.start||'?')+'–'+(r.end||'?'),String(r.id||''),{entryId:r.id,start:r.start,end:r.end,customer:r.customer})}
       for(let i=0;i<reports.length;i++)for(let j=i+1;j<reports.length;j++)if(normCustomer522(reports[i].customer)===normCustomer522(reports[j].customer)&&reports[i].start===reports[j].start&&reports[i].end===reports[j].end){const key=String(reports[i].id||'')+'|'+String(reports[j].id||'');await addIssue522(out,'warn','duplicate_entry',name,d,'Möglicher Doppeleintrag',(reports[i].customer||'Ohne Kunde')+' · '+reports[i].start+'–'+reports[i].end,key,{entryId:reports[j].id,start:reports[j].start,end:reports[j].end,customer:reports[j].customer})}
       const ints=reports.map(r=>{let a=minutes522(r.start),b=minutes522(r.end);if(a===null||b===null)return null;if(b<a)b+=1440;return {a,b,r}}).filter(Boolean).sort((a,b)=>a.a-b.a);for(let i=1;i<ints.length;i++)if(ints[i].a<ints[i-1].b){await addIssue522(out,'error','overlap_local',name,d,'Überschneidende Uhrzeiten',(ints[i-1].r.customer||'Eintrag 1')+' '+ints[i-1].r.start+'–'+ints[i-1].r.end+' / '+(ints[i].r.customer||'Eintrag 2')+' '+ints[i].r.start+'–'+ints[i].r.end,'local-overlap-'+i);break}
@@ -5868,6 +5878,58 @@ function install26(){
   }
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install26,0),{once:true});else setTimeout(install26,0);
+})();
+
+
+/* ===== DG APP 10 ABSENCE CREDIT DISPLAY / LOCK ===== */
+(function(){
+'use strict';
+const escAC=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function fmtAC(v){return typeof formatHours==='function'?formatHours(Number(v||0)):Number(v||0).toFixed(2).replace('.',',');}
+function cssAC(){
+  if(document.getElementById('dgAbsCreditCss'))return;
+  const s=document.createElement('style');s.id='dgAbsCreditCss';s.textContent=`
+    .dg48-day.dg-absence-credit{border-left:7px solid #2563eb!important;background:#f5f8ff!important}
+    .dg48-day.dg-absence-unexcused{border-left-color:#dc2626!important;background:#fff7f7!important}
+    .dg-absence-credit-box{margin-top:10px;padding:10px 12px;border-radius:12px;background:#dbeafe;color:#1e3a8a;font-weight:900}
+    .dg-absence-unexcused .dg-absence-credit-box{background:#fee2e2;color:#991b1b}
+  `;document.head.appendChild(s);
+}
+function decorateAC(rows){
+  const boxes=[...document.querySelectorAll('#dg48DayResult .dg48-days-employee')];
+  (rows||[]).forEach((emp,ei)=>{
+    const cards=[...(boxes[ei]?.querySelectorAll(':scope > .dg48-day-grid > .dg48-day')||[])];
+    (emp.days||[]).forEach((day,di)=>{
+      const card=cards[di];if(!card)return;
+      const status=String(day.status||'Arbeiten');
+      if(!['Urlaub','Krank','Schulung','Unerlaubte Abwesenheit','Unentschuldigte Abwesenheit','Feiertag'].includes(status))return;
+      const credit=['Unerlaubte Abwesenheit','Unentschuldigte Abwesenheit'].includes(status)?0:Number(day.creditedHours||0);
+      card.classList.add('dg-absence-credit');
+      if(['Unerlaubte Abwesenheit','Unentschuldigte Abwesenheit'].includes(status))card.classList.add('dg-absence-unexcused');
+      const small=card.querySelector(':scope > .muted.small');
+      if(small)small.innerHTML=fmtAC(credit)+' Std. Gutschrift · '+Number(day.entryCount||0)+' Arbeitsbericht'+(Number(day.entryCount||0)===1?'':'e');
+      const detail=card.querySelector('.dg49-detail');
+      if(detail){
+        detail.querySelectorAll('.dg72-report-status,.dg26-status-note,.dg-absence-credit-box').forEach(x=>x.remove());
+        const box=document.createElement('div');box.className='dg-absence-credit-box';
+        box.textContent=status+' · '+fmtAC(credit)+' Std. automatisch '+(credit>0?'gutgeschrieben':'ohne Gutschrift')+' · Tag automatisch abgeschlossen';
+        detail.prepend(box);
+      }
+      if(Number(day.entryCount||0)===0){
+        card.querySelectorAll('.dg49-hint').forEach(x=>x.remove());
+        card.querySelectorAll('button').forEach(b=>{if(/manuell abschließen/i.test(b.textContent||''))b.remove();});
+      }
+    });
+  });
+}
+function installAC(){
+  cssAC();
+  if(typeof window.renderBossDayClosuresV48==='function'&&!window.__dgAbsCreditWrapped){
+    window.__dgAbsCreditWrapped=true;const old=window.renderBossDayClosuresV48;
+    window.renderBossDayClosuresV48=function(rows){const r=old.apply(this,arguments);setTimeout(()=>decorateAC(rows),0);return r;};
+  }
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(installAC,0),{once:true});else setTimeout(installAC,0);
 })();
 
 /* ===== DG APP 10 FINAL RAILWAY HARDENING ===== */
