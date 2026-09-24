@@ -920,6 +920,7 @@ function legacyOutboxTerminalSuccess(action,parsed){
 }
 let legacyOutboxFlushRunning=false;
 async function flushLegacyWriteOutbox(limit=12){
+  if(FINAL_CUTOVER)return;
   if(legacyOutboxFlushRunning||!pool||!GOOGLE_BACKEND_URL||!legacyOutboxCryptoKey())return;
   legacyOutboxFlushRunning=true;
   try{
@@ -976,6 +977,7 @@ async function flushLegacyWriteOutbox(limit=12){
   }finally{legacyOutboxFlushRunning=false;}
 }
 function kickLegacyOutbox(){
+  if(FINAL_CUTOVER)return;
   setTimeout(()=>flushLegacyWriteOutbox().catch(e=>console.error('legacy outbox flush failed',e.message)),0);
 }
 
@@ -1368,11 +1370,15 @@ async function initDb() {
   }, 5 * 60 * 1000);
   if (typeof latencyTimer.unref === 'function') latencyTimer.unref();
 
-  const legacyOutboxTimer = setInterval(() => {
-    flushLegacyWriteOutbox().catch(e => console.error('legacy outbox scheduled flush failed', e.message));
-  }, 10 * 1000);
-  if (typeof legacyOutboxTimer.unref === 'function') legacyOutboxTimer.unref();
-  kickLegacyOutbox();
+  if(!FINAL_CUTOVER){
+    const legacyOutboxTimer = setInterval(() => {
+      flushLegacyWriteOutbox().catch(e => console.error('legacy outbox scheduled flush failed', e.message));
+    }, 10 * 1000);
+    if (typeof legacyOutboxTimer.unref === 'function') legacyOutboxTimer.unref();
+    kickLegacyOutbox();
+  }else{
+    console.log('FINAL_CUTOVER legacy write outbox disabled; Gmail and Calendar use direct APIs only.');
+  }
 }
 
 function cors(req, res) {
