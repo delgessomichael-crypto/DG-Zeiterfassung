@@ -3804,11 +3804,15 @@ function installSection(){
 }
 async function refreshCounts(){
  try{
-   const x=await req({action:'getFinanceOverviewV10'});
+   const [x,completed]=await Promise.all([
+     req({action:'getFinanceOverviewV10'}),
+     req({action:'getRegieReports',status:'Abgeschlossen'})
+   ]);
    const sec=dash()?.querySelector('.dg10-accounting-section');if(!sec)return;
    const a=sec.querySelector('[data-dg10-account="incoming"] strong'),t=sec.querySelector('[data-dg10-account="tax"] strong');
    if(a)a.textContent=String(x.incoming||0);if(t)t.textContent=String(x.tax||0);
-   const c=sec.querySelector('[data-dg10-account="create"] strong'),old=q('d3Count-completed');if(c)c.textContent=old?.textContent||'…';
+   const create=sec.querySelector('[data-dg10-account="create"] strong');
+   if(create)create.textContent=String(Array.isArray(completed)?completed.length:0);
  }catch(_e){}
 }
 function install(){
