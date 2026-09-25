@@ -2478,6 +2478,35 @@ function ensureQuickOfferTile(){
   }
   return true;
 }
+function ensureQuickAppointmentTile(){
+  const grid=dailyGrid();if(!grid)return false;
+  let t=grid.querySelector('[data-dg80-final="quickAppointment"]');
+  if(!t){
+    t=document.createElement('button');t.type='button';t.draggable=false;
+    t.className='d3-tile dg80-final-tile dg80-quick-offer dg80-quick-appointment';
+    t.dataset.dg80Final='quickAppointment';
+    t.innerHTML='<strong class="dg80-quick-plus">+</strong><span>Termin anlegen</span>';
+    const offer=grid.querySelector('[data-dg80-final="quickOfferRequest"]');
+    if(offer&&offer.nextSibling)grid.insertBefore(t,offer.nextSibling);else grid.appendChild(t);
+  }
+  if(t.dataset.dg18Appointment!=='1'){
+    t.dataset.dg18Appointment='1';
+    t.addEventListener('click',e=>{
+      e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();
+      const cal=q('dg80FinalCalendar');
+      if(cal){cal.click();return;}
+      const planner=q('dg62PlannerCard');
+      if(planner){
+        const details=planner.querySelector('.dg62-main');if(details)details.open=true;
+        if(typeof window.dg62OpenPlanner==='function')window.dg62OpenPlanner();
+        planner.scrollIntoView({behavior:'smooth',block:'start'});
+        return;
+      }
+      alert('Der Mitarbeiter-Kalender ist noch nicht bereit. Bitte die App einmal aktualisieren.');
+    },true);
+  }
+  return true;
+}
 function css(){
   if(q('dg80Ui18Css'))return;
   const s=document.createElement('style');s.id='dg80Ui18Css';
@@ -2493,7 +2522,7 @@ function bindCreated(){
   t.dataset.dg18='1';
   t.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();openList();},true);
 }
-function enforce(){css();ensureQuickOfferTile();bindCreated();paint();}
+function enforce(){css();ensureQuickOfferTile();ensureQuickAppointmentTile();bindCreated();paint();}
 function install(){
   css();let n=0;(function ready(){enforce();if(dailyGrid()&&q('dg80c-createdOffersYear'))return;if(++n<60)setTimeout(ready,100);})();
   const mo=new MutationObserver(()=>{clearTimeout(S.timer);S.timer=setTimeout(enforce,0);});mo.observe(document.body,{subtree:true,childList:true,characterData:true});
