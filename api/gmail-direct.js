@@ -741,7 +741,10 @@ function createGmailDirect(opts){
       e.needsReconnect=true;throw e;
     }
     const token=await accessToken();
-    await apiJson(token,'POST','messages/'+encodeURIComponent(messageId)+'/modify',{addLabelIds:['SPAM'],removeLabelIds:['INBOX']});
+    const finId=await ensureLabel(token,FINANCE_LABEL),taxId=await ensureLabel(token,TAX_LABEL);
+    await apiJson(token,'POST','messages/'+encodeURIComponent(messageId)+'/modify',{
+      addLabelIds:['SPAM'],removeLabelIds:[...new Set(['INBOX',finId,taxId].filter(Boolean))]
+    });
 
     let attachments=[];try{attachments=JSON.parse(String(q.rows[0].attachments_json||'[]'));if(!Array.isArray(attachments))attachments=[];}catch(_e){attachments=[];}
     const fileIds=[...new Set(attachments.map(x=>String(x&&x.fileId||'').trim()).filter(Boolean))];
@@ -826,8 +829,14 @@ function createGmailDirect(opts){
          ON CONFLICT(message_id) DO UPDATE SET inquiry_id=EXCLUDED.inquiry_id,thread_id=EXCLUDED.thread_id,sender=EXCLUDED.sender,subject=EXCLUDED.subject,received_at_text=EXCLUDED.received_at_text`,
         [messageId,String(msg.threadId||''),inquiryId,String(h.from||''),String(h.subject||current.subject||''),received]
       );
-      await apiJson(token,'POST','messages/'+encodeURIComponent(messageId)+'/modify',{removeLabelIds:['INBOX']});
+      const finId=await ensureLabel(token,FINANCE_LABEL),taxId=await ensureLabel(token,TAX_LABEL);
+      await apiJson(token,'POST','messages/'+encodeURIComponent(messageId)+'/modify',{
+        removeLabelIds:[...new Set(['INBOX',finId,taxId].filter(Boolean))]
+      });
+      let oldFinanceAttachments=[];try{oldFinanceAttachments=JSON.parse(String(current.attachments_json||'[]'));if(!Array.isArray(oldFinanceAttachments))oldFinanceAttachments=[];}catch(_e){oldFinanceAttachments=[];}
+      const oldFinanceFileIds=[...new Set(oldFinanceAttachments.map(x=>String(x&&x.fileId||'').trim()).filter(Boolean))];
       await pool.query('DELETE FROM finance_mail_v10 WHERE message_id=$1',[messageId]);
+      if(oldFinanceFileIds.length)await pool.query("DELETE FROM binary_files_v10 WHERE id=ANY($1::text[]) AND source='gmail-finance'",[oldFinanceFileIds]);
       return {ok:true,messageId,target,inquiryId,source};
     }
 
