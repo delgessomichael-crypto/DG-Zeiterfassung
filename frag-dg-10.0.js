@@ -22,7 +22,7 @@ async function askFragDG(){
   try{
     if(typeof window.api!=='function')throw new Error('App-Schnittstelle ist noch nicht bereit.');
     var r=await window.api(payload({action:'getAiAssistantV10',prompt:prompt}));
-    out.className=(r&&r.configured===false)?'status warn':'status ok';
+    out.className=(r&&(r.configured===false||r.billingRequired))?'status warn':'status ok';
     out.textContent=String(r&&r.text||'Keine Antwort erhalten.');
   }catch(e){
     out.className='status error';
