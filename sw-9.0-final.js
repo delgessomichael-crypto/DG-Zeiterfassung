@@ -1,5 +1,5 @@
 /* DG Zeiterfassung 10.0 - Railway migration cache */
-const CACHE='dg-zeiterfassung-10.0-stable-runtime-20260925-ui-mail-camera';
+const CACHE='dg-zeiterfassung-10.0-stable-runtime-20260925-1555-buttons-images';
 const STATIC=[
   './index.html',
   './app-5.0.css',
