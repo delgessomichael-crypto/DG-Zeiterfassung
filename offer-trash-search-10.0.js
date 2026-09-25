@@ -1,7 +1,7 @@
 /* DG App 10 - Angebots-Papierkorb + globale Kundensuche */
 (function(){
 'use strict';
-const VERSION='20260925-1745-trash-search-counter1';
+const VERSION='20260925-1815-dedupe-search2';
 const q=id=>document.getElementById(id);
 const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function payload(x){
@@ -101,23 +101,55 @@ function ensureTrashButton(){
 
 let searchTimer=0;
 function searchTargets(){
-  const explicit=['d3Inquiries','d3Running','d3Completed','d3OfferOpen','d3OfferCreate','d3OfferArchive','d3Reminder','d36Maintenance','dg62PlannerCard','regieCard','dg10AccountingSection'];
+  const explicit=[
+    'd3Inquiries','d3Running','d3Completed','d3OfferOpen','d3OfferCreate','d3OfferArchive',
+    'd3Reminder','d36Maintenance','dg62PlannerCard','regieCard','dg10AccountingSection',
+    'dg80WebsiteInquiries','dg80WhatsappInquiries','dg80CreatedOffersCenter','dg80ActionCenter',
+    'dg80EmployeeStats','dg10Partner'
+  ];
   const out=new Set(explicit.map(q).filter(Boolean));
-  document.querySelectorAll('#bossView .card,#bossView .d3-panel,#bossView section').forEach(el=>{
-    const h=el.querySelector(':scope > h2,:scope > h3,:scope .dg48-head h2');
-    const t=String(h&&h.textContent||'');
-    if(/Anfrag|Angebot|Auftrag|Rechnung|Wartung|Kalender|Reminder|WhatsApp|Kunde/i.test(t))out.add(el);
+
+  // Dynamische Bereiche nur dann ergänzen, wenn sie selbst ein echter Inhaltsbereich sind.
+  // Sammel-/Elterncontainer mit eigenen Unterpanels bekommen absichtlich keinen zweiten Suchbutton.
+  document.querySelectorAll('#bossView .card[id],#bossView .d3-panel[id],#bossView section[id]').forEach(el=>{
+    if(out.has(el))return;
+    const h=el.querySelector(':scope > h2,:scope > h3,:scope > .dg48-head h2');
+    const t=String(h&&h.textContent||'').trim();
+    if(!/Anfrag|Angebot|Auftrag|Rechnung|Wartung|Kalender|Reminder|WhatsApp|Kunde/i.test(t))return;
+    const nestedBusiness=el.querySelector(':scope .d3-panel[id],:scope .card[id],:scope section[id]');
+    if(nestedBusiness)return;
+    out.add(el);
   });
   return [...out];
 }
+function cleanupSearchDuplicates(targets){
+  const wanted=new Set(targets);
+  const all=[...document.querySelectorAll('#bossView .dg-customer-search-btn')];
+
+  // Entferne Suchbuttons aus Sammel-/Elterncontainern, wenn innerhalb bereits ein
+  // konkreter Zielbereich existiert. So gibt es pro geöffnetem Fachbereich exakt einen Button.
+  all.forEach(b=>{
+    const owner=b.closest('.d3-panel,.card,section');
+    if(!owner){b.remove();return;}
+    if(!wanted.has(owner)){
+      const hasWanted=[...wanted].some(x=>x!==owner&&owner.contains(x));
+      if(hasWanted)b.remove();
+    }
+  });
+
+  // Innerhalb desselben Bereichs ebenfalls strikt auf einen Button begrenzen.
+  targets.forEach(panel=>{
+    const own=[...panel.querySelectorAll(':scope > .dg-customer-search-btn,:scope > .dg-search-btn.dg-customer-search-btn')];
+    own.slice(1).forEach(x=>x.remove());
+  });
+}
 function ensureSearchButtons(){
-  for(const panel of searchTargets()){
-    const buttons=[...panel.querySelectorAll('button')].filter(b=>{
-      const owner=b.closest('.d3-panel,.card,section');
-      return owner===panel&&(/Kunde\\s+suchen/i.test(String(b.textContent||''))||b.classList.contains('dg-customer-search-btn'));
-    });
-    let b=buttons.shift()||null;
-    buttons.forEach(x=>x.remove());
+  const targets=searchTargets();
+  cleanupSearchDuplicates(targets);
+  for(const panel of targets){
+    const direct=[...panel.children].filter(x=>x.matches&&x.matches('.dg-customer-search-btn'));
+    let b=direct[0]||null;
+    direct.slice(1).forEach(x=>x.remove());
     if(!b){
       b=document.createElement('button');b.type='button';
       const h=panel.querySelector(':scope > h2,:scope > h3,:scope > .dg48-head');
