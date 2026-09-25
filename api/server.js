@@ -9156,6 +9156,86 @@ async function directOfferStatisticsNativeRead(body){
   const session=await localSessionForBody(body,true);if(!session)return null;
   return postgresOfferStatisticsNative();
 }
+async function directDeletedOffersV10(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const q=await pool.query(
+    `SELECT trash_id,offer_id,customer,description,source_type,previous_status,entry_ids_json,
+            deleted_at,deleted_by
+       FROM offer_trash_v10
+      WHERE restored_at IS NULL AND purged_at IS NULL
+      ORDER BY deleted_at DESC LIMIT 250`
+  );
+  return q.rows.map(r=>({
+    trashId:String(r.trash_id||''),offerId:String(r.offer_id||''),customer:String(r.customer||''),
+    description:String(r.description||''),sourceType:String(r.source_type||''),
+    previousStatus:String(r.previous_status||'Zu erstellen'),
+    entryIds:Array.isArray(r.entry_ids_json)?r.entry_ids_json:[],
+    deletedAt:r.deleted_at?new Date(r.deleted_at).toISOString():'',
+    deletedBy:String(r.deleted_by||'')
+  }));
+}
+async function directSearchCustomersV10(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const raw=String(body.query||body.q||'').trim();
+  if(raw.length<2)return [];
+  const like='%'+raw.replace(/[%_]/g,'\\async function directOfferStatisticsNativeRead(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  return postgresOfferStatisticsNative();
+}')+'%';
+  const out=[];
+  const push=(source,id,customer,detail,phone,email,status,extra)=>out.push({
+    source:String(source||''),id:String(id||''),customer:String(customer||''),
+    detail:String(detail||''),phone:String(phone||''),email:String(email||''),
+    status:String(status||''),extra:String(extra||'')
+  });
+  const [inq,off,orders,regie,maint,planner,reminders,wa]=await Promise.all([
+    pool.query(`SELECT id,customer,phone,email,status,subject,description,postal_code,city
+      FROM customer_inquiries_shadow
+      WHERE concat_ws(' ',id,customer,phone,email,status,subject,description,postal_code,city) ILIKE $1 ESCAPE '\\'
+      ORDER BY shadow_updated_at DESC LIMIT 60`,[like]),
+    pool.query(`SELECT offer_id,customer,phone,email,status,description,source
+      FROM inquiry_offers_shadow
+      WHERE concat_ws(' ',offer_id,customer,phone,email,status,description,source) ILIKE $1 ESCAPE '\\'
+      ORDER BY shadow_updated_at DESC LIMIT 60`,[like]),
+    pool.query(`SELECT id,customer,address,phone,email,status,description,source
+      FROM manual_orders_shadow
+      WHERE concat_ws(' ',id,customer,address,phone,email,status,description,source) ILIKE $1 ESCAPE '\\'
+      ORDER BY shadow_updated_at DESC LIMIT 60`,[like]),
+    pool.query(`SELECT id,customer,activity,job_status,billing_status,offer_id,object_id
+      FROM time_entries_shadow
+      WHERE concat_ws(' ',id,customer,activity,job_status,billing_status,offer_id,object_id) ILIKE $1 ESCAPE '\\'
+      ORDER BY shadow_updated_at DESC LIMIT 80`,[like]),
+    pool.query(`SELECT c.id,c.name,c.phone,c.email,c.billing_street,c.billing_zip,c.billing_city,
+                       o.id object_id,o.name object_name,o.street,o.zip,o.city
+      FROM maintenance_customers_shadow c
+      LEFT JOIN maintenance_objects_shadow o ON o.customer_id=c.id AND o.active=true
+      WHERE c.active=true AND concat_ws(' ',c.id,c.name,c.phone,c.email,c.billing_street,c.billing_zip,c.billing_city,
+                                        o.id,o.name,o.street,o.zip,o.city) ILIKE $1 ESCAPE '\\'
+      ORDER BY c.name LIMIT 60`,[like]),
+    pool.query(`SELECT id,customer,address,task,event_date,start_time,end_time
+      FROM planner_events_shadow
+      WHERE concat_ws(' ',id,customer,address,task,event_date,start_time,end_time) ILIKE $1 ESCAPE '\\'
+      ORDER BY event_date DESC LIMIT 60`,[like]),
+    pool.query(`SELECT id,offer_id,customer,offer_number,phone,email,status,result,description
+      FROM offer_reminders_shadow
+      WHERE concat_ws(' ',id,offer_id,customer,offer_number,phone,email,status,result,description) ILIKE $1 ESCAPE '\\'
+      ORDER BY shadow_updated_at DESC LIMIT 60`,[like]),
+    pool.query(`SELECT id,wa_id,contact_name,category,status,last_text
+      FROM whatsapp_threads_v10
+      WHERE concat_ws(' ',id,wa_id,contact_name,category,status,last_text) ILIKE $1 ESCAPE '\\'
+      ORDER BY last_message_at DESC NULLS LAST LIMIT 60`,[like])
+  ]);
+  for(const r of inq.rows)push('Anfragen',r.id,r.customer,r.subject||r.description,r.phone,r.email,r.status,[r.postal_code,r.city].filter(Boolean).join(' '));
+  for(const r of off.rows)push('Angebote',r.offer_id,r.customer,r.description,r.phone,r.email,r.status,r.source);
+  for(const r of orders.rows)push('Aufträge',r.id,r.customer,r.description,r.phone,r.email,r.status,r.address);
+  for(const r of regie.rows)push('Regieberichte',r.id,r.customer,r.activity,'','',r.job_status,String(r.offer_id||r.object_id||''));
+  for(const r of maint.rows)push('Wartungen',r.id,r.name,r.object_name||'',r.phone,r.email,'Wartung',[r.billing_street,r.billing_zip,r.billing_city,r.street,r.zip,r.city].filter(Boolean).join(' '));
+  for(const r of planner.rows)push('Kalender',r.id,r.customer,r.task,'','',r.event_date,r.address);
+  for(const r of reminders.rows)push('Reminder',r.id,r.customer,r.description,r.phone,r.email,r.status,r.offer_number||r.offer_id);
+  for(const r of wa.rows)push('WhatsApp',r.id,r.contact_name,r.last_text,r.wa_id,'',r.status,r.category);
+  out.sort((a,b)=>a.customer.localeCompare(b.customer,'de')||a.source.localeCompare(b.source,'de'));
+  return out.slice(0,250);
+}
 async function bootstrapOfferNativeV15(){
   if(!pool)return;
   const marker='trusted_offer_native_v15';
@@ -10349,6 +10429,8 @@ async function tryDirectPostgresRead(action,body){
   if(action==='getInquiryReminders')return directInquiryRemindersRead(body);
   if(action==='getOfferReports')return directOfferReportsNativeRead(body);
   if(action==='getOfferStatistics')return directOfferStatisticsNativeRead(body);
+  if(action==='getDeletedOffersV10')return directDeletedOffersV10(body);
+  if(action==='searchCustomersV10')return directSearchCustomersV10(body);
   if(action==='getMonthPayrollAudit')return directPayrollAuditNativeRead(body);
   if(action==='getPayrollCycleState')return directPayrollCycleViewRead(body);
   if(action==='getBossMonthData')return directBossMonthViewRead(body);
