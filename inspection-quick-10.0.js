@@ -2,10 +2,10 @@
 (function(){
 'use strict';
 
-const V='20260925-1915-inspection-camera3';
+const V='20260925-2005-inspection-live-camera4';
 const $=id=>document.getElementById(id);
 const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let inspectionPhotos=[];
+let inspectionPhotos=[],inspectionCameraStream=null;
 
 function chefAllowed(){
   // Erst aktiv, wenn die Mitarbeiteransicht wirklich geöffnet wurde.
@@ -152,13 +152,41 @@ function resizeInspectionImage(file){
 }
 async function addInspectionPhotos(files){
   const list=Array.from(files||[]);if(!list.length)return;
-  if(inspectionPhotos.length+list.length>6){notice('Maximal 6 Bilder pro Besichtigung.','warn');return;}
   try{
     for(const file of list)inspectionPhotos.push({dataUrl:await resizeInspectionImage(file),name:file.name||'Besichtigungsbild.jpg'});
     renderInspectionPhotos();
   }catch(e){notice('Mindestens ein Bild konnte nicht vorbereitet werden.','warn');}
   if($('inspectionCameraInput'))$('inspectionCameraInput').value='';
   if($('inspectionGalleryInput'))$('inspectionGalleryInput').value='';
+}
+async function startInspectionCamera(){
+  const live=$('inspectionCameraLive'),video=$('inspectionCameraVideo');
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    $('inspectionCameraInput')?.click();return;
+  }
+  try{
+    stopInspectionCamera();
+    inspectionCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+    if(video)video.srcObject=inspectionCameraStream;
+    live?.classList.remove('hidden');
+    $('inspectionCameraBtn').textContent='📷 Kamera läuft';
+  }catch(_e){
+    $('inspectionCameraInput')?.click();
+  }
+}
+function stopInspectionCamera(){
+  if(inspectionCameraStream){inspectionCameraStream.getTracks().forEach(t=>t.stop());inspectionCameraStream=null;}
+  const video=$('inspectionCameraVideo');if(video)video.srcObject=null;
+  $('inspectionCameraLive')?.classList.add('hidden');
+  const b=$('inspectionCameraBtn');if(b)b.textContent='📷 Kamera starten';
+}
+function captureInspectionPhoto(){
+  const v=$('inspectionCameraVideo');if(!inspectionCameraStream||!v||!v.videoWidth||!v.videoHeight)return;
+  const max=1200,scale=Math.min(1,max/v.videoWidth,max/v.videoHeight),cv=document.createElement('canvas');
+  cv.width=Math.round(v.videoWidth*scale);cv.height=Math.round(v.videoHeight*scale);
+  cv.getContext('2d').drawImage(v,0,0,cv.width,cv.height);
+  inspectionPhotos.push({dataUrl:cv.toDataURL('image/jpeg',0.7),name:'Besichtigungsbild_'+String(inspectionPhotos.length+1).padStart(2,'0')+'.jpg'});
+  renderInspectionPhotos();
 }
 function clearForm(){
   ['inspectionLastName','inspectionFirstName','inspectionStreet','inspectionPostalCode','inspectionCity','inspectionEmail','inspectionMobile','inspectionLandline','inspectionDescription','inspectionCalendarEventId','inspectionTimeDate','inspectionTimeStart','inspectionTimeEnd','inspectionTimeHours'].forEach(id=>{if($(id))$(id).value='';});
@@ -170,7 +198,7 @@ function clearForm(){
 }
 function closeModal(){
   const m=$('inspectionQuickModal');if(m)m.classList.add('hidden');
-  stopSpeech();
+  stopSpeech();stopInspectionCamera();
 }
 function openModal(){
   if(!chefAllowed())return;
@@ -239,7 +267,7 @@ async function submit(){
     timeStart:String($('inspectionTimeStart')?.value||'').trim(),
     timeEnd:String($('inspectionTimeEnd')?.value||'').trim(),
     timeHours:updateTimeHours(),
-    photos:inspectionPhotos.slice(0,6)
+    photos:inspectionPhotos.slice()
   };
   if(!item.lastName&&!item.firstName){notice('Bitte Name oder Vorname eintragen.','error');$('inspectionLastName')?.focus();return;}
   if(!item.description){notice('Bitte Auftragsbeschreibung eintragen.','error');$('inspectionDescription')?.focus();return;}
@@ -297,8 +325,15 @@ function buildModal(){
       <div style="margin-top:14px;padding:12px;border:1px solid #d7dee8;border-radius:12px;background:#f8fafc">
         <strong>📷 Bilder zur Besichtigung</strong>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
-          <button type="button" class="btn primary" id="inspectionCameraBtn">📷 Kamera</button>
+          <button type="button" class="btn primary" id="inspectionCameraBtn">📷 Kamera starten</button>
           <button type="button" class="btn secondary" id="inspectionGalleryBtn">🖼️ Vorhandene Bilder</button>
+        </div>
+        <div id="inspectionCameraLive" class="hidden" style="margin-top:10px">
+          <video id="inspectionCameraVideo" autoplay muted playsinline style="width:100%;max-height:360px;object-fit:cover;border-radius:12px;background:#111"></video>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+            <button type="button" class="btn success" id="inspectionCaptureBtn">📸 Foto aufnehmen</button>
+            <button type="button" class="btn secondary" id="inspectionCameraCloseBtn">Kamera schließen</button>
+          </div>
         </div>
         <input id="inspectionCameraInput" type="file" accept="image/*" capture="environment" class="hidden">
         <input id="inspectionGalleryInput" type="file" accept="image/*" multiple class="hidden">
@@ -317,7 +352,9 @@ function buildModal(){
   document.body.appendChild(m);
   $('inspectionCloseBtn').addEventListener('click',closeModal);
   $('inspectionSpeechBtn').addEventListener('click',toggleSpeech);
-  $('inspectionCameraBtn').addEventListener('click',()=>$('inspectionCameraInput')?.click());
+  $('inspectionCameraBtn').addEventListener('click',startInspectionCamera);
+  $('inspectionCaptureBtn').addEventListener('click',captureInspectionPhoto);
+  $('inspectionCameraCloseBtn').addEventListener('click',stopInspectionCamera);
   $('inspectionGalleryBtn').addEventListener('click',()=>$('inspectionGalleryInput')?.click());
   $('inspectionCameraInput').addEventListener('change',e=>addInspectionPhotos(e.target.files));
   $('inspectionGalleryInput').addEventListener('change',e=>addInspectionPhotos(e.target.files));
