@@ -1,5 +1,5 @@
 /* DG Zeiterfassung 10.0 - Railway migration cache */
-const CACHE='dg-zeiterfassung-10.0-stable-runtime-20260925-office-compact';
+const CACHE='dg-zeiterfassung-10.0-stable-runtime-20260925-office-compact4';
 const STATIC=[
   './index.html',
   './app-5.0.css',
