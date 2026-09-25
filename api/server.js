@@ -6,6 +6,7 @@ const zlib = require('zlib');
 const { Pool } = require('pg');
 const JSZip = require('jszip');
 const { createGmailDirect } = require('./gmail-direct');
+const { createIonosDirect } = require('./ionos-direct');
 const { createCalendarDirect } = require('./calendar-direct');
 
 const PORT = Number(process.env.PORT || 3000);
@@ -48,6 +49,7 @@ const gmailDirect = createGmailDirect({
   apiOrigin:API_ORIGIN,
   secret:MIGRATION_TOKEN
 });
+const ionosDirect = createIonosDirect({pool,apiOrigin:API_ORIGIN});
 const calendarDirect = createCalendarDirect({pool,google:gmailDirect});
 
 const schema = `
@@ -1363,6 +1365,7 @@ async function initDb() {
   if (!pool) return;
   await pool.query(schema);
   await gmailDirect.init();
+  await ionosDirect.init();
   await calendarDirect.init();
   await initFinalCutoverStorageV24();
   await bootstrapEmployeeCredentialsV24();
@@ -10574,12 +10577,20 @@ async function tryDirectPostgresRead(action,body){
   if(action==='getAiAssistantV10')return directAiAssistantV10(body);
   if(action==='getGmailStatusV10'){
     const session=await localSessionForBody(body,true);if(!session)return null;
-    const gmail=await gmailDirect.status(),calendar=await calendarDirect.status();
-    return Object.assign({},gmail,{calendar});
+    const gmail=await gmailDirect.status(),ionos=await ionosDirect.status(),calendar=await calendarDirect.status();
+    return Object.assign({},gmail,{calendar,ionos});
   }
   if(action==='syncGmailInquiriesV10'){
     const session=await localSessionForBody(body,true);if(!session)return null;
-    return gmailDirect.syncForUser(session.employee);
+    const [gmail,ionos]=await Promise.all([gmailDirect.syncForUser(session.employee),ionosDirect.syncForUser(session.employee)]);
+    return Object.assign({},gmail,{
+      ok:Boolean(gmail&&gmail.ok!==false)&&Boolean(ionos&&ionos.ok!==false),
+      imported:Number(gmail&&gmail.imported||0)+Number(ionos&&ionos.inquiryImported||0),
+      updated:Number(gmail&&gmail.updated||0)+Number(ionos&&ionos.inquiryUpdated||0),
+      duplicates:Number(gmail&&gmail.duplicates||0)+Number(ionos&&ionos.inquiryDuplicates||0),
+      failed:Number(gmail&&gmail.failed||0)+Number(ionos&&ionos.failed||0),
+      gmail,ionos
+    });
   }
   if(action==='getFinanceOverviewV10'){
     const session=await localSessionForBody(body,true);if(!session)return null;
@@ -10587,7 +10598,14 @@ async function tryDirectPostgresRead(action,body){
   }
   if(action==='syncFinanceGmailV10'){
     const session=await localSessionForBody(body,true);if(!session)return null;
-    return gmailDirect.financeSyncForUser(session.employee);
+    const [gmail,ionos]=await Promise.all([gmailDirect.financeSyncForUser(session.employee),ionosDirect.syncForUser(session.employee)]);
+    return Object.assign({},gmail,{
+      ok:Boolean(gmail&&gmail.ok!==false)&&Boolean(ionos&&ionos.ok!==false),
+      imported:Number(gmail&&gmail.imported||0)+Number(ionos&&ionos.financeImported||0),
+      tax:Number(gmail&&gmail.tax||0)+Number(ionos&&ionos.tax||0),
+      failed:Number(gmail&&gmail.failed||0)+Number(ionos&&ionos.failed||0),
+      gmail,ionos
+    });
   }
   if(action==='getFinanceInboxV10'){
     const session=await localSessionForBody(body,true);if(!session)return null;
@@ -10831,28 +10849,17 @@ async function tryDirectPostgresWrite(action,body){
   const employeeSelfAction=['confirmEmployeeAssignment','reportEmployeeAssignmentIssue','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','saveEmployeeLocationV10','createEmployeeInspectionRequestV10'].includes(action);
   const session=await localSessionForBody(body,!employeeSelfAction);if(!session)return null;
   const by=String(session.employee||body.employee||'').trim(),nowIso=new Date().toISOString();
-  if(action==='markFinancePaidV10'){
-    const result=await gmailDirect.markPaid(body.messageId,by,false);
-    return {result,outboxId:0};
-  }
-  if(action==='markTaxMailAsInvoiceV10'){
-    const result=await gmailDirect.markPaid(body.messageId,by,true);
-    return {result,outboxId:0};
-  }
-  if(action==='archiveTaxAdvisorMailV10'){
-    const result=await gmailDirect.archiveTax(body.messageId,by);
-    return {result,outboxId:0};
-  }
-  if(action==='deleteFinanceMailV10'){
-    const result=await gmailDirect.deleteFinanceMail(body.messageId,by);
-    return {result,outboxId:0};
-  }
-  if(action==='markFinanceSpamV10'){
-    const result=await gmailDirect.markSpam(body.messageId,by);
-    return {result,outboxId:0};
-  }
-  if(action==='moveFinanceMailV10'){
-    const result=await gmailDirect.moveFinanceMail(body.messageId,body.target,by);
+  if(['markFinancePaidV10','markTaxMailAsInvoiceV10','archiveTaxAdvisorMailV10','deleteFinanceMailV10','markFinanceSpamV10','moveFinanceMailV10'].includes(action)){
+    const pq=await pool.query("SELECT COALESCE(provider,'gmail') AS provider FROM finance_mail_v10 WHERE message_id=$1 LIMIT 1",[String(body.messageId||'')]);
+    const provider=String(pq.rows[0]&&pq.rows[0].provider||'gmail').toLowerCase();
+    const mail=provider==='ionos'?ionosDirect:gmailDirect;
+    let result;
+    if(action==='markFinancePaidV10')result=await mail.markPaid(body.messageId,by,false);
+    else if(action==='markTaxMailAsInvoiceV10')result=await mail.markPaid(body.messageId,by,true);
+    else if(action==='archiveTaxAdvisorMailV10')result=await mail.archiveTax(body.messageId,by);
+    else if(action==='deleteFinanceMailV10')result=await mail.deleteFinanceMail(body.messageId,by);
+    else if(action==='markFinanceSpamV10')result=await mail.markSpam(body.messageId,by);
+    else result=await mail.moveFinanceMail(body.messageId,body.target,by);
     return {result,outboxId:0};
   }
   const client=await pool.connect();
@@ -13394,13 +13401,18 @@ async function tryDirectPostgresWrite(action,body){
   }
   if(gmailArchiveAfterCommit){
     try{
-      const g=await gmailDirect.archiveInquiryMessages(gmailArchiveAfterCommit.inquiryId,gmailArchiveAfterCommit.actor);
+      const [g,i]=await Promise.all([
+        gmailDirect.archiveInquiryMessages(gmailArchiveAfterCommit.inquiryId,gmailArchiveAfterCommit.actor),
+        ionosDirect.archiveInquiryMessages(gmailArchiveAfterCommit.inquiryId,gmailArchiveAfterCommit.actor)
+      ]);
       if(result&&typeof result==='object'){
         result.gmailArchived=Number(g&&g.archived||0);
+        result.ionosArchived=Number(i&&i.archived||0);
         if(g&&g.needsReconnect)result.gmailNeedsReconnect=true;
+        if(i&&i.needsConfiguration)result.ionosNeedsConfiguration=true;
       }
     }catch(e){
-      console.error('GMAIL_INQUIRY_ARCHIVE failed action='+action+' inquiry='+gmailArchiveAfterCommit.inquiryId+' error='+e.message);
+      console.error('MAIL_INQUIRY_ARCHIVE failed action='+action+' inquiry='+gmailArchiveAfterCommit.inquiryId+' error='+e.message);
       if(result&&typeof result==='object')result.gmailArchiveError=String(e&&e.message||e);
     }
   }
@@ -14854,6 +14866,7 @@ initDb()
     if(Array.isArray(h.writeStats)&&h.writeStats.length)console.log('WRITE_STATS '+h.writeStats.map(x=>x.action+'='+x.success_count+'ok/'+x.failure_count+'fail').join(' | '));
     await logLatencySummary();
     gmailDirect.start();
+    ionosDirect.start();
     calendarDirect.start();
   })
   .then(() => server.listen(PORT, '0.0.0.0', () => {
