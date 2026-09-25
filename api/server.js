@@ -11213,7 +11213,7 @@ async function tryDirectPostgresWrite(action,body){
       }
       legacyPayload=Object.assign({},body,{reminderId,item:Object.assign({},item,{reminderDays})});
       result={ok:true,offerId,reminderId,dueDate:due,status:'Offenes Angebot'};
-    }else if(['moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus'].includes(action)){
+    }else if(['moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','restoreDiscardedOfferV10','purgeDiscardedOfferV10','setRegieReportsOfferStatus'].includes(action)){
       let offerId=String(body.offerId||'').trim(),reminderId=String(body.reminderId||'').trim();
       if(['declineOfferFromReminder','acceptOfferFromReminder'].includes(action)){
         if(!reminderId)throw new Error('Reminder wurde nicht gefunden.');
@@ -11231,6 +11231,8 @@ async function tryDirectPostgresWrite(action,body){
         resultText='Angenommen - Laufender Auftrag';
       }else if(action==='acceptOfferAsRunning'){targetStatus='Laufend';resultText='Angenommen - Laufender Auftrag';asRunning=true;}
       else if(action==='discardOfferPermanently'){targetStatus='Verworfen';}
+      else if(action==='restoreDiscardedOfferV10'){targetStatus='Angebot zu erstellen';}
+      else if(action==='purgeDiscardedOfferV10'){targetStatus='Endgültig gelöscht';}
       else if(action==='setRegieReportsOfferStatus'){
         targetStatus=String(body.offerStatus||'').trim();
         if(!['Angebot zu erstellen','Offenes Angebot','Angebot Angenommen','Angebot Abgelehnt'].includes(targetStatus))
@@ -11241,22 +11243,98 @@ async function tryDirectPostgresWrite(action,body){
         `SELECT id,hours,job_status,billing_status FROM time_entries_shadow WHERE offer_id=$1 FOR UPDATE`,[offerId]
       );
       if(action==='discardOfferPermanently'){
+        const trashId='TRASH-'+crypto.randomUUID();
         if(iq.rowCount){
-          if(String(iq.rows[0].status||'')!=='Zu erstellen')throw new Error('Nur noch nicht erstellte Angebote können über „Auftrag löschen“ entfernt werden.');
+          if(String(iq.rows[0].status||'')!=='Zu erstellen')throw new Error('Nur noch nicht erstellte Angebote können in den Papierkorb verschoben werden.');
+          await client.query(
+            `INSERT INTO offer_trash_v10(trash_id,offer_id,customer,description,source_type,previous_status,entry_ids_json,deleted_by)
+             VALUES($1,$2,$3,$4,'Angebotsanfrage','Zu erstellen','[]'::jsonb,$5)`,
+            [trashId,offerId,String(iq.rows[0].customer||''),String(iq.rows[0].description||''),by]
+          );
           await client.query(
             `UPDATE inquiry_offers_shadow SET status='Verworfen',changed_at_text=$2,changed_by=$3,shadow_updated_at=now() WHERE offer_id=$1`,
             [offerId,nowIso,by]
           );
-          result={ok:true,count:1};
+          result={ok:true,count:1,trashId};
         }else{
           const bad=tq.rows.find(r=>String(r.job_status||'')!=='Angebot zu erstellen');
-          if(bad)throw new Error('Nur noch nicht erstellte Angebote können über „Auftrag löschen“ entfernt werden.');
+          if(bad)throw new Error('Nur noch nicht erstellte Angebote können in den Papierkorb verschoben werden.');
           if(!tq.rowCount)throw new Error('Auftrag wurde nicht gefunden.');
-          await client.query(
-            `UPDATE time_entries_shadow SET job_status='Verworfen',offer_id='',offer_changed_at_text='',offer_changed_by='',shadow_updated_at=now() WHERE offer_id=$1`,[offerId]
+          const ids=tq.rows.map(r=>String(r.id||'')).filter(Boolean);
+          const details=await client.query(
+            `SELECT customer,activity FROM time_entries_shadow WHERE id=ANY($1::text[]) ORDER BY entry_date,start_time,id LIMIT 1`,[ids]
           );
-          result={ok:true,count:tq.rowCount};
+          const first=details.rows[0]||{};
+          await client.query(
+            `INSERT INTO offer_trash_v10(trash_id,offer_id,customer,description,source_type,previous_status,entry_ids_json,deleted_by)
+             VALUES($1,$2,$3,$4,'Regieberichte','Zu erstellen',$5::jsonb,$6)`,
+            [trashId,offerId,String(first.customer||''),String(first.activity||''),JSON.stringify(ids),by]
+          );
+          await client.query(
+            `UPDATE time_entries_shadow SET job_status='Verworfen',offer_changed_at_text=$2,offer_changed_by=$3,shadow_updated_at=now() WHERE offer_id=$1`,
+            [offerId,nowIso,by]
+          );
+          result={ok:true,count:tq.rowCount,trashId};
         }
+      }else if(action==='restoreDiscardedOfferV10'){
+        const trashQ=await client.query(
+          `SELECT trash_id,source_type,entry_ids_json FROM offer_trash_v10
+            WHERE offer_id=$1 AND restored_at IS NULL AND purged_at IS NULL
+            ORDER BY deleted_at DESC LIMIT 1 FOR UPDATE`,[offerId]
+        );
+        if(iq.rowCount&&String(iq.rows[0].status||'')==='Verworfen'){
+          await client.query(
+            `UPDATE inquiry_offers_shadow SET status='Zu erstellen',changed_at_text=$2,changed_by=$3,shadow_updated_at=now() WHERE offer_id=$1`,
+            [offerId,nowIso,by]
+          );
+        }
+        let entryIds=[];
+        if(trashQ.rowCount&&Array.isArray(trashQ.rows[0].entry_ids_json))entryIds=trashQ.rows[0].entry_ids_json.map(String).filter(Boolean);
+        if(entryIds.length){
+          await client.query(
+            `UPDATE time_entries_shadow SET job_status='Angebot zu erstellen',offer_id=$2,
+               offer_changed_at_text=$3,offer_changed_by=$4,shadow_updated_at=now()
+             WHERE id=ANY($1::text[])`,[entryIds,offerId,nowIso,by]
+          );
+        }else if(tq.rowCount){
+          await client.query(
+            `UPDATE time_entries_shadow SET job_status='Angebot zu erstellen',offer_changed_at_text=$2,offer_changed_by=$3,shadow_updated_at=now()
+             WHERE offer_id=$1 AND job_status='Verworfen'`,[offerId,nowIso,by]
+          );
+        }
+        if(!iq.rowCount&&!entryIds.length&&!tq.rowCount)throw new Error('Gelöschtes Angebot wurde nicht gefunden.');
+        await client.query(
+          `UPDATE offer_trash_v10 SET restored_at=now(),restored_by=$2 WHERE offer_id=$1 AND restored_at IS NULL AND purged_at IS NULL`,
+          [offerId,by]
+        );
+        result={ok:true,offerId,status:'Angebot zu erstellen',restored:true};
+      }else if(action==='purgeDiscardedOfferV10'){
+        const trashQ=await client.query(
+          `SELECT trash_id,entry_ids_json FROM offer_trash_v10
+            WHERE offer_id=$1 AND restored_at IS NULL AND purged_at IS NULL
+            ORDER BY deleted_at DESC LIMIT 1 FOR UPDATE`,[offerId]
+        );
+        if(iq.rowCount&&String(iq.rows[0].status||'')==='Verworfen'){
+          await client.query('DELETE FROM inquiry_offers_shadow WHERE offer_id=$1',[offerId]);
+        }
+        let entryIds=[];
+        if(trashQ.rowCount&&Array.isArray(trashQ.rows[0].entry_ids_json))entryIds=trashQ.rows[0].entry_ids_json.map(String).filter(Boolean);
+        if(entryIds.length){
+          await client.query(
+            `UPDATE time_entries_shadow SET offer_id='',offer_changed_at_text='',offer_changed_by='',shadow_updated_at=now()
+             WHERE id=ANY($1::text[]) AND job_status='Verworfen'`,[entryIds]
+          );
+        }else{
+          await client.query(
+            `UPDATE time_entries_shadow SET offer_id='',offer_changed_at_text='',offer_changed_by='',shadow_updated_at=now()
+             WHERE offer_id=$1 AND job_status='Verworfen'`,[offerId]
+          );
+        }
+        await client.query(
+          `UPDATE offer_trash_v10 SET purged_at=now(),purged_by=$2 WHERE offer_id=$1 AND restored_at IS NULL AND purged_at IS NULL`,
+          [offerId,by]
+        );
+        result={ok:true,offerId,purged:true};
       }else{
         const totalHours=Math.round(tq.rows.reduce((s,r)=>s+Number(r.hours||0),0)*100)/100;
         if(!iq.rowCount&&!tq.rowCount)throw new Error('Angebot wurde nicht gefunden.');
