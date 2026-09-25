@@ -1314,7 +1314,7 @@ async function restoreTodayDiscardedOffersOnceV10(){
         SET status='Zu erstellen',changed_at_text=$1,changed_by='System Wiederherstellung',shadow_updated_at=now()
       WHERE status='Verworfen'
         AND ((shadow_updated_at AT TIME ZONE 'Europe/Berlin')::date=$2::date
-             OR left(COALESCE(changed_at_text,''),10)=$2)
+             OR left(COALESCE(changed_at_text,''),10)=$2::text)
       RETURNING offer_id`,
     [new Date().toISOString(),today]
   );
