@@ -10913,7 +10913,6 @@ async function tryDirectPostgresWrite(action,body){
       const description=String(item.description||'').trim();
       const calendarEventId=String(item.calendarEventId||item.sourceCalendarEventId||'').trim();
       const photos=Array.isArray(item.photos)?item.photos:[];
-      if(photos.length>6)throw new Error('Maximal 6 Bilder pro Besichtigung.');
       if(!lastName&&!firstName)throw new Error('Bitte Name oder Vorname eintragen.');
       if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new Error('E-Mail-Adresse ist ungültig.');
       if(postalCode&&!/^\d{5}$/.test(postalCode))throw new Error('PLZ muss fünfstellig sein.');
