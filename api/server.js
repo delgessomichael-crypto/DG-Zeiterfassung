@@ -481,6 +481,38 @@ CREATE TABLE IF NOT EXISTS billing_review_requests_v10 (
 CREATE INDEX IF NOT EXISTS billing_review_requests_v10_status_idx
   ON billing_review_requests_v10(status,updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS reference_projects_v10 (
+  id TEXT PRIMARY KEY,
+  customer_internal TEXT,
+  location TEXT NOT NULL,
+  project_title TEXT NOT NULL,
+  device TEXT,
+  description TEXT,
+  customer_approved BOOLEAN NOT NULL DEFAULT false,
+  publication_status TEXT NOT NULL DEFAULT 'Entwurf',
+  created_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS reference_projects_v10_status_idx
+  ON reference_projects_v10(publication_status,updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS reference_project_images_v10 (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES reference_projects_v10(id) ON DELETE CASCADE,
+  phase TEXT NOT NULL,
+  file_id TEXT NOT NULL,
+  file_name TEXT,
+  mime_type TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS reference_project_images_v10_project_idx
+  ON reference_project_images_v10(project_id,phase,sort_order,created_at);
+
 CREATE TABLE IF NOT EXISTS employee_locations_v10 (
   employee_name TEXT PRIMARY KEY,
   latitude DOUBLE PRECISION NOT NULL,
@@ -10326,6 +10358,44 @@ async function directEmployeeLocationsV10(body){
   return q.rows.map(r=>({employee:String(r.employee_name),latitude:Number(r.latitude),longitude:Number(r.longitude),accuracy:Number(r.accuracy_m||0),capturedAt:new Date(r.captured_at).toISOString(),context:String(r.context||'')}));
 }
 
+async function directReferenceProjectsV10(body){
+  const session=await localSessionForBody(body,true);if(!session)return null;
+  const limit=Math.max(1,Math.min(100,Number(body&&body.limit||50)||50));
+  const pq=await pool.query(
+    `SELECT id,customer_internal,location,project_title,device,description,customer_approved,
+            publication_status,created_by,created_at,updated_by,updated_at
+       FROM reference_projects_v10
+      ORDER BY updated_at DESC
+      LIMIT $1`,[limit]
+  );
+  if(!pq.rowCount)return [];
+  const ids=pq.rows.map(r=>String(r.id||'')).filter(Boolean);
+  const iq=await pool.query(
+    `SELECT id,project_id,phase,file_id,file_name,mime_type,sort_order,created_at
+       FROM reference_project_images_v10
+      WHERE project_id=ANY($1::text[])
+      ORDER BY project_id,phase,sort_order,created_at,id`,[ids]
+  );
+  const byProject=new Map();
+  for(const x of iq.rows){
+    const pid=String(x.project_id||'');
+    if(!byProject.has(pid))byProject.set(pid,[]);
+    byProject.get(pid).push({
+      id:String(x.id||''),phase:String(x.phase||''),fileId:String(x.file_id||''),
+      name:String(x.file_name||''),mime:String(x.mime_type||''),sortOrder:Number(x.sort_order||0),
+      url:localFileUrlV24(String(x.file_id||'')),createdAt:x.created_at?new Date(x.created_at).toISOString():''
+    });
+  }
+  return pq.rows.map(r=>({
+    id:String(r.id||''),customerInternal:String(r.customer_internal||''),location:String(r.location||''),
+    project:String(r.project_title||''),device:String(r.device||''),description:String(r.description||''),
+    customerApproved:Boolean(r.customer_approved),status:String(r.publication_status||'Entwurf'),
+    createdBy:String(r.created_by||''),createdAt:r.created_at?new Date(r.created_at).toISOString():'',
+    updatedBy:String(r.updated_by||''),updatedAt:r.updated_at?new Date(r.updated_at).toISOString():'',
+    images:byProject.get(String(r.id||''))||[]
+  }));
+}
+
 async function directAiAssistantV10(body){
   const session=await localSessionForBody(body,true);if(!session)return null;
   const prompt=String(body&&body.prompt||'').trim();if(!prompt)throw new Error('Bitte eine Frage oder Aufgabe eingeben.');
@@ -10574,6 +10644,7 @@ async function tryDirectPostgresRead(action,body){
   if(action==='createWhatsappReviewTemplateV10')return directWhatsappReviewCreateTemplateV10(body);
   if(action==='deleteWhatsappReviewTemplateV10')return directWhatsappReviewDeleteTemplateV10(body);
   if(action==='getEmployeeLocationsV10')return directEmployeeLocationsV10(body);
+  if(action==='getReferenceProjectsV10')return directReferenceProjectsV10(body);
   if(action==='getAiAssistantV10')return directAiAssistantV10(body);
   if(action==='getGmailStatusV10'){
     const session=await localSessionForBody(body,true);if(!session)return null;
@@ -10706,7 +10777,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','syncHolidays','saveEmployeeAdmin','setEmployeeActive','savePlannerWorker','setPlannerWorkerActive','movePlannerWorker','planRequest3','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','reserveMaintenanceDeviceId','saveMaintenanceCustomer','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','saveAbsence','deleteAbsence','endSicknessAbsence',
   'setRegieObjectJobStatus','markRegieObjectCompleted','markRegieReportBilled','markRegieObjectBilled','markRegieObjectsBilled','updateRegieReport','saveEntry','updateEmployeeEntry','deleteEntry','closeDay','refreshClosedDay','setDayStatus','manualCloseBossDay','updateBossDayEntry','deleteBossDayEntry','confirmEmployeeAssignment','reportEmployeeAssignmentIssue',
-  'savePartnerCategoryV10','savePartnerV10','deactivatePartnerV10','setWhatsappThreadCategoryV10','transferWhatsappThreadV10','saveEmployeeLocationV10','mergeCustomerInquiriesV10','completeManualOrderV10','addRegieAttachments','deleteEmployeeAdmin'
+  'savePartnerCategoryV10','savePartnerV10','deactivatePartnerV10','setWhatsappThreadCategoryV10','transferWhatsappThreadV10','saveEmployeeLocationV10','mergeCustomerInquiriesV10','completeManualOrderV10','addRegieAttachments','deleteEmployeeAdmin','saveReferenceProjectV10'
 ]);
 
 function berlinTodayIso(){
@@ -10897,6 +10968,60 @@ async function tryDirectPostgresWrite(action,body){
         [id,groupId,by]
       );
       result={ok:true,groupId,ids,count:ids.length};skipLegacySync=true;
+    }else if(action==='saveReferenceProjectV10'){
+      const item=body&&body.item||{},files=Array.isArray(body&&body.files)?body.files:[];
+      const id=String(item.id||'').trim()||('REF-'+crypto.randomUUID());
+      const customerInternal=String(item.customerInternal||'').trim().slice(0,240);
+      const location=String(item.location||'').trim().slice(0,160);
+      const projectTitle=String(item.project||item.projectTitle||'').trim().slice(0,240);
+      const device=String(item.device||'').trim().slice(0,240);
+      const description=String(item.description||'').trim().slice(0,5000);
+      const customerApproved=Boolean(item.customerApproved);
+      const publicationStatus=String(item.status||item.publicationStatus||'Entwurf').trim();
+      if(!location)throw new Error('Bitte den Ort der Referenzbaustelle eintragen.');
+      if(!projectTitle)throw new Error('Bitte das Projekt der Referenzbaustelle eintragen.');
+      if(!['Entwurf','Freigegeben'].includes(publicationStatus))throw new Error('Ungültiger Veröffentlichungsstatus.');
+      if(publicationStatus==='Freigegeben'&&!customerApproved)throw new Error('Für eine Veröffentlichung muss die Kundenfreigabe bestätigt sein.');
+      if(files.length>18)throw new Error('Bitte höchstens 18 Bilder pro Speichervorgang hochladen.');
+      const existing=await client.query('SELECT id FROM reference_projects_v10 WHERE id=$1 FOR UPDATE',[id]);
+      if(existing.rowCount){
+        await client.query(
+          `UPDATE reference_projects_v10
+              SET customer_internal=$2,location=$3,project_title=$4,device=$5,description=$6,
+                  customer_approved=$7,publication_status=$8,updated_by=$9,updated_at=now()
+            WHERE id=$1`,
+          [id,customerInternal,location,projectTitle,device,description,customerApproved,publicationStatus,by]
+        );
+      }else{
+        await client.query(
+          `INSERT INTO reference_projects_v10(
+             id,customer_internal,location,project_title,device,description,customer_approved,
+             publication_status,created_by,updated_by
+           ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)`,
+          [id,customerInternal,location,projectTitle,device,description,customerApproved,publicationStatus,by]
+        );
+      }
+      const phaseOrder={Vorher:10,Montage:20,Fertig:30};
+      let added=0;
+      for(const file of files){
+        const phase=String(file&&file.phase||'').trim();
+        if(!['Vorher','Montage','Fertig'].includes(phase))throw new Error('Bildphase ist ungültig.');
+        const stored=await storeBinaryFileV24(client,{
+          dataUrl:String(file&&file.dataUrl||''),name:String(file&&file.name||'Referenzbild'),
+          mime:String(file&&file.type||file&&file.mime||'image/jpeg'),kind:'reference-project',
+          source:'frag-dg',metadata:{projectId:id,phase}
+        });
+        const imageId='REFIMG-'+crypto.randomUUID();
+        const order=Number(file&&file.sortOrder||0)||phaseOrder[phase]||0;
+        await client.query(
+          `INSERT INTO reference_project_images_v10(id,project_id,phase,file_id,file_name,mime_type,sort_order)
+           VALUES($1,$2,$3,$4,$5,$6,$7)`,
+          [imageId,id,phase,stored.id,stored.name,stored.mime,order]
+        );
+        added++;
+      }
+      result={ok:true,id,status:publicationStatus,customerApproved,imagesAdded:added};
+      skipLegacySync=true;
     }else if(action==='completeManualOrderV10'){
       const id=String(body.id||'').trim();if(!id)throw new Error('Auftrag-ID fehlt.');
       const oq=await client.query('SELECT customer,address FROM manual_orders_shadow WHERE id=$1 FOR UPDATE',[id]);
@@ -13778,7 +13903,7 @@ async function proxyLegacy(req, res, body) {
       console.error('Direct planner calendar read failed; retaining legacy fallback:',e.message);
     }
   }
-  if (['ping','systemHealthCheck','getDashboardSummary51','getCustomerInquiries','getInquiryReminders','getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getDeletedOffersV10','searchCustomersV10','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getRegieAttachments','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts','getEmployeeWorkOverviewV10','getPartnerNetworkV10','getWhatsappInboxV10','getWhatsappMediaV10','getEmployeeLocationsV10','getAiAssistantV10','getGmailStatusV10','syncGmailInquiriesV10','getFinanceOverviewV10','syncFinanceGmailV10','getFinanceInboxV10','getTaxAdvisorInboxV10','getFinanceArchiveV10','getMaintenanceAttachment','getMapsBrowserConfig','createRegieReportZip','createRegiePhotoZip','createTaxAdvisorPdf','getBillingReviewTargetV10','sendBillingReviewRequestV10'].includes(action)) {
+  if (['ping','systemHealthCheck','getDashboardSummary51','getCustomerInquiries','getInquiryReminders','getEmployeeAdminData','getBossMonthData','getMonthPayrollAudit','getPayrollCycleState','getOfferReports','getOfferStatistics','getDeletedOffersV10','searchCustomersV10','getManualOrders','getOwnReminders','getOfferReminders','getPlannerWorkers','getPlannerAvailability','getAbsences','getAbsenceOverview','getSicknessAlerts','searchMaintenanceCustomers','getMaintenanceCustomer','getMaintenanceContracts','getMaintenanceOverview','getMaintenanceArchive','findMaintenanceDeviceByInternalId','getObjectInternalNote','getObjectInternalNotes','checkRegieBillingRisk','getObjectReports','getRegieReports','getRegieAttachments','getTimeBankAccount','getMyTimeBank','getBossDayClosures','getMonthData','getDayData','getWeekData','getVacationAccount','getVacationAccounts','getEmployeeWorkOverviewV10','getPartnerNetworkV10','getWhatsappInboxV10','getWhatsappMediaV10','getEmployeeLocationsV10','getReferenceProjectsV10','getAiAssistantV10','getGmailStatusV10','syncGmailInquiriesV10','getFinanceOverviewV10','syncFinanceGmailV10','getFinanceInboxV10','getTaxAdvisorInboxV10','getFinanceArchiveV10','getMaintenanceAttachment','getMapsBrowserConfig','createRegieReportZip','createRegiePhotoZip','createTaxAdvisorPdf','getBillingReviewTargetV10','sendBillingReviewRequestV10'].includes(action)) {
     try {
       const direct=await tryDirectPostgresRead(action,body);
       if (direct!==null) {
