@@ -1,11 +1,11 @@
 /* DG Zeiterfassung 10.0 - Railway migration cache */
-const CACHE='dg-zeiterfassung-10.0-stable-runtime-20260925-camera-count';
+const CACHE='dg-zeiterfassung-10.0-stable-runtime-20260925-ui-mail-camera';
 const STATIC=[
   './index.html',
   './app-5.0.css',
   './core-9.0-final.js',
   './employee-controls-10.0.js',
-  './inspection-quick-10.0.js',
+  './inspection-quick-10.0.js',\n  './button-customize-10.0.js',
   './day-total-display-10.0.js',
   './customerflow-9.0-final.js',
   './payroll-9.0-final.js',
