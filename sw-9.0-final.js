@@ -1,5 +1,5 @@
 /* DG Zeiterfassung 10.0 - Railway migration cache */
-const CACHE='dg-zeiterfassung-10.0-stable-runtime-20260925-office-compact4';
+const CACHE='dg-zeiterfassung-10.0-stable-runtime-20260925-fragdg-visible1';
 const STATIC=[
   './index.html',
   './app-5.0.css',
@@ -9,7 +9,7 @@ const STATIC=[
   './button-customize-10.0.js',
   './offer-trash-search-10.0.js',
   './office-compact-10.0.js',
-  './day-total-display-10.0.js',
+  './day-total-display-10.0.js',\n  './frag-dg-10.0.js',
   './customerflow-9.0-final.js',
   './payroll-9.0-final.js',
   './ui-9.0-final.js',
