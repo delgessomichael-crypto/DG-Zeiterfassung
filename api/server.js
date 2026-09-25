@@ -10399,7 +10399,7 @@ async function directReferenceProjectsV10(body){
 async function directAiAssistantV10(body){
   const session=await localSessionForBody(body,true);if(!session)return null;
   const prompt=String(body&&body.prompt||'').trim();if(!prompt)throw new Error('Bitte eine Frage oder Aufgabe eingeben.');
-  const apiKey=String(process.env.OPENAI_API_KEY||'').trim(),model=String(process.env.OPENAI_MODEL||'').trim();
+  const apiKey=String(process.env.OPENAI_API_KEY||'').trim(),model=String(process.env.OPENAI_MODEL||'gpt-5.6-terra').trim();
   if(!apiKey||!model)return {configured:false,text:'KI-Integration ist vorbereitet. Für die Aktivierung fehlen noch OPENAI_API_KEY und/oder OPENAI_MODEL auf Railway.'};
   const inq=await pool.query("SELECT customer,source,subject,description,status,received_at_text FROM customer_inquiries_shadow WHERE COALESCE(status,'Offen') NOT IN ('Archiviert','Gelöscht') ORDER BY received_at_text DESC NULLS LAST LIMIT 25");
   const orders=await pool.query("SELECT customer,address,description,status,changed_at_text FROM manual_orders_shadow WHERE COALESCE(status,'') NOT IN ('Abgeschlossen','Abgerechnet') ORDER BY changed_at_text DESC NULLS LAST LIMIT 25");
