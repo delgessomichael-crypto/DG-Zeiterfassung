@@ -2,7 +2,7 @@
 (function(){
 'use strict';
 
-const VERSION='20260925-2018-frag-dg2';
+const VERSION='20260925-2028-frag-dg3';
 const q=id=>document.getElementById(id);
 const S=window.DG10_FRAG_DG=window.DG10_FRAG_DG||{busy:false,refs:[],observer:null,timer:null};
 
@@ -252,9 +252,12 @@ function install(){
   sync();
   if(!S.observer){
     S.observer=new MutationObserver(schedule);
-    S.observer.observe(document.body,{subtree:true,childList:true});
+    S.observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class']});
   }
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)schedule();});
+  document.addEventListener('click',e=>{if(e.target&&e.target.closest&&e.target.closest('#bossTab'))setTimeout(schedule,0);},true);
+  window.addEventListener('focus',schedule);
+  window.addEventListener('pageshow',schedule);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
