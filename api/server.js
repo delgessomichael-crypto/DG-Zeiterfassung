@@ -10410,7 +10410,13 @@ async function directAiAssistantV10(body){
     {role:'user',content:[{type:'input_text',text:'App-Kontext:\\n'+JSON.stringify(context)+'\\n\\nAufgabe:\\n'+prompt}]}
   ]})});
   const raw=await upstream.text();let data=null;try{data=JSON.parse(raw)}catch(_e){}
-  if(!upstream.ok)throw new Error('KI-Dienst meldet HTTP '+upstream.status+(data&&data.error&&data.error.message?': '+data.error.message:''));
+  if(!upstream.ok){
+    const msg=String(data&&data.error&&data.error.message||'').trim();
+    if(upstream.status===429&&/no credits remaining|credit_balance_exhausted|billing|quota/i.test(msg)){
+      return {configured:true,billingRequired:true,text:'OpenAI API-Guthaben ist aufgebraucht. Bitte in der OpenAI API-Abrechnung Credits hinzufügen; danach Frag DG erneut verwenden.'};
+    }
+    throw new Error('KI-Dienst meldet HTTP '+upstream.status+(msg?': '+msg:''));
+  }
   let out=String(data&&data.output_text||'');if(!out&&data&&Array.isArray(data.output))for(const item of data.output||[])for(const c of item.content||[])if(c&&c.text)out+=String(c.text);
   return {configured:true,text:out.trim()||'Keine Antwort erhalten.'};
 }
