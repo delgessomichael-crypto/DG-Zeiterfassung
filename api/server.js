@@ -9011,7 +9011,7 @@ async function postgresOfferReportsNative(body){
     ),
     pool.query(
       `SELECT offer_id,inquiry_id,customer,phone,email,description,source,created_at_text,status,
-              changed_at_text,changed_by FROM inquiry_offers_shadow`
+              changed_at_text,changed_by,attachments_json FROM inquiry_offers_shadow`
     )
   ]);
   const groups=new Map();
@@ -9057,6 +9057,7 @@ async function postgresOfferReportsNative(body){
       offerId:String(r.offer_id||''),inquiryId:String(r.inquiry_id||''),customer:String(r.customer||''),
       phone:String(r.phone||''),email:String(r.email||''),description:String(r.description||''),
       source:String(r.source||''),
+      attachments:(()=>{try{const a=JSON.parse(String(r.attachments_json||'[]'));return Array.isArray(a)?a:[];}catch(_e){return [];}})(),
       status:st==='Angenommen'?'Angebot Angenommen':st==='Abgelehnt'?'Angebot Abgelehnt':
         st==='Zu erstellen'?'Angebot zu erstellen':'Offenes Angebot',
       totalHours:0,reportCount:0,employees:[],reports:[],firstDate:d,lastDate:d,
@@ -9107,6 +9108,7 @@ function canonicalOfferReportsNative(rows){
     const y=JSON.parse(JSON.stringify(x||{}));
     if(Array.isArray(y.employees))y.employees=y.employees.map(String).sort((a,b)=>a.localeCompare(b,'de'));
     if(Array.isArray(y.reports))y.reports.sort((a,b)=>String(a.id||'').localeCompare(String(b.id||''))||String(a.date||'').localeCompare(String(b.date||'')));
+    delete y.attachments;
     return y;
   }).sort((a,b)=>String(a.offerId||'').localeCompare(String(b.offerId||''))||String(a.firstDate||'').localeCompare(String(b.firstDate||'')));
 }
