@@ -3548,7 +3548,7 @@ setTimeout(applyVersion10,3200);
 })();
 
 
-/* DG App 10 - Rechnungswesen / Gmail workflow */
+/* DG App 10 - Rechnungswesen / E-Mail workflow */
 (function(){
 'use strict';
 const V='20260925-1444-finance-spam-move6';
@@ -3597,7 +3597,7 @@ function filterHtml(key){return '<div class="dg10-account-filter"><div><label>Ja
 function ensureCards(){
  const r=boss();if(!r)return;
  const specs=[
- ['dg10InvoiceIncoming','Allgemeiner Rechnungseingang','<h2>Allgemeiner Rechnungseingang</h2><div class="muted small">Alle erkannten Eingangsrechnungen aus Gmail – ausgenommen Nachrichten von Frau Busse.</div><div class="dg10-fin-toolbar"><button class="btn secondary" data-dg10-sync="incoming">Jetzt synchronisieren</button></div><div id="dg10IncomingStatus" class="dg10-fin-status"></div><div id="dg10IncomingList" class="dg10-fin-list"></div>'],
+ ['dg10InvoiceIncoming','Allgemeiner Rechnungseingang','<h2>Allgemeiner Rechnungseingang</h2><div class="muted small">Alle erkannten Eingangsrechnungen aus Gmail und IONOS – ausgenommen Nachrichten von Frau Busse.</div><div class="dg10-fin-toolbar"><button class="btn secondary" data-dg10-sync="incoming">Jetzt synchronisieren</button></div><div id="dg10IncomingStatus" class="dg10-fin-status"></div><div id="dg10IncomingList" class="dg10-fin-list"></div>'],
  ['dg10TaxAdvisor','Steuerberater – Frau Busse','<h2>Steuerberater – Frau Busse</h2><div class="muted small">Ausschließlich Nachrichten von kontakt@buchhaltung-busse.de.</div><div class="dg10-fin-toolbar"><button class="btn secondary" data-dg10-sync="tax">Jetzt synchronisieren</button></div><div id="dg10TaxStatus" class="dg10-fin-status"></div><div id="dg10TaxList" class="dg10-fin-list"></div>'],
  ['dg10FinanceArchive','Rechnungsarchiv','<h2>Rechnungsarchiv</h2><div class="muted small">Archiv immer nach Monat und Jahr.</div><div class="dg10-account-archive-menu"><button data-dg10-archive="created">Erstellte Rechnungen</button><button data-dg10-archive="paid">Bezahlte Rechnungen</button><button data-dg10-archive="tax">Steuerberater</button></div>'],
  ['dg10ArchiveCreated','Erstellte Rechnungen','<button class="btn secondary dg10-account-back" data-back>← Rechnungsarchiv</button><h2>Erstellte Rechnungen</h2>'+filterHtml('created')+'<div id="dg10ArchiveCreatedList" class="dg10-fin-list"></div>'],
@@ -3631,7 +3631,7 @@ function moveOptions(kind){
 }
 function mailHtml(x,kind){
  const files=financeFilesHtml(x.attachments),mid=esc(x.messageId);
- let actions='<a class="btn secondary" target="_blank" rel="noopener" href="'+esc(x.gmailUrl||'#')+'">In Gmail öffnen</a>';
+ let actions=x.gmailUrl?'<a class="btn secondary" target="_blank" rel="noopener" href="'+esc(x.gmailUrl)+'">In Gmail öffnen</a>':'<span class="muted small">IONOS-Postfach</span>';
  if(kind==='incoming')actions+='<button class="btn success" data-paid="'+mid+'">Als bezahlt markieren</button>';
  if(kind==='tax')actions+='<button class="btn success" data-tax-invoice="'+mid+'">Als Rechnung markieren</button><button class="btn secondary" data-tax-archive="'+mid+'">Archivieren</button>';
  actions+='<button class="btn danger" data-fin-spam="'+mid+'">Spam</button><button class="btn danger" data-fin-delete="'+mid+'">Löschen</button>';
@@ -3647,7 +3647,7 @@ async function handleSync(area){
  if(state.syncing)return false;
  state.syncing=true;
  const target=area==='tax'?q('dg10TaxStatus'):q('dg10IncomingStatus');
- if(target)target.innerHTML='<div class="status info">Gmail wird synchronisiert …</div>';
+ if(target)target.innerHTML='<div class="status info">E-Mail-Postfächer werden synchronisiert …</div>';
  try{
    const r=await req({action:'syncFinanceGmailV10'});
    state.reconnectUrl=(r&&(r.needsReconnect||r.needsConnect)&&r.authUrl)?String(r.authUrl):'';
@@ -3703,7 +3703,7 @@ async function loadArchive(kind){
  const host=q(kind==='paid'?'dg10ArchivePaidList':'dg10ArchiveTaxList');if(!host)return;
  try{
    const rows=await req({action:'getFinanceArchiveV10',kind,year:y,month:m});
-   host.innerHTML=(rows||[]).map(x=>'<div class="dg10-fin-mail"><div class="dg10-fin-subject">'+esc(x.subject||'(ohne Betreff)')+'</div><div class="dg10-fin-meta">'+esc(x.senderName||x.senderEmail||'')+' · '+esc(kind==='paid'?'Bezahlt: '+de(x.paidAt):'Archiviert: '+de(x.archivedAt))+'</div>'+(financeFilesHtml(x.attachments)?'<div class="dg10-fin-files"><div class="muted small" style="margin:8px 0 6px"><strong>Anhänge</strong></div><div class="dg10-fin-actions">'+financeFilesHtml(x.attachments)+'</div></div>':'')+'<div class="dg10-fin-actions"><a class="btn secondary" target="_blank" rel="noopener" href="'+esc(x.gmailUrl||'#')+'">In Gmail öffnen</a><button class="btn danger" data-fin-delete="'+esc(x.messageId)+'">Löschen</button></div></div>').join('')||'<div class="status ok">Keine Einträge in '+MONTHS[m-1]+' '+y+'.</div>';
+   host.innerHTML=(rows||[]).map(x=>'<div class="dg10-fin-mail"><div class="dg10-fin-subject">'+esc(x.subject||'(ohne Betreff)')+'</div><div class="dg10-fin-meta">'+esc(x.senderName||x.senderEmail||'')+' · '+esc(kind==='paid'?'Bezahlt: '+de(x.paidAt):'Archiviert: '+de(x.archivedAt))+'</div>'+(financeFilesHtml(x.attachments)?'<div class="dg10-fin-files"><div class="muted small" style="margin:8px 0 6px"><strong>Anhänge</strong></div><div class="dg10-fin-actions">'+financeFilesHtml(x.attachments)+'</div></div>':'')+'<div class="dg10-fin-actions">'+(x.gmailUrl?'<a class="btn secondary" target="_blank" rel="noopener" href="'+esc(x.gmailUrl)+'">In Gmail öffnen</a>':'<span class="muted small">IONOS-Postfach</span>')+'<button class="btn danger" data-fin-delete="'+esc(x.messageId)+'">Löschen</button></div></div>').join('')||'<div class="status ok">Keine Einträge in '+MONTHS[m-1]+' '+y+'.</div>';
  }catch(e){host.innerHTML='<div class="status error">'+esc(e.message)+'</div>';}
 }
 function openArchive(kind){
