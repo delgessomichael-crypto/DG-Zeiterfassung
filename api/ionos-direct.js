@@ -423,6 +423,20 @@ function createIonosDirect(opts){
     return {inquiryId,updated,duplicate,imported:!existing};
   }
 
+  async function updateInquiryMailRef(inquiryId, mailId, patch){
+    const q=await pool.query('SELECT mail_refs_json FROM customer_inquiries_shadow WHERE id=$1 LIMIT 1',[String(inquiryId||'')]);
+    if(!q.rowCount)return;
+    const refs=parseJsonList(q.rows[0].mail_refs_json);
+    let changed=false;
+    for(const r of refs){
+      if(String(r&&r.provider||'')==='ionos'&&String(r&&r.messageId||'')===String(mailId||'')){
+        Object.assign(r,patch||{});changed=true;
+      }
+    }
+    if(changed)await pool.query('UPDATE customer_inquiries_shadow SET mail_refs_json=$2,shadow_updated_at=now() WHERE id=$1',
+      [String(inquiryId||''),JSON.stringify(refs)]);
+  }
+
   async function importFinance(parsed, meta, kind, mailbox, uid){
     const from=mailAddress(parsed,'from'),subject=String(parsed.subject||''),dupe=await crossFinanceDuplicate(from.email,subject,meta.receivedAt);
     if(dupe)return {duplicate:true,financeMessageId:dupe};
@@ -475,20 +489,31 @@ function createIonosDirect(opts){
               const kind=financeKind(parsed);
               if(kind){
                 const dest=kind==='tax'?folders.tax:folders.finance;
-                const moved=await moveInOpenMailbox(c,uid,dest);
-                const fin=await importFinance(parsed,meta,kind,moved.mailbox,moved.uid||0);
+                // Zuerst sicher in PostgreSQL speichern, erst danach aus dem IONOS-Posteingang verschieben.
+                // So geht bei einem DB-Fehler keine Mail aus dem produktiven Eingang verloren.
+                const fin=await importFinance(parsed,meta,kind,'INBOX',uid);
                 if(fin.duplicate)summary.financeDuplicates++;
                 else if(kind==='tax')summary.tax++;else summary.financeImported++;
+                try{
+                  const moved=await moveInOpenMailbox(c,uid,dest);
+                  if(!fin.duplicate){
+                    await pool.query("UPDATE finance_mail_v10 SET provider_mailbox=$2,provider_uid=$3,updated_at=now() WHERE message_id=$1 AND provider='ionos'",
+                      [fin.financeMessageId,moved.mailbox,Number(moved.uid||0)]);
+                  }
+                }catch(e){summary.moveFailed++;throw e;}
                 await saveTracking(providerRef,{...meta,financeMessageId:fin.financeMessageId,classification:kind});
                 continue;
               }
               const rec=await parseInquiry(parsed);
               if(rec){
-                const moved=await moveInOpenMailbox(c,uid,folders.archive);
-                const refObj={provider:'ionos',messageId:mailId,mailbox:moved.mailbox,uid:moved.uid||0,rfcMessageId:meta.rfcMessageId};
+                const refObj={provider:'ionos',messageId:mailId,mailbox:'INBOX',uid,rfcMessageId:meta.rfcMessageId};
                 const x=await importInquiry(parsed,meta,rec,refObj);
                 if(x.duplicate)summary.inquiryDuplicates++;else if(x.updated)summary.inquiryUpdated++;else if(x.imported)summary.inquiryImported++;
-                summary.archived++;
+                try{
+                  const moved=await moveInOpenMailbox(c,uid,folders.archive);
+                  await updateInquiryMailRef(x.inquiryId,mailId,{mailbox:moved.mailbox,uid:Number(moved.uid||0)});
+                  summary.archived++;
+                }catch(e){summary.moveFailed++;throw e;}
                 await saveTracking(providerRef,{...meta,inquiryId:x.inquiryId,classification:'inquiry'});
                 continue;
               }
