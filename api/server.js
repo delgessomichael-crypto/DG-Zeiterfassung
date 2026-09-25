@@ -10910,6 +10910,8 @@ async function tryDirectPostgresWrite(action,body){
       const landline=String(item.landline||item.phone||'').trim();
       const description=String(item.description||'').trim();
       const calendarEventId=String(item.calendarEventId||item.sourceCalendarEventId||'').trim();
+      const photos=Array.isArray(item.photos)?item.photos:[];
+      if(photos.length>6)throw new Error('Maximal 6 Bilder pro Besichtigung.');
       if(!lastName&&!firstName)throw new Error('Bitte Name oder Vorname eintragen.');
       if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new Error('E-Mail-Adresse ist ungültig.');
       if(postalCode&&!/^\d{5}$/.test(postalCode))throw new Error('PLZ muss fünfstellig sein.');
@@ -10925,18 +10927,28 @@ async function tryDirectPostgresWrite(action,body){
         email?'E-Mail: '+email:''
       ].filter(Boolean).join('\n');
       const offerId=String(body.offerId||'').trim()||('BES-MA-'+crypto.randomUUID());
+      const photoFiles=[];
+      for(let pi=0;pi<photos.length;pi++){
+        const p=photos[pi]||{},dataUrl=String(p.dataUrl||'').trim();
+        if(!dataUrl)continue;
+        const stored=await storeBinaryFileV24(client,{dataUrl,name:String(p.name||('Besichtigungsbild_'+String(pi+1).padStart(2,'0')+'.jpg')),kind:'inspection-photo',source:'railway',metadata:{offerId,customer,calendarEventId,employee:by}});
+        photoFiles.push(stored);
+      }
+      const attachments=photoFiles.map(x=>({fileId:x.id,name:x.name,mime:x.mime,size:x.size,url:x.url,source:'Railway',kind:'inspection-photo'}));
       await client.query(
         `INSERT INTO inquiry_offers_shadow(
            offer_id,inquiry_id,customer,phone,email,description,source,created_at_text,status,
-           changed_at_text,changed_by,calendar_event_id,inspection_date,inspection_hours,activity_note,shadow_updated_at
-         ) VALUES($1,'',$2,$3,$4,$5,'Besichtigung Mitarbeiter',$6,'Zu erstellen',$6,$7,$8,$9,0,$10,now())
+           changed_at_text,changed_by,calendar_event_id,inspection_date,inspection_hours,activity_note,attachments_json,shadow_updated_at
+         ) VALUES($1,'',$2,$3,$4,$5,'Besichtigung Mitarbeiter',$6,'Zu erstellen',$6,$7,$8,$9,0,$10,$11,now())
          ON CONFLICT(offer_id) DO UPDATE SET
            customer=EXCLUDED.customer,phone=EXCLUDED.phone,email=EXCLUDED.email,
            description=EXCLUDED.description,source=EXCLUDED.source,status='Zu erstellen',
            changed_at_text=EXCLUDED.changed_at_text,changed_by=EXCLUDED.changed_by,
            calendar_event_id=EXCLUDED.calendar_event_id,inspection_date=EXCLUDED.inspection_date,
-           activity_note=EXCLUDED.activity_note,shadow_updated_at=now()`,
-        [offerId,customer,phone,email,details,nowIso,by,calendarEventId,berlinTodayIso(),description]
+           activity_note=EXCLUDED.activity_note,
+           attachments_json=CASE WHEN EXCLUDED.attachments_json<>'[]' THEN EXCLUDED.attachments_json ELSE inquiry_offers_shadow.attachments_json END,
+           shadow_updated_at=now()`,
+        [offerId,customer,phone,email,details,nowIso,by,calendarEventId,berlinTodayIso(),description,JSON.stringify(attachments)]
       );
       let timeEntryId='',timeDayData=null;
       if(Boolean(item.captureTime)){
@@ -10961,10 +10973,11 @@ async function tryDirectPostgresWrite(action,body){
              billing_status,billed_at_text,billed_by,object_id,job_status,is_supplement,supplement_created_at_text,
              offer_id,offer_changed_at_text,offer_changed_by,maintenance,next_maintenance_due,maintenance_customer_id,
              maintenance_object_id,maintenance_device_id,source_payload,shadow_updated_at
-           ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'',$9,$10,false,'','','',0,'','',false,'','',$11,
-                    'Offen','','','',$12,$13,$14,$15,$9,$2,false,'','','','',$16::jsonb,now())`,
+           ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'',$9,$10,false,'','','',$11,$12,$13,false,'','',$14,
+                    'Offen','','','',$15,$16,$17,$18,$9,$2,false,'','','','',$19::jsonb,now())`,
           [timeEntryId,by,date,customer,start,end,hours,
-           'Besichtigungstermin · '+description,nowIso,isSupplement,calendarEventId,
+           'Besichtigungstermin · '+description,nowIso,isSupplement,
+           photoFiles.length,photoFiles.map(x=>x.id).join(','),photoFiles.map(x=>x.url).join(' | '),calendarEventId,
            'Angebot zu erstellen',isSupplement,isSupplement?nowIso:'',offerId,
            JSON.stringify({source:'createEmployeeInspectionRequestV10',offerId,captureTime:true})]
         );
@@ -10978,6 +10991,7 @@ async function tryDirectPostgresWrite(action,body){
       result={
         ok:true,offerId,status:'Zu erstellen',customer,firstName,lastName,street,postalCode,city,
         email,mobile,landline,description,calendarEventId,createdAt:nowIso,createdBy:by,
+        attachments,photoCount:attachments.length,
         timeEntryId,timeCaptured:Boolean(timeEntryId),dayData:timeDayData
       };
       if(calendarEventId)calendarAfterCommit={operation:'employee-delete',employee:by,eventId:calendarEventId};
