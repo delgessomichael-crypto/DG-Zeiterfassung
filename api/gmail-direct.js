@@ -731,6 +731,126 @@ function createGmailDirect(opts){
     return {ok:true,messageId,deleted:true,trashedInGmail:true,deletedFiles:fileIds.length};
   }
 
+  async function markSpam(messageId,actor){
+    messageId=String(messageId||'').trim();if(!messageId)throw new Error('E-Mail fehlt.');
+    const q=await pool.query('SELECT attachments_json FROM finance_mail_v10 WHERE message_id=$1 LIMIT 1',[messageId]);
+    if(!q.rowCount)throw new Error('E-Mail wurde in der App nicht gefunden.');
+    const oauth=await row();
+    if(!oauth||!hasModifyScope(oauth)){
+      const e=new Error('Google-Freigabe zum Markieren als Spam fehlt. Bitte Gmail-Verbindung aktualisieren.');
+      e.needsReconnect=true;throw e;
+    }
+    const token=await accessToken();
+    await apiJson(token,'POST','messages/'+encodeURIComponent(messageId)+'/modify',{addLabelIds:['SPAM'],removeLabelIds:['INBOX']});
+
+    let attachments=[];try{attachments=JSON.parse(String(q.rows[0].attachments_json||'[]'));if(!Array.isArray(attachments))attachments=[];}catch(_e){attachments=[];}
+    const fileIds=[...new Set(attachments.map(x=>String(x&&x.fileId||'').trim()).filter(Boolean))];
+    const client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      await client.query('DELETE FROM finance_mail_v10 WHERE message_id=$1',[messageId]);
+      if(fileIds.length)await client.query("DELETE FROM binary_files_v10 WHERE id=ANY($1::text[]) AND source='gmail-finance'",[fileIds]);
+      await client.query(
+        `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+         ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
+        ['finance_last_action_v10',JSON.stringify({action:'spam',messageId,actor:String(actor||''),fileIds,at:new Date().toISOString()})]
+      );
+      await client.query('COMMIT');
+    }catch(e){try{await client.query('ROLLBACK');}catch(_e){}throw e;}finally{client.release();}
+    return {ok:true,messageId,spam:true,removedFromApp:true,deletedFiles:fileIds.length};
+  }
+
+  async function moveFinanceMail(messageId,target,actor){
+    messageId=String(messageId||'').trim();target=String(target||'').trim();
+    if(!messageId)throw new Error('E-Mail fehlt.');
+    if(!['inquiries','incoming','tax'].includes(target))throw new Error('Ungültiger Zielordner.');
+    const q=await pool.query('SELECT * FROM finance_mail_v10 WHERE message_id=$1 LIMIT 1',[messageId]);
+    if(!q.rowCount)throw new Error('E-Mail wurde in der App nicht gefunden.');
+    const current=q.rows[0],oauth=await row();
+    if(!oauth||!hasModifyScope(oauth)){
+      const e=new Error('Google-Freigabe zum Verschieben fehlt. Bitte Gmail-Verbindung aktualisieren.');
+      e.needsReconnect=true;throw e;
+    }
+    const token=await accessToken();
+    const msg=await api(token,'messages/'+encodeURIComponent(messageId)+'?format=full');
+
+    if(target==='inquiries'){
+      const rec=await parseInquiry(msg);
+      const h=headers(msg.payload||{}),received=new Date(Number(msg.internalDate)||Date.now()).toISOString();
+      const att=await persistInquiryAttachments(token,msg);
+      let inquiryId='',source='E-Mail direkt';
+      if(rec){
+        source=rec.source||source;
+        const existing=await findMergeTarget(rec);
+        if(existing){
+          inquiryId=String(existing.id||'');
+          const ids=[...new Set(String(existing.gmail_ids||'').split('|').filter(Boolean).concat(messageId))].join('|');
+          let desc=String(existing.description||'');if(rec.description&&!desc.includes(rec.description))desc=[desc,rec.description].filter(Boolean).join(' / ').slice(0,8000);
+          const merged=mergeAttachments(existing.attachments_json,att);
+          await pool.query(
+            `UPDATE customer_inquiries_shadow SET gmail_ids=$2,
+              email=CASE WHEN COALESCE(email,'')='' THEN $3 ELSE email END,
+              phone=CASE WHEN COALESCE(phone,'')='' THEN $4 ELSE phone END,
+              postal_code=CASE WHEN COALESCE(postal_code,'')='' THEN $5 ELSE postal_code END,
+              city=CASE WHEN COALESCE(city,'')='' THEN $6 ELSE city END,
+              description=$7,attachments_json=$8,changed_at_text=$9,changed_by=$10,shadow_updated_at=now()
+              WHERE id=$1`,
+            [inquiryId,ids,rec.email||'',rec.phone||'',rec.postalCode||'',rec.city||'',desc,JSON.stringify(merged),received,String(actor||'')]
+          );
+        }else{
+          inquiryId='GM-INQ-'+crypto.randomUUID();
+          await pool.query(
+            `INSERT INTO customer_inquiries_shadow(
+              id,source,gmail_ids,customer,email,phone,postal_code,city,subject,description,received_at_text,status,read_flag,
+              created_at_text,changed_at_text,changed_by,attachments_json,external_url,phone_url,dropbox_url,aqon_appointment_url,aqon_details,shadow_updated_at
+            ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'Neu',false,$11,$11,$12,$13,$14,$15,$16,$17,$18,now())`,
+            [inquiryId,rec.source||source,messageId,rec.customer||current.sender_name||current.sender_email||'E-Mail',rec.email||current.sender_email||'',
+             rec.phone||'',rec.postalCode||'',rec.city||'',rec.subject||current.subject||'',rec.description||current.subject||'',received,
+             String(actor||''),JSON.stringify(att),rec.externalUrl||'',rec.phoneUrl||'',rec.dropboxUrl||'',rec.aqonAppointmentUrl||'',rec.aqonDetails||'']
+          );
+        }
+      }else{
+        inquiryId='GM-INQ-'+crypto.randomUUID();
+        const h2=headers(msg.payload||{}),from=sender(h2.from),text=bodyText(msg.payload||{}).slice(0,5000);
+        await pool.query(
+          `INSERT INTO customer_inquiries_shadow(
+            id,source,gmail_ids,customer,email,phone,postal_code,city,subject,description,received_at_text,status,read_flag,
+            created_at_text,changed_at_text,changed_by,attachments_json,shadow_updated_at
+          ) VALUES($1,'E-Mail direkt',$2,$3,$4,'','','',$5,$6,$7,'Neu',false,$7,$7,$8,$9,now())`,
+          [inquiryId,messageId,String(from.name||from.email||'E-Mail'),String(from.email||''),String(h2.subject||current.subject||''),text||String(current.subject||''),received,String(actor||''),JSON.stringify(att)]
+        );
+      }
+      await pool.query(
+        `INSERT INTO gmail_import_messages_v10(message_id,thread_id,inquiry_id,sender,subject,received_at_text)
+         VALUES($1,$2,$3,$4,$5,$6)
+         ON CONFLICT(message_id) DO UPDATE SET inquiry_id=EXCLUDED.inquiry_id,thread_id=EXCLUDED.thread_id,sender=EXCLUDED.sender,subject=EXCLUDED.subject,received_at_text=EXCLUDED.received_at_text`,
+        [messageId,String(msg.threadId||''),inquiryId,String(h.from||''),String(h.subject||current.subject||''),received]
+      );
+      await apiJson(token,'POST','messages/'+encodeURIComponent(messageId)+'/modify',{removeLabelIds:['INBOX']});
+      await pool.query('DELETE FROM finance_mail_v10 WHERE message_id=$1',[messageId]);
+      return {ok:true,messageId,target,inquiryId,source};
+    }
+
+    const category=target==='tax'?'tax':'incoming';
+    const label=target==='tax'?TAX_LABEL:FINANCE_LABEL;
+    const labelId=await ensureLabel(token,label);
+    const removeLabels=['INBOX'];
+    if(target==='incoming'){const taxId=await ensureLabel(token,TAX_LABEL);if(taxId)removeLabels.push(taxId);}
+    else {const finId=await ensureLabel(token,FINANCE_LABEL);if(finId)removeLabels.push(finId);}
+    await apiJson(token,'POST','messages/'+encodeURIComponent(messageId)+'/modify',{addLabelIds:[labelId],removeLabelIds:[...new Set(removeLabels)]});
+    await pool.query(
+      `UPDATE finance_mail_v10 SET category=$2,status='open',gmail_label=$3,paid_at_text=NULL,archived_at_text=NULL,updated_at=now() WHERE message_id=$1`,
+      [messageId,category,label]
+    );
+    await pool.query(
+      `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+       ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
+      ['finance_last_action_v10',JSON.stringify({action:'move_mail',messageId,target,actor:String(actor||''),at:new Date().toISOString()})]
+    );
+    return {ok:true,messageId,target};
+  }
+
+
   async function archiveInquiryMessages(inquiryId,actor){
     inquiryId=String(inquiryId||'').trim();if(!inquiryId)return {ok:true,archived:0,messageIds:[]};
     const q=await pool.query('SELECT gmail_ids FROM customer_inquiries_shadow WHERE id=$1 LIMIT 1',[inquiryId]);
@@ -850,7 +970,7 @@ function createGmailDirect(opts){
     setTimeout(()=>scheduledSync().catch(e=>console.error('GMAIL startup sync failed',e.message)),15000);
   }
 
-  return {init,start,status,syncForUser,financeSyncForUser,financeList,financeOverview,financeArchive,markPaid,archiveTax,deleteFinanceMail,archiveInquiryMessages,callback,authUrl,configured,calendarApi,googleConnection,accessToken};
+  return {init,start,status,syncForUser,financeSyncForUser,financeList,financeOverview,financeArchive,markPaid,archiveTax,deleteFinanceMail,markSpam,moveFinanceMail,archiveInquiryMessages,callback,authUrl,configured,calendarApi,googleConnection,accessToken};
 }
 
 module.exports={createGmailDirect};
