@@ -282,6 +282,26 @@ ALTER TABLE inquiry_offers_shadow ADD COLUMN IF NOT EXISTS inspection_hours NUME
 ALTER TABLE inquiry_offers_shadow ADD COLUMN IF NOT EXISTS activity_note TEXT;
 ALTER TABLE inquiry_offers_shadow ADD COLUMN IF NOT EXISTS attachments_json TEXT;
 
+CREATE TABLE IF NOT EXISTS offer_trash_v10 (
+  trash_id TEXT PRIMARY KEY,
+  offer_id TEXT NOT NULL,
+  customer TEXT,
+  description TEXT,
+  source_type TEXT,
+  previous_status TEXT,
+  entry_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  deleted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_by TEXT,
+  restored_at TIMESTAMPTZ,
+  restored_by TEXT,
+  purged_at TIMESTAMPTZ,
+  purged_by TEXT
+);
+CREATE INDEX IF NOT EXISTS offer_trash_v10_active_idx
+  ON offer_trash_v10(restored_at,purged_at,deleted_at DESC);
+CREATE INDEX IF NOT EXISTS offer_trash_v10_offer_idx
+  ON offer_trash_v10(offer_id,deleted_at DESC);
+
 CREATE TABLE IF NOT EXISTS offer_reminders_shadow (
   id TEXT PRIMARY KEY,
   offer_id TEXT,
@@ -1477,6 +1497,8 @@ const CACHEABLE_ACTIONS = new Set([
   'getOfferStatistics',
   'getOwnReminders',
   'getOfferReports',
+  'getDeletedOffersV10',
+  'searchCustomersV10',
   'getOfferReminders',
   'getInquiryReminders',
   'getCustomerInquiries',
@@ -10482,7 +10504,7 @@ function directMinimumWageRead(body){
 
 const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'createOwnReminder','saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder',
-  'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus','saveOfferCreatedWithReminder','createInspectionOffer','createEmployeeInspectionRequestV10',
+  'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','restoreDiscardedOfferV10','purgeDiscardedOfferV10','setRegieReportsOfferStatus','saveOfferCreatedWithReminder','createInspectionOffer','createEmployeeInspectionRequestV10',
   'mergeRegieObjects','saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed','setMonthClosureStatus','setPayrollMonthStatus','completePayrollCycle','forceCompletePayrollCycle',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'markFinancePaidV10','markTaxMailAsInvoiceV10','archiveTaxAdvisorMailV10','deleteFinanceMailV10','markFinanceSpamV10','moveFinanceMailV10',
