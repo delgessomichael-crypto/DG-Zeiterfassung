@@ -2,14 +2,16 @@
 (function(){
 'use strict';
 
-const VERSION='20260925-2055-frag-dg1';
+const VERSION='20260925-2018-frag-dg2';
 const q=id=>document.getElementById(id);
 const S=window.DG10_FRAG_DG=window.DG10_FRAG_DG||{busy:false,refs:[],observer:null,timer:null};
 
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function chef(){
-  if(typeof window.canAccessBoss==='function')return !!window.canAccessBoss();
-  return localStorage.getItem('dg_chef_access')==='1';
+function officeOpen(){
+  const boss=q('bossView');
+  if(!boss||boss.classList.contains('hidden'))return false;
+  const s=window.getComputedStyle?getComputedStyle(boss):null;
+  return !s||(s.display!=='none'&&s.visibility!=='hidden');
 }
 function payload(x){
   if(typeof window.chefPayload==='function')return window.chefPayload(x);
@@ -90,7 +92,6 @@ async function ask(){
 }
 
 function ensureTop(){
-  if(!chef())return;
   const boss=q('bossView');if(!boss)return;
   let box=q('fragDgTop');
   if(!box){
@@ -214,7 +215,6 @@ function openRefs(){
   p.classList.remove('hidden');loadRefs();setTimeout(()=>p.scrollIntoView({behavior:'smooth',block:'start'}),20);
 }
 function ensureReferences(){
-  if(!chef())return;
   const archive=document.querySelector('#bossView .dg80-final-section[data-section="archive"]');
   const grid=archive&&archive.querySelector('.dg80-final-grid');
   if(!archive||!grid)return;
@@ -241,7 +241,7 @@ function ensureReferences(){
 
 function sync(){
   css();
-  if(!chef())return;
+  if(!officeOpen())return;
   ensureTop();
   ensureReferences();
   const old=q('dg10Ai');if(old)old.remove();
