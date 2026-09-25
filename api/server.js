@@ -10396,17 +10396,27 @@ async function directReferenceProjectsV10(body){
   }));
 }
 
+function fragDgModelForPrompt(prompt){
+  const p=String(prompt||'').trim();
+  const low=p.toLowerCase();
+  if(/^\s*(sol[:\s]|\/sol\b)/i.test(p))return 'gpt-5.6-sol';
+  if(/^\s*(luna[:\s]|\/luna\b)/i.test(p))return 'gpt-5.6-luna';
+  const complex=/\b(analys|prüf|pruef|bewert|kalkul|berechn|strategie|konzept|technisch|dimensionier|ausleg|diagnos|ursache|recht|vertrag|kündig|kuendig|steuer|förder|foerder|seo|optimier|angebot\s+(erstell|kalkul|ausarbeit)|wärmepumpe|waermepumpe|hydraul|heizlast|schadens|streit|gericht)\b/i;
+  if(p.length>1200||complex.test(low))return 'gpt-5.6-sol';
+  return 'gpt-5.6-luna';
+}
 async function directAiAssistantV10(body){
   const session=await localSessionForBody(body,true);if(!session)return null;
   const prompt=String(body&&body.prompt||'').trim();if(!prompt)throw new Error('Bitte eine Frage oder Aufgabe eingeben.');
-  const apiKey=String(process.env.OPENAI_API_KEY||'').trim(),model=String(process.env.OPENAI_MODEL||'gpt-5.6-terra').trim();
-  if(!apiKey||!model)return {configured:false,text:'KI-Integration ist vorbereitet. Für die Aktivierung fehlen noch OPENAI_API_KEY und/oder OPENAI_MODEL auf Railway.'};
+  const apiKey=String(process.env.OPENAI_API_KEY||'').trim(),model=fragDgModelForPrompt(prompt);
+  if(!apiKey)return {configured:false,text:'KI-Integration ist vorbereitet. Für die Aktivierung fehlt noch OPENAI_API_KEY auf Railway.'};
   const inq=await pool.query("SELECT customer,source,subject,description,status,received_at_text FROM customer_inquiries_shadow WHERE COALESCE(status,'Offen') NOT IN ('Archiviert','Gelöscht') ORDER BY received_at_text DESC NULLS LAST LIMIT 25");
   const orders=await pool.query("SELECT customer,address,description,status,changed_at_text FROM manual_orders_shadow WHERE COALESCE(status,'') NOT IN ('Abgeschlossen','Abgerechnet') ORDER BY changed_at_text DESC NULLS LAST LIMIT 25");
   const offers=await pool.query("SELECT customer,description,status,created_at_text FROM inquiry_offers_shadow ORDER BY created_at_text DESC NULLS LAST LIMIT 25");
-  const context={inquiries:inq.rows,orders:orders.rows,offers:offers.rows};
+  const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+  const context={today,timeZone:'Europe/Berlin',inquiries:inq.rows,orders:orders.rows,offers:offers.rows};
   const upstream=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+apiKey},body:JSON.stringify({model,input:[
-    {role:'system',content:[{type:'input_text',text:'Du bist der interne Büro-Assistent der Del Gesso Gebäudetechnik. Nutze nur den bereitgestellten App-Kontext. Unterstütze bei Überblick, Priorisierung, Textentwürfen und Vorbereitung. Führe keine externen oder irreversiblen Aktionen aus. Antworte auf Deutsch, klar und praxisnah.'}]},
+    {role:'system',content:[{type:'input_text',text:'Du bist Frag DG, der interne Büro-Assistent der Del Gesso Gebäudetechnik. Nutze nur den bereitgestellten App-Kontext für betriebsinterne Fakten. Unterstütze bei Überblick, Priorisierung, Übersetzung, Textentwürfen und Vorbereitung. Führe keine externen oder irreversiblen Aktionen aus. Antworte standardmäßig auf Deutsch; wenn der Nutzer ausdrücklich eine andere Sprache verlangt, antworte in dieser Sprache. Sei klar, knapp und praxisnah.'}]},
     {role:'user',content:[{type:'input_text',text:'App-Kontext:\\n'+JSON.stringify(context)+'\\n\\nAufgabe:\\n'+prompt}]}
   ]})});
   const raw=await upstream.text();let data=null;try{data=JSON.parse(raw)}catch(_e){}
@@ -10418,7 +10428,7 @@ async function directAiAssistantV10(body){
     throw new Error('KI-Dienst meldet HTTP '+upstream.status+(msg?': '+msg:''));
   }
   let out=String(data&&data.output_text||'');if(!out&&data&&Array.isArray(data.output))for(const item of data.output||[])for(const c of item.content||[])if(c&&c.text)out+=String(c.text);
-  return {configured:true,text:out.trim()||'Keine Antwort erhalten.'};
+  return {configured:true,modelUsed:model,text:out.trim()||'Keine Antwort erhalten.'};
 }
 
 
