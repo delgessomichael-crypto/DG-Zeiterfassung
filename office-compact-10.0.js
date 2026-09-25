@@ -2,7 +2,7 @@
 (function(){
 'use strict';
 
-const VERSION='20260925-1905-office-compact3';
+const VERSION='20260925-1915-office-compact4';
 const q=id=>document.getElementById(id);
 const S=window.DG10_OFFICE_COMPACT=window.DG10_OFFICE_COMPACT||{};
 S.sectionState=S.sectionState||{};
@@ -85,8 +85,12 @@ function ensureAccessShell(){
   const shell=ensureUpperShell('dg10AccessShell','Mitarbeiter, Büro & Besichtigung',app,employee,'access');
   if(!shell)return;
   const body=shell.querySelector('.dg10-upper-body');
+  const connection=q('connectionBar');
+  if(connection&&connection.parentElement!==body)body.appendChild(connection);
+  const queue=q('queueBar');
+  if(queue&&queue.parentElement!==body)body.appendChild(queue);
   const tabs=app.querySelector(':scope > .tabs')||q('employeeTab')?.closest('.tabs');
-  if(tabs&&tabs.parentElement!==body)body.prepend(tabs);
+  if(tabs&&tabs.parentElement!==body)body.appendChild(tabs);
   const inspection=q('inspectionQuickLauncher');
   if(inspection&&inspection.parentElement!==body)body.appendChild(inspection);
 }
