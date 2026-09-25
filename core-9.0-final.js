@@ -1566,7 +1566,7 @@ function d3Wire(c){const old=c.querySelector(':scope > .dg48-head');if(!old)retu
 function d3Group(id,title,items){const c=d3Section(id,title,'<div class="d3-menu"></div><div class="d3-content"></div>'),menu=c.querySelector('.d3-menu'),host=c.querySelector('.d3-content');items.forEach(([p,label])=>{if(!p)return;p.classList.add('d3-panel','hidden');p.querySelector(':scope > .dg48-head')?.remove();d3Body(p)?.classList.remove('hidden');const b=d3Element('button','',esc(label));b.type='button';b.dataset.panel=p.id;b.addEventListener('click',()=>{const y=menu.getBoundingClientRect().top;host.style.minHeight=Math.max(0,innerHeight-host.getBoundingClientRect().top)+'px';d3Open(id,p.id);const delta=menu.getBoundingClientRect().top-y;if(Math.abs(delta)>1)window.scrollBy({top:delta,behavior:'instant'});});menu.append(b);host.append(p);});return c;}
 function d3InstallOffice(){const root=$('bossView'),cards=[...root.children],find=t=>cards.find(c=>(c.querySelector(':scope > .dg48-head h2,:scope > h2')?.textContent||'').includes(t));const completed=find('Regieberichte');completed.id='d3Completed';completed.querySelector('h2').textContent='Abgeschlossene Auftr\u00e4ge';$('regieMergeToolbar')?.remove();
  const running=d3Section('d3Running','Laufende Auftr\u00e4ge','<div id="d3RunningStatus"></div><div id="d3OrderPlan"></div><div id="d3RunningList"></div>');
- const inquiry=d3Section('d3Inquiries','Offene Anfragen','<div class="report-actions">'+d3Button('Gmail abgleichen','d3Import')+d3Button('Aktualisieren','d3Inquiries',[],'secondary')+'</div><div id="d3InquiryStatus"></div><div id="d3InquiryList"></div>');
+ const inquiry=d3Section('d3Inquiries','Offene Anfragen','<div class="report-actions">'+d3Button('E-Mail abgleichen','d3Import')+d3Button('Aktualisieren','d3Inquiries',[],'secondary')+'</div><div id="d3InquiryStatus"></div><div id="d3InquiryList"></div>');
  const offers=[['d3OfferOpen','Offene Angebote','Offen'],['d3OfferCreate','Angebote zu erstellen','Zu erstellen'],['d3OfferArchive','Angebotsarchiv','Archiv']].map(([id,title,stage])=>{const p=d3Section(id,title,'<h3>'+title+'</h3><div id="'+id+'Status"></div><div id="'+id+'List"></div>');DG3.loaders[id]=()=>loadOffers(stage);return [p,title];});const stat=d3Section('d3Stats','Angebotsstatistik','<div id="d3StatsStatus"></div><div id="d3StatsList"></div>');offers.push([stat,'Angebotsstatistik']);DG3.loaders.d3Stats=loadStats;const offerGroup=d3Group('d3Offers','Angebotsbereich',offers);
  const reminder=d3Section('d3Reminder','Reminder','<div id="d3ReminderStatus"></div><div id="d3ReminderList"></div>'),employee=find('Mitarbeiterverwaltung');employee.id='d3EmployeeAdmin';const admin=d3Group('d3Admin','Verwaltung',[[employee,'Mitarbeiterverwaltung'],[$('dg48AbsenceGroup'),'Urlaub / Abwesenheiten / Feiertage'],[$('dg48EmployeeClosures'),'Mitarbeiterberichte']]),health=d3Section('d3Health','Systemcheck','<div id="d3HealthList"></div>'),planner=$('dg62PlannerCard');
  [planner,completed,running,inquiry,offerGroup,reminder,admin,health].forEach((c,i)=>{root.append(c);c.classList.add('d3-main');c.classList.toggle('d3-alt',i%2===1);if(c!==planner)d3Wire(c);d3Collapse(c,true);});
@@ -1684,7 +1684,7 @@ function d3Inquiry(id){const r=DG3.inquiries.find(x=>x.id===id);if(!r)throw new 
 function d3Address(r){return r.address||[r.postalCode,r.city].filter(Boolean).join(' ');}
 async function d3Inquiries(){setMessage('d3InquiryStatus','Anfragen werden geladen ...','info');try{DG3.inquiries=await api(chefPayload({action:'getCustomerInquiries',status:'Offen'}));$('d3InquiryList').innerHTML=DG3.inquiries.map((r,i)=>'<div class="report-card'+(i%2?' d3-alt':'')+'"><div class="d3-head"><strong>'+esc(r.customer)+'</strong><span class="badge">'+esc(r.source)+'</span></div><div class="report-meta">'+esc(r.receivedAt)+' - '+esc(r.status)+'</div><div>'+esc(d3Address(r))+'</div><div><a href="tel:'+esc(r.phone)+'">'+esc(r.phone)+'</a> <a href="mailto:'+esc(r.email)+'">'+esc(r.email)+'</a></div><div>'+esc(r.description||r.subject)+'</div>'+(r.internalNote?'<div class="status info">Interne Notiz: '+esc(r.internalNote)+'</div>':'')+'<div class="report-actions">'+d3Button('Kontakt aufgenommen','d3Contact',[r.id])+d3Button('Termin erstellen','d3Appointment',['inquiry',r.id,false])+d3Button('Angebot / Besichtigung','d3Appointment',['inquiry',r.id,true])+d3Button('Als Angebot uebernehmen','d3InquiryOffer',[r.id])+d3Button('Als Auftrag uebernehmen','d3InquiryOrder',[r.id],'success')+d3Button('Interne Notiz','d3InquiryNote',[r.id])+d3Button('Erledigt','d3CompleteInquiry',[r.id],'success')+d3Button('Entfernen','d3DeleteInquiry',[r.id],'danger')+'</div></div>').join('')||'Keine offenen Anfragen.';setMessage('d3InquiryStatus',DG3.inquiries.length+' offene Anfragen.','ok');d3Count('inquiries',DG3.inquiries.length);}catch(e){setMessage('d3InquiryStatus',e.message,'error');}}
 async function d3Import(){
-  setMessage('d3InquiryStatus','Gmail wird direkt mit Railway abgeglichen ...','info');
+  setMessage('d3InquiryStatus','E-Mail-Postfächer werden direkt mit Railway abgeglichen ...','info');
   try{
     const r=await api(chefPayload({action:'syncGmailInquiriesV10'}));
     if(r&&r.needsConfiguration){
@@ -1699,8 +1699,8 @@ async function d3Import(){
     }
     await d3Inquiries();
     const extra=r&&r.failed?' · Fehler: '+Number(r.failed||0):'';
-    setMessage('d3InquiryStatus','Gmail-Abgleich: '+Number(r&&r.imported||0)+' neu, '+Number(r&&r.updated||0)+' aktualisiert, '+Number(r&&r.duplicates||0)+' bereits bekannt'+extra+'.','ok');
-  }catch(e){setMessage('d3InquiryStatus','Gmail-Abgleich fehlgeschlagen: '+e.message,'error');}
+    setMessage('d3InquiryStatus','E-Mail-Abgleich: '+Number(r&&r.imported||0)+' neu, '+Number(r&&r.updated||0)+' aktualisiert, '+Number(r&&r.duplicates||0)+' bereits bekannt'+extra+'.','ok');
+  }catch(e){setMessage('d3InquiryStatus','E-Mail-Abgleich fehlgeschlagen: '+e.message,'error');}
 }
 function d3InquiryNote(id){const r=d3Inquiry(id);d3Form('Interne Notiz',[{name:'note',label:'Notiz',type:'textarea'}],{note:r.internalNote||''},async v=>{await api(chefPayload({action:'saveCustomerInquiryNote',id,note:v.note}));await d3Inquiries();});}
 function d3Contact(id){const r=d3Inquiry(id);d3Form('Kontakt dokumentieren',[{name:'date',label:'Datum',type:'date',required:true},{name:'time',label:'Uhrzeit',type:'time',required:true},{name:'person',label:'Gespraechspartner'},{name:'note',label:'Notiz',type:'textarea'}],{date:localDate(),time:new Date().toTimeString().slice(0,5),person:r.customer,note:''},async v=>{await api(chefPayload({action:'saveCustomerInquiryContact',id,...v}));await d3Inquiries();});}
@@ -1986,7 +1986,7 @@ async function d34AqonInquiries(){
 const d34BaseImport=d3Import;
 d3Import=async function(){
   try{if(window.DG51&&DG51.readCache&&typeof DG51.readCache.clear==='function')DG51.readCache.clear();}catch(_e){}
-  setMessage('d3InquiryStatus','Gmail wird direkt mit Railway abgeglichen ...','info');
+  setMessage('d3InquiryStatus','E-Mail-Postfächer werden direkt mit Railway abgeglichen ...','info');
   try{
     const r=await api(chefPayload({action:'syncGmailInquiriesV10'}));
     if(r&&r.needsConfiguration){
@@ -2002,8 +2002,8 @@ d3Import=async function(){
     await d3Inquiries();await d3Dashboard();
     if(DG3.open==='d34AqonInquiries')await d34AqonInquiries();
     const extra=r&&r.failed?' · Fehler: '+Number(r.failed||0):'';
-    setMessage('d3InquiryStatus','Gmail-Abgleich abgeschlossen: '+Number(r&&r.imported||0)+' neu, '+Number(r&&r.updated||0)+' aktualisiert, '+Number(r&&r.duplicates||0)+' bereits bekannt'+extra+'.','ok');
-  }catch(e){setMessage('d3InquiryStatus','Gmail-Abgleich fehlgeschlagen: '+e.message,'error');}
+    setMessage('d3InquiryStatus','E-Mail-Abgleich abgeschlossen: '+Number(r&&r.imported||0)+' neu, '+Number(r&&r.updated||0)+' aktualisiert, '+Number(r&&r.duplicates||0)+' bereits bekannt'+extra+'.','ok');
+  }catch(e){setMessage('d3InquiryStatus','E-Mail-Abgleich fehlgeschlagen: '+e.message,'error');}
 };
 window.addEventListener('message',e=>{let apiOrigin='';try{apiOrigin=new URL('https://dg-app-10-api-production.up.railway.app/').origin;}catch(_e){}if(e.origin===apiOrigin&&e.data&&e.data.type==='dg-gmail-connected')setTimeout(()=>d3Import(),800);});
 
@@ -6024,7 +6024,7 @@ async function loadMaps10(){if(window.google&&google.maps&&google.maps.places)re
 function looksAddr10(el){const k=[el.id,el.name,el.placeholder,el.getAttribute('aria-label')].filter(Boolean).join(' ').toLowerCase();return /(adresse|anschrift|straße|strasse|street)/.test(k);}
 async function places10(root=document){root.querySelectorAll('input').forEach(async el=>{if(el.dataset.dg10Places||!looksAddr10(el))return;el.dataset.dg10Places='loading';if(!await loadMaps10()){delete el.dataset.dg10Places;return;}const ac=new google.maps.places.Autocomplete(el,{componentRestrictions:{country:'de'},fields:['formatted_address','address_components','place_id'],types:['address']});ac.addListener('place_changed',()=>{const p=ac.getPlace();if(p&&p.formatted_address){el.value=p.formatted_address;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}});el.dataset.dg10Places='1';});}
 
-/* 13. Gmail + Kalender alle 20 Minuten */
+/* 13. E-Mail-Postfächer + Kalender alle 20 Minuten */
 let lastSync10=0;async function autoGmail10(){if(typeof canAccessBoss!=='function'||!canAccessBoss())return;try{const s=await api(bossPayload10({action:'getGmailStatusV10'}));if(s&&s.configured&&s.connected)await api(bossPayload10({action:'syncGmailInquiriesV10'}));}catch(_e){}}async function sync20(){if(document.hidden||!navigator.onLine||Date.now()-lastSync10<1190000)return;lastSync10=Date.now();if(typeof canAccessBoss==='function'&&canAccessBoss()){try{await autoGmail10();}catch(_e){}try{if(typeof d3Inquiries==='function')await d3Inquiries();}catch(_e){}try{if(typeof dg62Load==='function')await dg62Load();}catch(_e){}}else{try{if(typeof loadCalendarEvents==='function')await loadCalendarEvents(true);}catch(_e){}}}
 
 function install10(){addCss10();speech10(document);cleanup10();places10(document);if(typeof canAccessBoss==='function'&&canAccessBoss()){ensureEmployeeOverview10();refreshEmpSelect10();ensurePartner10();ensureAi10();}const obs=new MutationObserver(ms=>{for(const m of ms)for(const n of m.addedNodes)if(n.nodeType===1){speech10(n);places10(n);}cleanup10();decorateInquiryMerge10();refreshEmpSelect10();});obs.observe(document.body,{childList:true,subtree:true});setInterval(sync20,20*60*1000);setTimeout(()=>{decorateInquiryMerge10();sync20();},1500);}
