@@ -5886,7 +5886,7 @@ window.dg742EnsureOffice=installOffice742;
 const q=id=>document.getElementById(id);
 const esc10=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const bossPayload10=o=>typeof chefPayload==='function'?chefPayload(o):Object.assign({},o,{employee:(typeof auth==='function'?auth().employee:''),employeePin:(typeof auth==='function'?auth().pin:'')});
-function addCss10(){if(q('dg10EnhanceCss'))return;const st=document.createElement('style');st.id='dg10EnhanceCss';st.textContent='.dg10-mic{width:auto!important;min-width:44px!important;margin-left:6px;padding:8px 10px!important}.dg10-speech-wrap{display:flex;align-items:flex-start;gap:6px}.dg10-speech-wrap>input,.dg10-speech-wrap>textarea{flex:1}.dg10-panel{border:1px solid #dbe3ec;border-radius:14px;padding:14px;margin:12px 0;background:#fff}.dg10-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.dg10-stat{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:10px}.dg10-stat b{display:block;font-size:20px}.dg10-mergebar{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.dg10-partner{border:1px solid #e5e7eb;border-radius:14px;padding:12px;margin:10px 0;background:#fff}.dg10-trade-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:10px 0 14px}.dg10-trade-btn{min-height:72px;border:1px solid #a9d9b4;border-radius:16px;background:#e8f7ea;color:#185c2c;padding:12px;font:inherit;font-weight:900;cursor:pointer;text-align:center}.dg10-trade-btn:hover,.dg10-trade-btn.active{background:#d9f2de;border-color:#78c48a;box-shadow:0 0 0 3px rgba(47,133,90,.12)}.dg10-trade-add{font-size:34px;line-height:1;display:flex;align-items:center;justify-content:center}.dg10-trade-detail{border-top:1px solid #e5e7eb;padding-top:14px;margin-top:4px}.dg10-trade-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}.dg10-partner-meta{display:grid;gap:4px;margin-top:7px}.dg10-partner-note{margin-top:8px;padding-top:8px;border-top:1px dashed #dbe3ec}.dg10-partner-empty{padding:14px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;background:#f8fafc}@media(max-width:650px){.dg10-trade-grid{grid-template-columns:1fr 1fr}.dg10-trade-btn{min-height:64px}}.dg10-aiout{white-space:pre-wrap;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px;min-height:60px}.dg10-hide{display:none!important}';document.head.appendChild(st);}
+function addCss10(){if(q('dg10EnhanceCss'))return;const st=document.createElement('style');st.id='dg10EnhanceCss';st.textContent='.dg10-mic{width:auto!important;min-width:44px!important;margin-left:6px;padding:8px 10px!important}.dg10-speech-wrap{display:flex;align-items:flex-start;gap:6px}.dg10-speech-wrap>input,.dg10-speech-wrap>textarea{flex:1}.dg10-panel{border:1px solid #dbe3ec;border-radius:14px;padding:14px;margin:12px 0;background:#fff}.dg10-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.dg10-stat{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:10px}.dg10-stat b{display:block;font-size:20px}.dg10-mergebar{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.dg10-partner{border:1px solid #e5e7eb;border-radius:14px;padding:12px;margin:10px 0;background:#fff}.dg10-trade-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:10px 0 14px}.dg10-trade-btn{min-height:72px;border:1px solid #a9d9b4;border-radius:16px;background:#e8f7ea;color:#185c2c;padding:12px;font:inherit;font-weight:900;cursor:pointer;text-align:center}.dg10-trade-btn:hover,.dg10-trade-btn.active{background:#d9f2de;border-color:#78c48a;box-shadow:0 0 0 3px rgba(47,133,90,.12)}.dg10-trade-add{font-size:34px;line-height:1;display:flex;align-items:center;justify-content:center}.dg10-trade-detail{border-top:1px solid #e5e7eb;padding-top:14px;margin-top:4px}.dg10-trade-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}.dg10-partner-meta{display:grid;gap:4px;margin-top:7px}.dg10-partner-note{margin-top:8px;padding-top:8px;border-top:1px dashed #dbe3ec}.dg10-partner-empty{padding:14px;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;background:#f8fafc}@media(max-width:650px){.dg10-trade-grid{grid-template-columns:1fr 1fr}.dg10-trade-btn{min-height:64px}}.dg10-aiout{white-space:pre-wrap;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px;min-height:60px}.dg10-frag-top{margin:0 0 11px;padding:12px;border:2px solid #405fa7;border-radius:15px;background:#f4f7ff;box-shadow:0 4px 16px rgba(64,95,167,.10)}.dg10-frag-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}.dg10-frag-head strong{font-size:18px;color:#31589e}.dg10-frag-line{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center}.dg10-frag-line input{margin:0!important;min-height:46px!important}.dg10-frag-line button{min-height:46px!important;white-space:nowrap}.dg10-frag-out:empty{display:none}.dg10-frag-mic{min-width:48px!important;margin:0!important}.dg10-ref-tile{background:#eef4ff!important;border-color:#bfd0f3!important}.dg10-ref-modal{position:fixed;inset:0;z-index:120000;background:rgba(15,23,42,.52);display:flex;align-items:center;justify-content:center;padding:18px}.dg10-ref-modal.hidden{display:none!important}.dg10-ref-box{width:min(980px,96vw);max-height:94vh;overflow:auto;background:#fff;border-radius:18px;padding:18px;box-shadow:0 24px 70px rgba(15,23,42,.30)}.dg10-ref-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.dg10-ref-head h2{margin:0;color:#31589e}.dg10-ref-files{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px}.dg10-ref-files>div{border:1px solid #dbe3ec;border-radius:12px;padding:10px;background:#f8fafc}.dg10-ref-approve{display:flex;align-items:center;gap:8px;margin:12px 0;font-weight:800}.dg10-ref-approve input{width:auto}.dg10-ref-card{border:1px solid #dbe3ec;border-radius:14px;padding:12px;margin:9px 0;background:#fff}.dg10-ref-card-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.dg10-hide{display:none!important}@media(max-width:720px){.dg10-frag-line{grid-template-columns:minmax(0,1fr) auto}.dg10-frag-line #dg10AiAsk{grid-column:1/-1;width:100%}.dg10-ref-files{grid-template-columns:1fr}}';document.head.appendChild(st);}
 
 /* 1. Spracheingabe */
 const Speech10=window.SpeechRecognition||window.webkitSpeechRecognition;let rec10=null,btn10=null;
@@ -6014,9 +6014,124 @@ if(typeof oldAppointment10==='function')window.d3Appointment=async function(kind
 const oldOrderStatus10=window.d3OrderStatus;
 if(typeof oldOrderStatus10==='function')window.d3OrderStatus=async function(id,status){if(status!=='Abgeschlossen')return oldOrderStatus10.apply(this,arguments);if(!confirm('Auftrag abschließen und alle passenden Berichte zu „Rechnung zu erstellen“ verschieben?'))return;try{await api(bossPayload10({action:'completeManualOrderV10',id}));if(typeof window.d3Orders==='function')await window.d3Orders();if(typeof loadRegieReports==='function'){await loadRegieReports('Laufend');await loadRegieReports('Abgeschlossen');}}catch(e){alert(e.message);}};
 
-/* 2. KI */
-function ensureAi10(){if(q('dg10Ai')||!q('bossView'))return;const c=document.createElement('div');c.id='dg10Ai';c.className='card';c.innerHTML='<h2>DG KI-Assistent</h2><div class="muted small">Liest den aktuellen App-Stand und bereitet Antworten, Texte und Prioritäten vor.</div><textarea id="dg10AiPrompt" rows="4" placeholder="z. B. Welche offenen Vorgänge brauchen heute meine Aufmerksamkeit?"></textarea><button class="btn primary" id="dg10AiAsk" style="margin-top:8px">KI fragen</button><div id="dg10AiOut" class="dg10-aiout" style="margin-top:10px">Bereit.</div>';q('bossView').appendChild(c);q('dg10AiAsk').onclick=askAi10;speech10(c);}
-async function askAi10(){const p=q('dg10AiPrompt'),out=q('dg10AiOut');if(!p||!p.value.trim())return;out.textContent='KI arbeitet ...';try{const r=await api(bossPayload10({action:'getAiAssistantV10',prompt:p.value.trim()}));out.textContent=r.text||'Keine Antwort.';}catch(e){out.textContent=e.message;}}
+/* 2. Frag DG */
+function ensureAi10(){
+  const boss=q('bossView');if(!boss)return;
+  q('dg10Ai')?.remove();
+  let c=q('fragDgTop');
+  if(!c){
+    c=document.createElement('div');
+    c.id='fragDgTop';
+    c.className='dg10-frag-top';
+    c.innerHTML='<div class="dg10-frag-head"><strong>Frag DG</strong><span class="muted small">Intelligente Unterstützung für den Büroalltag</span></div><div class="dg10-frag-line"><input id="dg10AiPrompt" type="text" placeholder="Frag DG – z. B. Was ist heute dringend?"><button type="button" class="btn secondary dg10-frag-mic" id="dg10FragMic" title="Spracheingabe">🎤</button><button type="button" class="btn primary" id="dg10AiAsk">Frag DG</button></div><div id="dg10AiOut" class="dg10-aiout dg10-frag-out"></div>';
+    boss.insertBefore(c,boss.firstChild);
+    q('dg10AiAsk').onclick=askAi10;
+    const input=q('dg10AiPrompt');
+    input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();askAi10();}});
+    q('dg10FragMic').onclick=e=>{e.preventDefault();startRec10(input,q('dg10FragMic'));};
+  }else if(boss.firstChild!==c){
+    boss.insertBefore(c,boss.firstChild);
+  }
+}
+async function askAi10(){
+  const p=q('dg10AiPrompt'),out=q('dg10AiOut'),btn=q('dg10AiAsk');
+  if(!p||!p.value.trim()||!out)return;
+  if(btn)btn.disabled=true;
+  out.className='dg10-aiout dg10-frag-out status info';
+  out.textContent='Frag DG arbeitet ...';
+  try{
+    const r=await api(bossPayload10({action:'getAiAssistantV10',prompt:p.value.trim()}));
+    out.className='dg10-aiout dg10-frag-out '+(r&&r.configured===false?'status warn':'status ok');
+    out.textContent=r&&r.text?r.text:'Keine Antwort.';
+  }catch(e){
+    out.className='dg10-aiout dg10-frag-out status error';
+    out.textContent=e.message||String(e);
+  }finally{if(btn)btn.disabled=false;}
+}
+
+let refRows10=[];
+function refEsc10(v){return esc10(v);}
+function refRawData10(file){return new Promise((ok,fail)=>{const r=new FileReader();r.onload=()=>ok(String(r.result||''));r.onerror=()=>fail(r.error||new Error('Bild konnte nicht gelesen werden.'));r.readAsDataURL(file);});}
+async function refImageData10(file){
+  const raw=await refRawData10(file);
+  if(!/^image\//i.test(file.type||''))return raw;
+  try{
+    const img=await new Promise((ok,fail)=>{const x=new Image();x.onload=()=>ok(x);x.onerror=fail;x.src=raw;});
+    const max=1600,scale=Math.min(1,max/Math.max(img.width,img.height));
+    if(scale>=.999&&file.size<2200000)return raw;
+    const canvas=document.createElement('canvas');
+    canvas.width=Math.max(1,Math.round(img.width*scale));
+    canvas.height=Math.max(1,Math.round(img.height*scale));
+    canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+    return canvas.toDataURL('image/jpeg',.82);
+  }catch(_e){return raw;}
+}
+async function refFiles10(){
+  const out=[];
+  for(const [id,phase] of [['dg10RefBefore','Vorher'],['dg10RefBuild','Montage'],['dg10RefDone','Fertig']]){
+    const el=q(id);if(!el)continue;
+    for(let i=0;i<el.files.length;i++){
+      if(out.length>=18)throw new Error('Maximal 18 Bilder pro Speichervorgang.');
+      const file=el.files[i];
+      out.push({phase,name:file.name,type:file.type||'image/jpeg',sortOrder:i,dataUrl:await refImageData10(file)});
+    }
+  }
+  return out;
+}
+function refCard10(r){
+  const c={Vorher:0,Montage:0,Fertig:0};
+  (r.images||[]).forEach(x=>{if(Object.prototype.hasOwnProperty.call(c,x.phase))c[x.phase]++;});
+  return '<div class="dg10-ref-card"><div class="dg10-ref-card-head"><strong>'+refEsc10(r.project||'Referenzbaustelle')+'</strong><span class="badge">'+refEsc10(r.status||'Entwurf')+'</span></div><div>'+refEsc10(r.location||'')+(r.device?' · '+refEsc10(r.device):'')+'</div>'+(r.customerInternal?'<div class="muted small">Kunde intern: '+refEsc10(r.customerInternal)+'</div>':'')+(r.description?'<div style="margin-top:7px">'+refEsc10(r.description)+'</div>':'')+'<div class="muted small" style="margin-top:7px">Bilder: Vorher '+c.Vorher+' · Montage '+c.Montage+' · Fertig '+c.Fertig+'</div><div class="muted small">Kundenfreigabe: '+(r.customerApproved?'Ja':'Nein')+'</div></div>';
+}
+async function loadReferences10(){
+  const host=q('dg10RefList');if(!host)return;
+  host.innerHTML='<div class="status info">Referenzbaustellen werden geladen ...</div>';
+  try{
+    const rows=await api(bossPayload10({action:'getReferenceProjectsV10',limit:100}));
+    refRows10=Array.isArray(rows)?rows:[];
+    host.innerHTML=refRows10.map(refCard10).join('')||'<div class="status ok">Noch keine Referenzbaustellen gespeichert.</div>';
+    const n=q('dg10RefCount');if(n)n.textContent=String(refRows10.length);
+  }catch(e){host.innerHTML='<div class="status error">'+refEsc10(e.message||e)+'</div>';}
+}
+function closeReference10(){q('dg10RefModal')?.classList.add('hidden');}
+function clearReference10(){
+  ['dg10RefCustomer','dg10RefLocation','dg10RefProject','dg10RefDevice','dg10RefDescription'].forEach(id=>{if(q(id))q(id).value='';});
+  ['dg10RefBefore','dg10RefBuild','dg10RefDone'].forEach(id=>{if(q(id))q(id).value='';});
+  if(q('dg10RefApproved'))q('dg10RefApproved').checked=false;
+}
+function ensureReferenceModal10(){
+  if(q('dg10RefModal'))return;
+  const m=document.createElement('div');m.id='dg10RefModal';m.className='dg10-ref-modal hidden';
+  m.innerHTML='<div class="dg10-ref-box"><div class="dg10-ref-head"><div><h2>Referenzbaustellen · Frag DG</h2><div class="muted small">Vorher/Nachher-Projekte für Website, Google und lokale Sichtbarkeit vorbereiten.</div></div><button class="btn secondary" id="dg10RefClose">Schließen</button></div><div class="status info">„Freigeben“ markiert das Projekt als geprüft und veröffentlichungsbereit. Die direkte Website-Veröffentlichung wird im nächsten Schritt angebunden.</div><div class="grid2"><div><label>Kunde (nur intern)</label><input id="dg10RefCustomer"></div><div><label>Ort</label><input id="dg10RefLocation" placeholder="z. B. Zirndorf"></div></div><label>Projekt</label><input id="dg10RefProject" placeholder="z. B. Austausch Gasheizung gegen Wärmepumpe"><label>Gerät / Technik</label><input id="dg10RefDevice" placeholder="z. B. Vaillant aroTHERM plus"><label>Projektbeschreibung</label><textarea id="dg10RefDescription" rows="4"></textarea><div class="dg10-ref-files"><div><strong>Vorher</strong><input id="dg10RefBefore" type="file" accept="image/*" multiple></div><div><strong>Montage</strong><input id="dg10RefBuild" type="file" accept="image/*" multiple></div><div><strong>Fertig</strong><input id="dg10RefDone" type="file" accept="image/*" multiple></div></div><label class="dg10-ref-approve"><input id="dg10RefApproved" type="checkbox"> Kundenfreigabe zur Veröffentlichung liegt vor</label><div class="button-row"><button class="btn secondary" id="dg10RefDraft">Als Entwurf speichern</button><button class="btn success" id="dg10RefRelease">Zur Veröffentlichung freigeben</button></div><div id="dg10RefStatus"></div><h3>Gespeicherte Referenzbaustellen</h3><div id="dg10RefList"></div></div>';
+  document.body.appendChild(m);
+  q('dg10RefClose').onclick=closeReference10;
+  q('dg10RefDraft').onclick=()=>saveReference10('Entwurf');
+  q('dg10RefRelease').onclick=()=>saveReference10('Freigegeben');
+  speech10(m);
+}
+async function saveReference10(status){
+  const st=q('dg10RefStatus');if(st){st.className='status info';st.textContent='Referenzbaustelle wird gespeichert ...';}
+  try{
+    const item={customerInternal:q('dg10RefCustomer').value.trim(),location:q('dg10RefLocation').value.trim(),project:q('dg10RefProject').value.trim(),device:q('dg10RefDevice').value.trim(),description:q('dg10RefDescription').value.trim(),customerApproved:q('dg10RefApproved').checked,status};
+    const files=await refFiles10();
+    const r=await api(bossPayload10({action:'saveReferenceProjectV10',item,files}));
+    if(st){st.className='status ok';st.textContent=(status==='Freigegeben'?'Zur Veröffentlichung freigegeben.':'Entwurf gespeichert.')+' '+Number(r&&r.imagesAdded||0)+' Bild(er) übernommen.';}
+    clearReference10();await loadReferences10();
+  }catch(e){if(st){st.className='status error';st.textContent=e.message||String(e);}}
+}
+function openReference10(){ensureReferenceModal10();q('dg10RefModal').classList.remove('hidden');loadReferences10();}
+function ensureReferenceTile10(){
+  const grid=q('bossView')?.querySelector('.dg80-final-section[data-section="archive"] .dg80-final-grid');
+  if(!grid)return;
+  let t=q('dg10RefTile');
+  if(!t){
+    t=document.createElement('button');t.type='button';t.id='dg10RefTile';t.className='d3-tile dg80-final-tile dg10-ref-tile';
+    t.innerHTML='<span>Referenzbaustellen</span><strong id="dg10RefCount">0</strong>';
+    t.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();openReference10();},true);
+    grid.appendChild(t);
+    loadReferences10();
+  }
+}
 
 /* 14. Google Places in relevanten Adressfeldern */
 let maps10=null,key10='';async function mapsKey10(){if(key10)return key10;try{const r=await api(bossPayload10({action:'getMapsBrowserConfig'}));if(r&&r.configured&&r.key)key10=String(r.key||'');}catch(_e){}return key10;}
@@ -6027,7 +6142,16 @@ async function places10(root=document){root.querySelectorAll('input').forEach(as
 /* 13. E-Mail-Postfächer + Kalender alle 20 Minuten */
 let lastSync10=0;async function autoGmail10(){if(typeof canAccessBoss!=='function'||!canAccessBoss())return;try{const s=await api(bossPayload10({action:'getGmailStatusV10'}));if(s&&s.configured&&s.connected)await api(bossPayload10({action:'syncGmailInquiriesV10'}));}catch(_e){}}async function sync20(){if(document.hidden||!navigator.onLine||Date.now()-lastSync10<1190000)return;lastSync10=Date.now();if(typeof canAccessBoss==='function'&&canAccessBoss()){try{await autoGmail10();}catch(_e){}try{if(typeof d3Inquiries==='function')await d3Inquiries();}catch(_e){}try{if(typeof dg62Load==='function')await dg62Load();}catch(_e){}}else{try{if(typeof loadCalendarEvents==='function')await loadCalendarEvents(true);}catch(_e){}}}
 
-function install10(){addCss10();speech10(document);cleanup10();places10(document);if(typeof canAccessBoss==='function'&&canAccessBoss()){ensureEmployeeOverview10();refreshEmpSelect10();ensurePartner10();ensureAi10();}const obs=new MutationObserver(ms=>{for(const m of ms)for(const n of m.addedNodes)if(n.nodeType===1){speech10(n);places10(n);}cleanup10();decorateInquiryMerge10();refreshEmpSelect10();});obs.observe(document.body,{childList:true,subtree:true});setInterval(sync20,20*60*1000);setTimeout(()=>{decorateInquiryMerge10();sync20();},1500);}
+function install10(){
+  addCss10();speech10(document);cleanup10();places10(document);
+  const mountBoss10=()=>{if(typeof canAccessBoss!=='function'||canAccessBoss()){ensureEmployeeOverview10();refreshEmpSelect10();ensurePartner10();ensureAi10();ensureReferenceTile10();}};
+  mountBoss10();
+  const obs=new MutationObserver(ms=>{for(const m of ms)for(const n of m.addedNodes)if(n.nodeType===1){speech10(n);places10(n);}cleanup10();decorateInquiryMerge10();refreshEmpSelect10();mountBoss10();});
+  obs.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['class']});
+  document.addEventListener('click',e=>{if(e.target&&e.target.closest&&e.target.closest('#bossTab'))setTimeout(mountBoss10,0);},true);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)mountBoss10();});
+  setInterval(sync20,20*60*1000);setTimeout(()=>{decorateInquiryMerge10();sync20();mountBoss10();},1500);
+}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install10,{once:true});else setTimeout(install10,0);
 })();
 /* ===== END DG APP 10 FRONTEND ENHANCEMENTS ===== */
