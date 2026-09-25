@@ -169,6 +169,8 @@ function sync(){
   ensureAppShell();
   ensureToolsShell();
   q('bossView')?.querySelectorAll('.dg80-final-section').forEach(applySection);
+  try{if(typeof window.dg10MountFragDG==='function')window.dg10MountFragDG();}catch(e){console.error('Frag DG mount',e);}
+  try{if(typeof window.dg10EnsureReferenceTile==='function')window.dg10EnsureReferenceTile();}catch(e){console.error('Referenzbaustellen mount',e);}
   document.documentElement.dataset.dgOfficeCompact=VERSION;
 }
 
@@ -180,9 +182,10 @@ function install(){
   sync();
   if(!S.observer){
     S.observer=new MutationObserver(schedule);
-    S.observer.observe(document.body,{subtree:true,childList:true});
+    S.observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class']});
   }
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)schedule();});
+  document.addEventListener('click',e=>{if(e.target&&e.target.closest&&e.target.closest('#bossTab'))setTimeout(schedule,0);},true);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
