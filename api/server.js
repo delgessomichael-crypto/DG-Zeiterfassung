@@ -10483,7 +10483,7 @@ const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','setRegieReportsOfferStatus','saveOfferCreatedWithReminder','createInspectionOffer','createEmployeeInspectionRequestV10',
   'mergeRegieObjects','saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed','setMonthClosureStatus','setPayrollMonthStatus','completePayrollCycle','forceCompletePayrollCycle',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
-  'markFinancePaidV10','markTaxMailAsInvoiceV10','archiveTaxAdvisorMailV10','deleteFinanceMailV10',
+  'markFinancePaidV10','markTaxMailAsInvoiceV10','archiveTaxAdvisorMailV10','deleteFinanceMailV10','markFinanceSpamV10','moveFinanceMailV10',
   'updateCustomerInquiry','deleteCustomerInquiry','rejectCustomerInquiry','saveCustomerInquiryNote','saveCustomerInquiryContact','completeCustomerInquiry','archiveCustomerInquiry','inquiryToOffer',
   'createInquiryReminder','reopenInquiryReminder','archiveInquiryReminder','rejectInquiryReminder','rescheduleOfferReminder','saveManualOrder',
   'saveMonthlyAdjustment','deleteMonthlyAdjustment','saveVacationEntitlement','saveTimeBankManual','applyTimeBankToMonth','bankMonthSurplus','syncHolidays','saveEmployeeAdmin','setEmployeeActive','savePlannerWorker','setPlannerWorkerActive','movePlannerWorker','planRequest3','savePlannerEvent','deletePlannerEvent','transferPlannerEvent','reserveMaintenanceDeviceId','saveMaintenanceCustomer','addMaintenanceRepair','addManualMaintenanceCount','deleteMaintenanceDevice','deleteMaintenanceCustomer','deleteMaintenanceAttachment','saveAbsence','deleteAbsence','endSicknessAbsence',
@@ -10645,6 +10645,14 @@ async function tryDirectPostgresWrite(action,body){
   }
   if(action==='deleteFinanceMailV10'){
     const result=await gmailDirect.deleteFinanceMail(body.messageId,by);
+    return {result,outboxId:0};
+  }
+  if(action==='markFinanceSpamV10'){
+    const result=await gmailDirect.markSpam(body.messageId,by);
+    return {result,outboxId:0};
+  }
+  if(action==='moveFinanceMailV10'){
+    const result=await gmailDirect.moveFinanceMail(body.messageId,body.target,by);
     return {result,outboxId:0};
   }
   const client=await pool.connect();
@@ -12805,8 +12813,11 @@ async function tryDirectPostgresWrite(action,body){
       if(!validIsoDateText(date)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(start)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(end)||end<=start)
         throw new Error('Ungültiges Datum oder Von/Bis.');
       if(!employeeIds.length)throw new Error('Mindestens einen Mitarbeiter auswählen.');
+
+      // Neuanlage und Bearbeitung benutzen bewusst dieselbe Aktion. Eine frische KT-ID
+      // darf deshalb nicht mehr als vermeintliches Update abgewiesen werden.
       const oldQ=await client.query('SELECT * FROM planner_events_shadow WHERE id=$1 FOR UPDATE',[id]);
-      if(!oldQ.rowCount)throw new Error('DG-Termin wurde nicht gefunden.');
+      const old=oldQ.rows[0]||{};
       const workers=await client.query(
         'SELECT id,display_name,employee_name,active FROM planner_workers_shadow WHERE id=ANY($1::text[])',[employeeIds]
       );
@@ -12816,7 +12827,6 @@ async function tryDirectPostgresWrite(action,body){
         const w=wmap.get(wid);if(!w||w.active===false)throw new Error('Mitarbeiter nicht aktiv.');
         names.push(String(w.display_name||w.employee_name||wid));
       }
-      const old=oldQ.rows[0];
       const maintenanceCustomerId=type==='Wartung'?String(item.maintenanceCustomerId||old.maintenance_customer_id||'').trim():'';
       const maintenanceObjectId=type==='Wartung'?String(item.maintenanceObjectId||old.maintenance_object_id||'').trim():'';
       const maintenanceDeviceId=type==='Wartung'?String(item.maintenanceDeviceId||old.maintenance_device_id||'').trim():'';
@@ -12824,15 +12834,25 @@ async function tryDirectPostgresWrite(action,body){
         const md=await client.query('SELECT active FROM maintenance_devices_shadow WHERE id=$1 LIMIT 1',[maintenanceDeviceId]);
         if(!md.rowCount||md.rows[0].active===false)throw new Error('Das zugeordnete Wartungsgerät wurde nicht gefunden oder ist inaktiv.');
       }
+      const createdAt=oldQ.rowCount?String(old.created_at_text||nowIso):nowIso;
+      const googleIds=oldQ.rowCount?String(old.google_event_ids_json||'{}'):'{}';
       await client.query(
-        `UPDATE planner_events_shadow SET customer=$2,address=$3,task=$4,event_date=$5,start_time=$6,end_time=$7,
-           employee_ids_json=$8,employee_names_json=$9,updated_at_text=$10,updated_by=$11,event_type=$12,
-           maintenance_customer_id=$13,maintenance_object_id=$14,maintenance_device_id=$15,shadow_updated_at=now()
-         WHERE id=$1`,
-        [id,customer,address,task,date,start,end,JSON.stringify(employeeIds),JSON.stringify(names),nowIso,by,type,
-         maintenanceCustomerId,maintenanceObjectId,maintenanceDeviceId]
+        `INSERT INTO planner_events_shadow(
+           id,customer,address,task,event_date,start_time,end_time,employee_ids_json,employee_names_json,
+           google_event_ids_json,created_at_text,updated_at_text,updated_by,event_type,
+           maintenance_customer_id,maintenance_object_id,maintenance_device_id,shadow_updated_at
+         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,now())
+         ON CONFLICT(id) DO UPDATE SET
+           customer=EXCLUDED.customer,address=EXCLUDED.address,task=EXCLUDED.task,
+           event_date=EXCLUDED.event_date,start_time=EXCLUDED.start_time,end_time=EXCLUDED.end_time,
+           employee_ids_json=EXCLUDED.employee_ids_json,employee_names_json=EXCLUDED.employee_names_json,
+           updated_at_text=EXCLUDED.updated_at_text,updated_by=EXCLUDED.updated_by,event_type=EXCLUDED.event_type,
+           maintenance_customer_id=EXCLUDED.maintenance_customer_id,maintenance_object_id=EXCLUDED.maintenance_object_id,
+           maintenance_device_id=EXCLUDED.maintenance_device_id,shadow_updated_at=now()`,
+        [id,customer,address,task,date,start,end,JSON.stringify(employeeIds),JSON.stringify(names),googleIds,
+         createdAt,nowIso,by,type,maintenanceCustomerId,maintenanceObjectId,maintenanceDeviceId]
       );
-      result={ok:true,id,type,maintenanceDeviceId};
+      result={ok:true,id,type,maintenanceDeviceId,created:!oldQ.rowCount};
       if(directCalendarReady)calendarAfterCommit={operation:'sync',eventId:id};
     }else if(action==='deletePlannerEvent'){
       const id=String(body.id||'').trim();if(!id)throw new Error('Termin nicht gefunden.');
