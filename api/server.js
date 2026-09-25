@@ -9086,23 +9086,38 @@ async function postgresOfferReportsNative(body){
     pool.query(
       `SELECT id,employee_name,entry_date,customer,start_time,end_time,hours,activity,
               transmitted_at_text,material_used,material,customer_signature_url,photo_count,
-              photo_file_ids,photo_urls,job_status,offer_id,offer_changed_at_text,offer_changed_by,object_id
-         FROM time_entries_shadow WHERE COALESCE(offer_id,'')<>''`
+              photo_file_ids,photo_urls,job_status,offer_id,offer_changed_at_text,offer_changed_by,object_id,
+              shadow_updated_at
+         FROM time_entries_shadow
+        WHERE COALESCE(offer_id,'')<>''
+          AND COALESCE(billing_status,'Offen')='Offen'`
     ),
     pool.query(
       `SELECT offer_id,inquiry_id,customer,phone,email,description,source,created_at_text,status,
-              changed_at_text,changed_by,attachments_json FROM inquiry_offers_shadow`
+              changed_at_text,changed_by,attachments_json,shadow_updated_at FROM inquiry_offers_shadow`
     )
   ]);
+
+  // One offer ID has exactly one canonical status. For offers with time entries,
+  // the latest active time-entry status is authoritative. This prevents a single
+  // offer from appearing in two stages when one mirror row is older than another.
+  const timeStatus=new Map();
+  for(const r of tq.rows){
+    const offerId=String(r.offer_id||'').trim();if(!offerId)continue;
+    const updated=r.shadow_updated_at?new Date(r.shadow_updated_at).getTime():0;
+    const prev=timeStatus.get(offerId);
+    if(!prev||updated>=prev.updated)timeStatus.set(offerId,{status:String(r.job_status||'Abgeschlossen'),updated});
+  }
+
   const groups=new Map();
   for(const r of tq.rows){
-    const st=String(r.job_status||'Abgeschlossen');
-    if(!allowed[stage].includes(st))continue;
     const offerId=String(r.offer_id||'').trim();if(!offerId)continue;
+    const canonical=String(timeStatus.get(offerId)?.status||r.job_status||'Abgeschlossen');
+    if(!allowed[stage].includes(canonical))continue;
     const date=berlinDateOnly(r.entry_date);
     let g=groups.get(offerId);
     if(!g){
-      g={offerId,status:st,customer:String(r.customer||''),objectId:String(r.object_id||''),
+      g={offerId,status:canonical,customer:String(r.customer||''),objectId:String(r.object_id||''),
         totalHours:0,reportCount:0,employeesMap:new Set(),reports:[],firstDate:date,lastDate:date,
         changedAt:shadowGermanDateTime(r.offer_changed_at_text||''),changedBy:String(r.offer_changed_by||'')};
       groups.set(offerId,g);
@@ -9119,31 +9134,55 @@ async function postgresOfferReportsNative(body){
       activity:String(r.activity||''),transmittedAt:shadowGermanDateTime(r.transmitted_at_text||''),
       materialUsed:Boolean(r.material_used),material:String(r.material||''),
       customerSignatureUrl:String(r.customer_signature_url||''),photoCount:Number(r.photo_count||0),
-      photoFileIds:String(r.photo_file_ids||''),photoUrls:String(r.photo_urls||''),offerStatus:st
+      photoFileIds:String(r.photo_file_ids||''),photoUrls:String(r.photo_urls||''),offerStatus:canonical
     });
   }
+
   const out=[...groups.values()].map(g=>{
     g.totalHours=pgRound2(g.totalHours);g.employees=[...g.employeesMap].filter(Boolean).sort();
     delete g.employeesMap;
     g.reports.sort((a,b)=>(a.date+' '+a.start).localeCompare(b.date+' '+b.start));
     return g;
   });
+  const byOfferId=new Map(out.map(x=>[String(x.offerId||''),x]));
+
+  // Inquiry/inspection metadata enriches an existing offer instead of creating
+  // a second zero-hour card with the same offer ID.
   for(const r of iq.rows){
+    const offerId=String(r.offer_id||'').trim();if(!offerId)continue;
     const st=String(r.status||'Offen');
-    const match=stage==='Offen'?st==='Offen':stage==='Zu erstellen'?st==='Zu erstellen':['Angenommen','Abgelehnt'].includes(st);
-    if(!match)continue;
+    const inquiryStatus=st==='Angenommen'?'Angebot Angenommen':st==='Abgelehnt'?'Angebot Abgelehnt':
+      st==='Zu erstellen'?'Angebot zu erstellen':'Offenes Angebot';
+    const canonical=String(timeStatus.get(offerId)?.status||inquiryStatus);
+    if(!allowed[stage].includes(canonical))continue;
     const d=berlinDateOnly(r.created_at_text);
-    out.push({
-      offerId:String(r.offer_id||''),inquiryId:String(r.inquiry_id||''),customer:String(r.customer||''),
+    const attachments=(()=>{try{const a=JSON.parse(String(r.attachments_json||'[]'));return Array.isArray(a)?a:[];}catch(_e){return [];}})();
+    const existing=byOfferId.get(offerId);
+    if(existing){
+      existing.status=canonical;
+      if(!existing.inquiryId)existing.inquiryId=String(r.inquiry_id||'');
+      if(!existing.customer)existing.customer=String(r.customer||'');
+      if(!existing.phone)existing.phone=String(r.phone||'');
+      if(!existing.email)existing.email=String(r.email||'');
+      if(!existing.description)existing.description=String(r.description||'');
+      if(!existing.source)existing.source=String(r.source||'');
+      if((!Array.isArray(existing.attachments)||!existing.attachments.length)&&attachments.length)existing.attachments=attachments;
+      if(d&&(!existing.firstDate||d<existing.firstDate))existing.firstDate=d;
+      if(d&&(!existing.lastDate||d>existing.lastDate))existing.lastDate=d;
+      if(r.changed_at_text)existing.changedAt=shadowGermanDateTime(r.changed_at_text);
+      if(r.changed_by)existing.changedBy=String(r.changed_by||'');
+      continue;
+    }
+    const item={
+      offerId,inquiryId:String(r.inquiry_id||''),customer:String(r.customer||''),
       phone:String(r.phone||''),email:String(r.email||''),description:String(r.description||''),
-      source:String(r.source||''),
-      attachments:(()=>{try{const a=JSON.parse(String(r.attachments_json||'[]'));return Array.isArray(a)?a:[];}catch(_e){return [];}})(),
-      status:st==='Angenommen'?'Angebot Angenommen':st==='Abgelehnt'?'Angebot Abgelehnt':
-        st==='Zu erstellen'?'Angebot zu erstellen':'Offenes Angebot',
+      source:String(r.source||''),attachments,status:canonical,
       totalHours:0,reportCount:0,employees:[],reports:[],firstDate:d,lastDate:d,
       changedAt:shadowGermanDateTime(r.changed_at_text||''),changedBy:String(r.changed_by||'')
-    });
+    };
+    out.push(item);byOfferId.set(offerId,item);
   }
+
   out.sort((a,b)=>stage==='Archiv'
     ?String(b.lastDate||'').localeCompare(String(a.lastDate||''))
     :String(a.firstDate||'').localeCompare(String(b.firstDate||'')));
