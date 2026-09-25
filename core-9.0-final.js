@@ -6142,6 +6142,10 @@ async function places10(root=document){root.querySelectorAll('input').forEach(as
 /* 13. E-Mail-Postfächer + Kalender alle 20 Minuten */
 let lastSync10=0;async function autoGmail10(){if(typeof canAccessBoss!=='function'||!canAccessBoss())return;try{const s=await api(bossPayload10({action:'getGmailStatusV10'}));if(s&&s.configured&&s.connected)await api(bossPayload10({action:'syncGmailInquiriesV10'}));}catch(_e){}}async function sync20(){if(document.hidden||!navigator.onLine||Date.now()-lastSync10<1190000)return;lastSync10=Date.now();if(typeof canAccessBoss==='function'&&canAccessBoss()){try{await autoGmail10();}catch(_e){}try{if(typeof d3Inquiries==='function')await d3Inquiries();}catch(_e){}try{if(typeof dg62Load==='function')await dg62Load();}catch(_e){}}else{try{if(typeof loadCalendarEvents==='function')await loadCalendarEvents(true);}catch(_e){}}}
 
+window.dg10MountFragDG=ensureAi10;
+window.dg10EnsureReferenceTile=ensureReferenceTile10;
+window.dg10OpenReferenceProjects=openReference10;
+
 function install10(){
   addCss10();speech10(document);cleanup10();places10(document);
   const mountBoss10=()=>{if(typeof canAccessBoss!=='function'||canAccessBoss()){ensureEmployeeOverview10();refreshEmpSelect10();ensurePartner10();ensureAi10();ensureReferenceTile10();}};
