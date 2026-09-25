@@ -3551,7 +3551,7 @@ setTimeout(applyVersion10,3200);
 /* DG App 10 - Rechnungswesen / Gmail workflow */
 (function(){
 'use strict';
-const V='20260924-1835-finance-delete5';
+const V='20260925-1444-finance-spam-move6';
 const q=id=>document.getElementById(id);
 const MONTHS=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
 const state={incoming:[],tax:[],syncing:false,reconnectUrl:''};
@@ -3582,7 +3582,7 @@ function css(){
  '.dg10-fin-toolbar{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin:10px 0 14px}.dg10-fin-list{display:grid;gap:12px}'+
  '.dg10-fin-mail{border:1px solid #dbe3ec;border-radius:15px;padding:14px;background:#fff}.dg10-fin-mail:nth-child(even){background:#f8fafc}'+
  '.dg10-fin-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.dg10-fin-subject{font-size:17px;font-weight:900}.dg10-fin-meta{color:#64748b;font-size:13px;margin-top:4px}'+
- '.dg10-fin-files{margin-top:8px;font-size:13px;color:#475569}.dg10-fin-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}'+
+ '.dg10-fin-files{margin-top:8px;font-size:13px;color:#475569}.dg10-fin-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.dg10-fin-move{display:flex;gap:7px;flex-wrap:wrap;align-items:center}.dg10-fin-move select{min-width:190px;max-width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;font:inherit}'+
  '.dg10-fin-status{margin:8px 0}.dg10-account-filter{display:grid;grid-template-columns:minmax(150px,1fr) minmax(150px,1fr);gap:12px;margin:12px 0 16px}'+
  '.dg10-account-filter label{display:block;font-weight:900;margin-bottom:5px}.dg10-account-filter select{width:100%}'+
  '.dg10-account-archive-menu{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:14px}'+
@@ -3625,13 +3625,18 @@ function financeFilesHtml(files){
    return '<span class="btn secondary" style="opacity:.65;cursor:default">'+esc(label)+'</span>';
  }).join('');
 }
+function moveOptions(kind){
+ const rows=[['inquiries','Kundenanfragen'],['incoming','Allgemeiner Rechnungseingang'],['tax','Steuerberater']];
+ return '<option value="">Verschieben nach …</option>'+rows.filter(x=>x[0]!==kind).map(x=>'<option value="'+x[0]+'">'+esc(x[1])+'</option>').join('');
+}
 function mailHtml(x,kind){
- const files=financeFilesHtml(x.attachments);
+ const files=financeFilesHtml(x.attachments),mid=esc(x.messageId);
  let actions='<a class="btn secondary" target="_blank" rel="noopener" href="'+esc(x.gmailUrl||'#')+'">In Gmail öffnen</a>';
- if(kind==='incoming')actions+='<button class="btn success" data-paid="'+esc(x.messageId)+'">Als bezahlt markieren</button>';
- if(kind==='tax')actions+='<button class="btn success" data-tax-invoice="'+esc(x.messageId)+'">Als Rechnung markieren</button><button class="btn secondary" data-tax-archive="'+esc(x.messageId)+'">Archivieren</button>';
- actions+='<button class="btn danger" data-fin-delete="'+esc(x.messageId)+'">Löschen</button>';
- return '<div class="dg10-fin-mail"><div class="dg10-fin-head"><div><div class="dg10-fin-subject">'+esc(x.subject||'(ohne Betreff)')+'</div><div class="dg10-fin-meta">'+esc(x.senderName||x.senderEmail||'')+(x.senderEmail?' · '+esc(x.senderEmail):'')+'</div></div><strong>'+esc(de(x.receivedAt))+'</strong></div>'+(files?'<div class="dg10-fin-files"><div class="muted small" style="margin-bottom:6px"><strong>Anhänge</strong></div><div class="dg10-fin-actions">'+files+'</div></div>':'')+'<div class="dg10-fin-actions">'+actions+'</div></div>';
+ if(kind==='incoming')actions+='<button class="btn success" data-paid="'+mid+'">Als bezahlt markieren</button>';
+ if(kind==='tax')actions+='<button class="btn success" data-tax-invoice="'+mid+'">Als Rechnung markieren</button><button class="btn secondary" data-tax-archive="'+mid+'">Archivieren</button>';
+ actions+='<button class="btn danger" data-fin-spam="'+mid+'">Spam</button><button class="btn danger" data-fin-delete="'+mid+'">Löschen</button>';
+ const move='<div class="dg10-fin-move"><select aria-label="E-Mail verschieben" data-fin-move-select="'+mid+'">'+moveOptions(kind)+'</select><button class="btn secondary" data-fin-move="'+mid+'">Verschieben</button></div>';
+ return '<div class="dg10-fin-mail"><div class="dg10-fin-head"><div><div class="dg10-fin-subject">'+esc(x.subject||'(ohne Betreff)')+'</div><div class="dg10-fin-meta">'+esc(x.senderName||x.senderEmail||'')+(x.senderEmail?' · '+esc(x.senderEmail):'')+'</div></div><strong>'+esc(de(x.receivedAt))+'</strong></div>'+(files?'<div class="dg10-fin-files"><div class="muted small" style="margin-bottom:6px"><strong>Anhänge</strong></div><div class="dg10-fin-actions">'+files+'</div></div>':'')+'<div class="dg10-fin-actions">'+actions+move+'</div></div>';
 }
 function googleReconnectHtml(url){
   return '<div class="status warn"><strong>Google-Freigabe muss einmalig aktualisiert werden.</strong><br>'+
@@ -3721,6 +3726,32 @@ function wireCards(){
      return;
    }
    const paid=e.target.closest('[data-paid]');if(paid){e.preventDefault();paid.disabled=true;try{await req({action:'markFinancePaidV10',messageId:paid.dataset.paid});await refreshIncoming();}finally{paid.disabled=false;}return;}
+   const spam=e.target.closest('[data-fin-spam]');if(spam){
+     e.preventDefault();
+     if(!confirm('Diese E-Mail als Spam markieren? Sie wird dauerhaft aus der App entfernt und in Gmail als Spam markiert.'))return;
+     spam.disabled=true;
+     try{
+       await req({action:'markFinanceSpamV10',messageId:spam.dataset.finSpam});
+       const active=q('bossView')?.querySelector('.dg80-shell-active');
+       if(active?.id==='dg10TaxAdvisor')await refreshTax();else await refreshIncoming();
+       await refreshCounts();
+     }finally{spam.disabled=false;}
+     return;
+   }
+   const move=e.target.closest('[data-fin-move]');if(move){
+     e.preventDefault();
+     const id=String(move.dataset.finMove||''),sel=root.querySelector('[data-fin-move-select="'+CSS.escape(id)+'"]'),target=String(sel?.value||'');
+     if(!target){alert('Bitte zuerst den Zielordner auswählen.');return;}
+     move.disabled=true;
+     try{
+       await req({action:'moveFinanceMailV10',messageId:id,target});
+       const active=q('bossView')?.querySelector('.dg80-shell-active');
+       if(active?.id==='dg10TaxAdvisor')await refreshTax();else await refreshIncoming();
+       await refreshCounts();
+       if(target==='inquiries'){try{if(typeof window.d3Dashboard==='function')await window.d3Dashboard(true);}catch(_e){}}
+     }finally{move.disabled=false;}
+     return;
+   }
    const del=e.target.closest('[data-fin-delete]');if(del){
      e.preventDefault();
      if(!confirm('Diese E-Mail wirklich löschen? Sie wird aus der App entfernt und in Gmail in den Papierkorb verschoben.'))return;
