@@ -889,7 +889,7 @@ function createGmailDirect(opts){
     const r=await row();if(!r)return {ok:true,configured:true,connected:false,needsConnect:true,redirectUri};
     syncing=true;
     try{
-      const token=await accessToken(),query='in:inbox newer_than:30d -category:promotions -category:social';
+      const token=await accessToken(),canModify=hasModifyScope(r),query='in:inbox newer_than:30d -category:promotions -category:social';
       let pageToken='',ids=[];
       // Maximal die 200 neuesten Inbox-Mails pro Lauf betrachten. Weitere Mails
       // werden in den naechsten 20-Minuten-Laeufen nachgezogen, statt Googles
@@ -901,10 +901,18 @@ function createGmailDirect(opts){
         pageToken=String(list.nextPageToken||'');if(!pageToken)break;
       }
       ids=[...new Set(ids)];
-      let known=new Set();
+      let known=new Set(),knownInquiryIds=[];
       if(ids.length){
-        const kq=await pool.query('SELECT message_id FROM gmail_import_messages_v10 WHERE message_id=ANY($1::text[])',[ids]);
+        const kq=await pool.query('SELECT message_id,inquiry_id FROM gmail_import_messages_v10 WHERE message_id=ANY($1::text[])',[ids]);
         known=new Set(kq.rows.map(x=>String(x.message_id||'')));
+        knownInquiryIds=kq.rows.filter(x=>String(x.inquiry_id||'').trim()).map(x=>String(x.message_id||''));
+      }
+      let archived=0,archiveFailed=0;
+      if(canModify&&knownInquiryIds.length){
+        for(const id of knownInquiryIds){
+          try{await apiJson(token,'POST','messages/'+encodeURIComponent(id)+'/modify',{removeLabelIds:['INBOX']});archived++;}
+          catch(e){archiveFailed++;console.error('GMAIL_INQUIRY_RECONCILE message='+id+' error='+e.message);}
+        }
       }
       const pendingAll=ids.filter(id=>!known.has(id));
       // Pro Lauf hoechstens 50 neue Mails voll laden (inkl. Anhaengen).
@@ -917,10 +925,15 @@ function createGmailDirect(opts){
           if(x.imported){imported++;sources[x.source]=(sources[x.source]||0)+1;}
           else if(x.updated){updated++;sources[x.source]=(sources[x.source]||0)+1;}
           else if(x.duplicate)duplicates++;else ignored++;
+          if(canModify&&(x.imported||x.updated||x.duplicate)&&String(x.inquiryId||'').trim()){
+            try{await apiJson(token,'POST','messages/'+encodeURIComponent(id)+'/modify',{removeLabelIds:['INBOX']});archived++;}
+            catch(e){archiveFailed++;console.error('GMAIL_INQUIRY_ARCHIVE_AFTER_IMPORT message='+id+' error='+e.message);}
+          }
         }catch(e){failed++;console.error('GMAIL_IMPORT message='+id+' error='+e.message);}
       }
       const inquiryAttachmentBackfill=await backfillInquiryAttachments(token);
       const summary={at:new Date().toISOString(),scanned:ids.length,pending:pending.length,deferred:Math.max(0,pendingAll.length-pending.length),imported,updated,ignored,duplicates,failed,sources,
+        archivedFromInbox:archived,archiveFailed,modifyAuthorized:canModify,needsReconnect:!canModify,
         attachmentBackfillUpdated:Number(inquiryAttachmentBackfill.updated||0),
         attachmentBackfillFailed:Number(inquiryAttachmentBackfill.failed||0)};
       await pool.query(`INSERT INTO app_meta(key,value) VALUES('gmail_last_sync_v10',$1::jsonb) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,[JSON.stringify(summary)]);
@@ -961,7 +974,7 @@ function createGmailDirect(opts){
 
   async function syncForUser(actor){
     const r=await sync();
-    if(r.needsConnect) r.authUrl=await authUrl(actor);
+    if(r.needsConnect||r.needsReconnect) r.authUrl=await authUrl(actor);
     return r;
   }
 
