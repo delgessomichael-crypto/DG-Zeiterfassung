@@ -1302,6 +1302,63 @@ async function finalCutoverAuditV24(){
   };
 }
 
+async function restoreTodayDiscardedOffersOnceV10(){
+  if(!pool)return {skipped:true};
+  const today=berlinTodayIso(),marker='restore_discarded_offers_once:'+today;
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);
+  if(done.rowCount)return {skipped:true,today};
+
+  let inquiryOffers=0,regieGroups=0,regieEntries=0;
+  const iq=await pool.query(
+    `UPDATE inquiry_offers_shadow
+        SET status='Zu erstellen',changed_at_text=$1,changed_by='System Wiederherstellung',shadow_updated_at=now()
+      WHERE status='Verworfen'
+        AND ((shadow_updated_at AT TIME ZONE 'Europe/Berlin')::date=$2::date
+             OR left(COALESCE(changed_at_text,''),10)=$2)
+      RETURNING offer_id`,
+    [new Date().toISOString(),today]
+  );
+  inquiryOffers=iq.rowCount;
+
+  const tq=await pool.query(
+    `SELECT id,customer,object_id,offer_id,shadow_updated_at
+       FROM time_entries_shadow
+      WHERE job_status='Verworfen'
+        AND (shadow_updated_at AT TIME ZONE 'Europe/Berlin')::date=$1::date
+      ORDER BY customer,object_id,shadow_updated_at,id`,
+    [today]
+  );
+  const groups=new Map();
+  for(const r of tq.rows){
+    const existing=String(r.offer_id||'').trim();
+    const key=existing?('offer:'+existing):('customer:'+shadowObjectKey(String(r.object_id||r.customer||'')));
+    if(!groups.has(key))groups.set(key,[]);
+    groups.get(key).push(r);
+  }
+  for(const [key,rows] of groups){
+    const existing=String(rows[0].offer_id||'').trim();
+    const offerId=existing||('RESTORED-'+today.replace(/-/g,'')+'-'+crypto.createHash('sha1').update(key).digest('hex').slice(0,10));
+    const ids=rows.map(r=>String(r.id||'')).filter(Boolean);
+    if(!ids.length)continue;
+    await pool.query(
+      `UPDATE time_entries_shadow
+          SET job_status='Angebot zu erstellen',offer_id=$2,offer_changed_at_text=$3,
+              offer_changed_by='System Wiederherstellung',shadow_updated_at=now()
+        WHERE id=ANY($1::text[])`,
+      [ids,offerId,new Date().toISOString()]
+    );
+    regieGroups++;regieEntries+=ids.length;
+  }
+
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+      ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
+    [marker,JSON.stringify({today,inquiryOffers,regieGroups,regieEntries,restoredAt:new Date().toISOString(),reason:'User requested restoration of all offers deleted today'})]
+  );
+  console.log('OFFER_RESTORE_TODAY date='+today+' inquiryOffers='+inquiryOffers+' regieGroups='+regieGroups+' regieEntries='+regieEntries);
+  return {today,inquiryOffers,regieGroups,regieEntries};
+}
+
 async function initDb() {
   if (!pool) return;
   await pool.query(schema);
@@ -1334,6 +1391,7 @@ async function initDb() {
   await initDayClosuresShadow();
   await reconcileLegacyDayClosureDuplicatesV9();
   await initTimeEntriesShadow();
+  await restoreTodayDiscardedOffersOnceV10();
   await repairOfficeAbsenceCreditsV27();
   await initRegieMetadataShadows();
   await bootstrapCompletedCustomerConsolidationV23();
