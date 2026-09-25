@@ -314,7 +314,7 @@ function createGmailDirect(opts){
   async function backfillFinanceAttachments(token){
     const q=await pool.query(
       `SELECT message_id,attachments_json FROM finance_mail_v10
-        WHERE COALESCE(attachments_json,'')<>'' ORDER BY updated_at DESC LIMIT 20`
+        WHERE COALESCE(provider,'gmail')='gmail' AND COALESCE(attachments_json,'')<>'' ORDER BY updated_at DESC LIMIT 20`
     );
     let updated=0,failed=0;
     for(const row of q.rows){
@@ -550,12 +550,13 @@ function createGmailDirect(opts){
   }
   function financeRow(r){
     let attachments=[];try{attachments=JSON.parse(String(r.attachments_json||'[]'));if(!Array.isArray(attachments))attachments=[];}catch(_e){attachments=[];}
+    const provider=String(r.provider||'gmail').toLowerCase();
     return {
       messageId:String(r.message_id||''),threadId:String(r.thread_id||''),senderEmail:String(r.sender_email||''),
       senderName:String(r.sender_name||''),subject:String(r.subject||''),receivedAt:String(r.received_at_text||''),
       category:String(r.category||''),status:String(r.status||''),paidAt:String(r.paid_at_text||''),
-      archivedAt:String(r.archived_at_text||''),attachments,gmailLabel:String(r.gmail_label||''),
-      gmailUrl:'https://mail.google.com/mail/u/0/#all/'+encodeURIComponent(String(r.message_id||''))
+      archivedAt:String(r.archived_at_text||''),attachments,gmailLabel:String(r.gmail_label||''),provider,
+      gmailUrl:provider==='gmail'?'https://mail.google.com/mail/u/0/#all/'+encodeURIComponent(String(r.message_id||'')):''
     };
   }
   async function storeFinanceMessage(token,msg,kind,labelName){
