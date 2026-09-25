@@ -9236,10 +9236,7 @@ async function directSearchCustomersV10(body){
   const session=await localSessionForBody(body,true);if(!session)return null;
   const raw=String(body.query||body.q||'').trim();
   if(raw.length<2)return [];
-  const like='%'+raw.replace(/[%_]/g,'\\async function directOfferStatisticsNativeRead(body){
-  const session=await localSessionForBody(body,true);if(!session)return null;
-  return postgresOfferStatisticsNative();
-}')+'%';
+  const like='%'+raw+'%';
   const out=[];
   const push=(source,id,customer,detail,phone,email,status,extra)=>out.push({
     source:String(source||''),id:String(id||''),customer:String(customer||''),
@@ -9249,38 +9246,38 @@ async function directSearchCustomersV10(body){
   const [inq,off,orders,regie,maint,planner,reminders,wa]=await Promise.all([
     pool.query(`SELECT id,customer,phone,email,status,subject,description,postal_code,city
       FROM customer_inquiries_shadow
-      WHERE concat_ws(' ',id,customer,phone,email,status,subject,description,postal_code,city) ILIKE $1 ESCAPE '\\'
+      WHERE concat_ws(' ',id,customer,phone,email,status,subject,description,postal_code,city) ILIKE $1
       ORDER BY shadow_updated_at DESC LIMIT 60`,[like]),
     pool.query(`SELECT offer_id,customer,phone,email,status,description,source
       FROM inquiry_offers_shadow
-      WHERE concat_ws(' ',offer_id,customer,phone,email,status,description,source) ILIKE $1 ESCAPE '\\'
+      WHERE concat_ws(' ',offer_id,customer,phone,email,status,description,source) ILIKE $1
       ORDER BY shadow_updated_at DESC LIMIT 60`,[like]),
     pool.query(`SELECT id,customer,address,phone,email,status,description,source
       FROM manual_orders_shadow
-      WHERE concat_ws(' ',id,customer,address,phone,email,status,description,source) ILIKE $1 ESCAPE '\\'
+      WHERE concat_ws(' ',id,customer,address,phone,email,status,description,source) ILIKE $1
       ORDER BY shadow_updated_at DESC LIMIT 60`,[like]),
     pool.query(`SELECT id,customer,activity,job_status,billing_status,offer_id,object_id
       FROM time_entries_shadow
-      WHERE concat_ws(' ',id,customer,activity,job_status,billing_status,offer_id,object_id) ILIKE $1 ESCAPE '\\'
+      WHERE concat_ws(' ',id,customer,activity,job_status,billing_status,offer_id,object_id) ILIKE $1
       ORDER BY shadow_updated_at DESC LIMIT 80`,[like]),
     pool.query(`SELECT c.id,c.name,c.phone,c.email,c.billing_street,c.billing_zip,c.billing_city,
                        o.id object_id,o.name object_name,o.street,o.zip,o.city
       FROM maintenance_customers_shadow c
       LEFT JOIN maintenance_objects_shadow o ON o.customer_id=c.id AND o.active=true
       WHERE c.active=true AND concat_ws(' ',c.id,c.name,c.phone,c.email,c.billing_street,c.billing_zip,c.billing_city,
-                                        o.id,o.name,o.street,o.zip,o.city) ILIKE $1 ESCAPE '\\'
+                                        o.id,o.name,o.street,o.zip,o.city) ILIKE $1
       ORDER BY c.name LIMIT 60`,[like]),
     pool.query(`SELECT id,customer,address,task,event_date,start_time,end_time
       FROM planner_events_shadow
-      WHERE concat_ws(' ',id,customer,address,task,event_date,start_time,end_time) ILIKE $1 ESCAPE '\\'
+      WHERE concat_ws(' ',id,customer,address,task,event_date,start_time,end_time) ILIKE $1
       ORDER BY event_date DESC LIMIT 60`,[like]),
     pool.query(`SELECT id,offer_id,customer,offer_number,phone,email,status,result,description
       FROM offer_reminders_shadow
-      WHERE concat_ws(' ',id,offer_id,customer,offer_number,phone,email,status,result,description) ILIKE $1 ESCAPE '\\'
+      WHERE concat_ws(' ',id,offer_id,customer,offer_number,phone,email,status,result,description) ILIKE $1
       ORDER BY shadow_updated_at DESC LIMIT 60`,[like]),
     pool.query(`SELECT id,wa_id,contact_name,category,status,last_text
       FROM whatsapp_threads_v10
-      WHERE concat_ws(' ',id,wa_id,contact_name,category,status,last_text) ILIKE $1 ESCAPE '\\'
+      WHERE concat_ws(' ',id,wa_id,contact_name,category,status,last_text) ILIKE $1
       ORDER BY last_message_at DESC NULLS LAST LIMIT 60`,[like])
   ]);
   for(const r of inq.rows)push('Anfragen',r.id,r.customer,r.subject||r.description,r.phone,r.email,r.status,[r.postal_code,r.city].filter(Boolean).join(' '));
