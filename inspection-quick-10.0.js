@@ -2,9 +2,10 @@
 (function(){
 'use strict';
 
-const V='20260924-1425-inspection-time-speech2';
+const V='20260925-1915-inspection-camera3';
 const $=id=>document.getElementById(id);
 const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let inspectionPhotos=[];
 
 function chefAllowed(){
   // Erst aktiv, wenn die Mitarbeiteransicht wirklich geöffnet wurde.
@@ -132,11 +133,39 @@ function renderCalendarSelect(){
     if(idx>=0){sel.value=String(idx);fillFromEvent(current,false);}
   }
 }
+function renderInspectionPhotos(){
+  const box=$('inspectionPhotoPreview'),st=$('inspectionPhotoStatus');if(!box)return;
+  box.innerHTML=inspectionPhotos.map((p,i)=>'<div style="position:relative;border:1px solid #d1d5db;border-radius:12px;overflow:hidden;background:#fff"><img src="'+esc(p.dataUrl)+'" alt="Besichtigungsbild '+(i+1)+'" style="display:block;width:100%;height:110px;object-fit:cover"><button type="button" data-inspection-photo-remove="'+i+'" style="position:absolute;top:5px;right:5px;border:0;border-radius:999px;width:30px;height:30px;background:#b91c1c;color:#fff;font-weight:900">×</button></div>').join('');
+  if(st)st.textContent=inspectionPhotos.length?inspectionPhotos.length+' Bild(er) angehängt.':'Noch keine Bilder angehängt.';
+}
+function resizeInspectionImage(file){
+  return new Promise((resolve,reject)=>{
+    const r=new FileReader();r.onerror=reject;r.onload=()=>{
+      const img=new Image();img.onerror=reject;img.onload=()=>{
+        const max=1200;let w=img.width,h=img.height;
+        if(w>max||h>max){const f=Math.min(max/w,max/h);w=Math.round(w*f);h=Math.round(h*f);}
+        const cv=document.createElement('canvas');cv.width=w;cv.height=h;cv.getContext('2d').drawImage(img,0,0,w,h);
+        resolve(cv.toDataURL('image/jpeg',0.7));
+      };img.src=r.result;
+    };r.readAsDataURL(file);
+  });
+}
+async function addInspectionPhotos(files){
+  const list=Array.from(files||[]);if(!list.length)return;
+  if(inspectionPhotos.length+list.length>6){notice('Maximal 6 Bilder pro Besichtigung.','warn');return;}
+  try{
+    for(const file of list)inspectionPhotos.push({dataUrl:await resizeInspectionImage(file),name:file.name||'Besichtigungsbild.jpg'});
+    renderInspectionPhotos();
+  }catch(e){notice('Mindestens ein Bild konnte nicht vorbereitet werden.','warn');}
+  if($('inspectionCameraInput'))$('inspectionCameraInput').value='';
+  if($('inspectionGalleryInput'))$('inspectionGalleryInput').value='';
+}
 function clearForm(){
   ['inspectionLastName','inspectionFirstName','inspectionStreet','inspectionPostalCode','inspectionCity','inspectionEmail','inspectionMobile','inspectionLandline','inspectionDescription','inspectionCalendarEventId','inspectionTimeDate','inspectionTimeStart','inspectionTimeEnd','inspectionTimeHours'].forEach(id=>{if($(id))$(id).value='';});
   if($('inspectionCalendarSelect'))$('inspectionCalendarSelect').value='';
   const p=$('inspectionTimePanel');if(p)p.classList.add('hidden');
   const b=$('inspectionTimeBtn');if(b)b.textContent='Zeit erfassen';
+  inspectionPhotos=[];renderInspectionPhotos();
   notice('','info');
 }
 function closeModal(){
@@ -209,7 +238,8 @@ async function submit(){
     timeDate:String($('inspectionTimeDate')?.value||'').trim(),
     timeStart:String($('inspectionTimeStart')?.value||'').trim(),
     timeEnd:String($('inspectionTimeEnd')?.value||'').trim(),
-    timeHours:updateTimeHours()
+    timeHours:updateTimeHours(),
+    photos:inspectionPhotos.slice(0,6)
   };
   if(!item.lastName&&!item.firstName){notice('Bitte Name oder Vorname eintragen.','error');$('inspectionLastName')?.focus();return;}
   if(!item.description){notice('Bitte Auftragsbeschreibung eintragen.','error');$('inspectionDescription')?.focus();return;}
@@ -264,6 +294,17 @@ function buildModal(){
       <label>Auftragsbeschreibung</label>
       <textarea id="inspectionDescription" class="inspection-description" placeholder="Auftragsbeschreibung einsprechen oder eintippen"></textarea>
       <button type="button" class="btn secondary" id="inspectionSpeechBtn" style="width:100%;margin-top:8px">🎤 Spracheingabe</button>
+      <div style="margin-top:14px;padding:12px;border:1px solid #d7dee8;border-radius:12px;background:#f8fafc">
+        <strong>📷 Bilder zur Besichtigung</strong>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
+          <button type="button" class="btn primary" id="inspectionCameraBtn">📷 Kamera</button>
+          <button type="button" class="btn secondary" id="inspectionGalleryBtn">🖼️ Vorhandene Bilder</button>
+        </div>
+        <input id="inspectionCameraInput" type="file" accept="image/*" capture="environment" class="hidden">
+        <input id="inspectionGalleryInput" type="file" accept="image/*" multiple class="hidden">
+        <div id="inspectionPhotoStatus" class="muted small" style="margin-top:8px">Noch keine Bilder angehängt.</div>
+        <div id="inspectionPhotoPreview" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-top:8px"></div>
+      </div>
       <button type="button" class="btn danger" id="inspectionTimeBtn" style="width:100%;margin-top:14px">Zeit erfassen</button>
       <div id="inspectionTimePanel" class="hidden" style="margin-top:10px;padding:10px;border:1px solid #cbd5e1;border-radius:10px">
         <div class="grid2"><div><label>Datum</label><input id="inspectionTimeDate" type="date"></div><div><label>Stunden</label><input id="inspectionTimeHours" readonly></div></div>
@@ -276,6 +317,11 @@ function buildModal(){
   document.body.appendChild(m);
   $('inspectionCloseBtn').addEventListener('click',closeModal);
   $('inspectionSpeechBtn').addEventListener('click',toggleSpeech);
+  $('inspectionCameraBtn').addEventListener('click',()=>$('inspectionCameraInput')?.click());
+  $('inspectionGalleryBtn').addEventListener('click',()=>$('inspectionGalleryInput')?.click());
+  $('inspectionCameraInput').addEventListener('change',e=>addInspectionPhotos(e.target.files));
+  $('inspectionGalleryInput').addEventListener('change',e=>addInspectionPhotos(e.target.files));
+  $('inspectionPhotoPreview').addEventListener('click',e=>{const b=e.target.closest('[data-inspection-photo-remove]');if(!b)return;inspectionPhotos.splice(Number(b.dataset.inspectionPhotoRemove),1);renderInspectionPhotos();});
   $('inspectionTimeBtn').addEventListener('click',toggleTimeCapture);
   $('inspectionTimeStart').addEventListener('input',updateTimeHours);
   $('inspectionTimeEnd').addEventListener('input',updateTimeHours);
