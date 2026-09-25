@@ -13,6 +13,8 @@
   "dependencies": {
     "pg": "^8.13.1",
     "jszip": "^3.10.1",
-    "pdf-lib": "^1.17.1"
+    "pdf-lib": "^1.17.1",
+    "imapflow": "^1.0.181",
+    "mailparser": "^3.7.2"
   }
 }
