@@ -19,6 +19,7 @@ const FILES = new Map([
   ['/inspection-quick-10.0.js', 'inspection-quick-10.0.js'],
   ['/button-customize-10.0.js', 'button-customize-10.0.js'],
   ['/offer-trash-search-10.0.js', 'offer-trash-search-10.0.js'],
+  ['/office-compact-10.0.js', 'office-compact-10.0.js'],
   ['/day-total-display-10.0.js', 'day-total-display-10.0.js'],
   ['/customerflow-9.0-final.js', 'customerflow-9.0-final.js'],
   ['/payroll-9.0-final.js', 'payroll-9.0-final.js'],
