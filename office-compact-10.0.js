@@ -2,13 +2,15 @@
 (function(){
 'use strict';
 
-const VERSION='20260925-1915-office-compact4';
+const VERSION='20260926-1525-office-compact5-invoice-alert';
 const q=id=>document.getElementById(id);
 const S=window.DG10_OFFICE_COMPACT=window.DG10_OFFICE_COMPACT||{};
 S.sectionState=S.sectionState||{};
 S.upperState=S.upperState||{access:true,app:true,tools:true};
 S.timer=S.timer||null;
 S.observer=S.observer||null;
+S.alertTimer=S.alertTimer||null;
+S.alertPhase=!!S.alertPhase;
 
 function ensureCss(){
   if(q('dg10OfficeCompactCss'))return;
@@ -20,6 +22,8 @@ function ensureCss(){
     '.dg10-upper-title{border:0!important;font:inherit!important;text-align:left!important}'+
     '.dg10-upper-title:focus,#bossView .dg80-final-section-title:focus{outline:3px solid rgba(49,88,158,.22)!important;outline-offset:2px!important}'+
     '.dg10-upper-chevron,.dg10-section-chevron{font-size:22px!important;line-height:1!important;flex:0 0 auto!important}'+
+    '#bossView .dg10-section-alert-count{display:inline-flex!important;align-items:center!important;justify-content:center!important;min-width:30px!important;height:30px!important;padding:0 9px!important;margin-left:auto!important;border-radius:999px!important;background:#dc2626!important;color:#fff!important;font-size:15px!important;font-weight:900!important;line-height:1!important;box-shadow:0 2px 7px rgba(0,0,0,.16)!important}'+
+    '#bossView .dg10-section-alert-count.hidden{display:none!important}'+
     '.dg10-upper-body{padding:10px 12px!important}'+
     '.dg10-upper-section.dg10-upper-collapsed>.dg10-upper-body{display:none!important}'+
     '#bossView .dg80-final-section.dg10-section-collapsed>:not(.dg80-final-section-title){display:none!important}'+
@@ -133,6 +137,47 @@ function keyOf(sec){
 }
 function defaultCollapsed(key){return key!=='daily';}
 
+function invoiceCount(sec){
+  if(!sec||keyOf(sec)!=='accounting')return 0;
+  const local=sec.querySelector('[data-dg10-account="create"] strong');
+  const fallback=q('d3Count-completed');
+  const raw=String(local?.textContent||fallback?.textContent||'0').trim();
+  const m=raw.match(/-?\d+/);
+  return m?Math.max(0,Number(m[0])||0):0;
+}
+function paintInvoiceAlert(sec,title,collapsed){
+  if(!sec||!title||keyOf(sec)!=='accounting')return;
+  const n=invoiceCount(sec);
+  let badge=title.querySelector(':scope > .dg10-section-alert-count');
+  if(!badge){
+    badge=document.createElement('span');
+    badge.className='dg10-section-alert-count hidden';
+    badge.setAttribute('aria-label','Offene Rechnungen zu erstellen');
+    const ch=title.querySelector(':scope > .dg10-section-chevron');
+    if(ch)title.insertBefore(badge,ch);else title.appendChild(badge);
+  }
+  badge.textContent=String(n);
+  badge.classList.toggle('hidden',n<=0);
+  const alert=collapsed&&n>0;
+  title.classList.toggle('dg10-invoice-alert',alert);
+  if(alert){
+    const red=S.alertPhase;
+    title.style.setProperty('background',red?'#fee2e2':'#dcfce7','important');
+    title.style.setProperty('color',red?'#991b1b':'#166534','important');
+    title.style.setProperty('box-shadow',red?'inset 0 0 0 2px #ef4444':'inset 0 0 0 2px #22c55e','important');
+  }else{
+    title.style.removeProperty('background');
+    title.style.removeProperty('color');
+    title.style.removeProperty('box-shadow');
+  }
+}
+function repaintInvoiceAlerts(){
+  q('bossView')?.querySelectorAll('.dg80-final-section[data-section="accounting"]').forEach(sec=>{
+    const title=sec.querySelector(':scope > .dg80-final-section-title');
+    if(title)paintInvoiceAlert(sec,title,sec.classList.contains('dg10-section-collapsed'));
+  });
+}
+
 function applySection(sec){
   const title=sec.querySelector(':scope > .dg80-final-section-title');
   if(!title)return;
@@ -151,6 +196,7 @@ function applySection(sec){
     title.appendChild(ch);
   }
   ch.textContent=collapsed?'▸':'▾';
+  paintInvoiceAlert(sec,title,collapsed);
   if(title.dataset.dg10CollapseBound==='1')return;
   title.dataset.dg10CollapseBound='1';
   const toggle=e=>{
@@ -180,6 +226,12 @@ function schedule(){
 }
 function install(){
   sync();
+  if(!S.alertTimer){
+    S.alertTimer=setInterval(()=>{
+      S.alertPhase=!S.alertPhase;
+      repaintInvoiceAlerts();
+    },850);
+  }
   if(!S.observer){
     S.observer=new MutationObserver(schedule);
     S.observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class']});
