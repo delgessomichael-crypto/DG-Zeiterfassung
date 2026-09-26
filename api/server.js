@@ -11571,17 +11571,6 @@ async function tryDirectPostgresWrite(action,body){
         // nur der Angebotsbereich blendet diesen Vorgang dauerhaft aus.
         result={ok:true,offerId,purged:true};
       }else{
-          await client.query(
-            `UPDATE time_entries_shadow SET offer_id='',offer_changed_at_text='',offer_changed_by='',shadow_updated_at=now()
-             WHERE offer_id=$1 AND job_status='Verworfen'`,[offerId]
-          );
-        }
-        await client.query(
-          `UPDATE offer_trash_v10 SET purged_at=now(),purged_by=$2 WHERE offer_id=$1 AND restored_at IS NULL AND purged_at IS NULL`,
-          [offerId,by]
-        );
-        result={ok:true,offerId,purged:true};
-      }else{
         const totalHours=Math.round(tq.rows.reduce((s,r)=>s+Number(r.hours||0),0)*100)/100;
         if(!iq.rowCount&&!tq.rowCount)throw new Error('Angebot wurde nicht gefunden.');
         let mode=asRunning&&tq.rowCount?'Regieberichte':'',manualOrderId='';
