@@ -11484,14 +11484,32 @@ async function tryDirectPostgresWrite(action,body){
            FROM inquiry_offers_shadow WHERE offer_id=ANY($1::text[]) FOR UPDATE`,[offerIds]
       );
       const tq=await client.query(
-        `SELECT id,offer_id,job_status FROM time_entries_shadow WHERE offer_id=ANY($1::text[]) FOR UPDATE`,[offerIds]
+        `SELECT id,offer_id,job_status,shadow_updated_at FROM time_entries_shadow WHERE offer_id=ANY($1::text[]) FOR UPDATE`,[offerIds]
       );
       const found=new Set([...iq.rows.map(r=>String(r.offer_id||'')),...tq.rows.map(r=>String(r.offer_id||''))]);
       const missing=offerIds.filter(id=>!found.has(id));
       if(missing.length)throw new Error('Mindestens ein Angebot wurde nicht mehr gefunden. Bitte Liste neu laden.');
-      const badInquiry=iq.rows.find(r=>!['Zu erstellen','Offen'].includes(String(r.status||'')));
-      const badTime=tq.rows.find(r=>String(r.job_status||'')!=='Angebot zu erstellen');
-      if(badInquiry||badTime)throw new Error('Zusammenführen ist nur bei „Zu erstellende Angebote“ möglich.');
+      // Exakt dieselbe Statuslogik wie die sichtbare Liste "Zu erstellende Angebote":
+      // Bei vorhandenen Zeitberichten ist der zuletzt aktualisierte Zeitbericht maßgeblich,
+      // sonst der Status des Angebotsdatensatzes. Alte historische Zeilen dürfen das
+      // Zusammenführen nicht blockieren.
+      const latestTimeStatus=new Map();
+      for(const r of tq.rows){
+        const id=String(r.offer_id||'').trim(),updated=r.shadow_updated_at?new Date(r.shadow_updated_at).getTime():0;
+        const prev=latestTimeStatus.get(id);
+        if(!prev||updated>=prev.updated)latestTimeStatus.set(id,{status:String(r.job_status||''),updated});
+      }
+      const inquiryStatus=new Map(iq.rows.map(r=>{
+        const s=String(r.status||'Offen');
+        const mapped=s==='Angenommen'?'Angebot Angenommen':s==='Abgelehnt'?'Angebot Abgelehnt':
+          s==='Zu erstellen'?'Angebot zu erstellen':'Offenes Angebot';
+        return [String(r.offer_id||''),mapped];
+      }));
+      const invalid=offerIds.find(id=>{
+        const canonical=String(latestTimeStatus.get(id)?.status||inquiryStatus.get(id)||'');
+        return canonical!=='Angebot zu erstellen';
+      });
+      if(invalid)throw new Error('Mindestens ein markierter Vorgang ist nicht mehr unter „Zu erstellende Angebote“. Bitte Liste neu laden.');
 
       const primaryIq=iq.rows.find(r=>String(r.offer_id||'')===primary)||null;
       const secondaryIq=iq.rows.filter(r=>String(r.offer_id||'')!==primary);
@@ -11522,7 +11540,7 @@ async function tryDirectPostgresWrite(action,body){
         }
         await client.query(
           `UPDATE inquiry_offers_shadow SET customer=$2,phone=$3,email=$4,description=$5,source=$6,
-             attachments_json=$7,changed_at_text=$8,changed_by=$9,shadow_updated_at=now()
+             attachments_json=$7,status='Zu erstellen',changed_at_text=$8,changed_by=$9,shadow_updated_at=now()
            WHERE offer_id=$1`,
           [primary,String(merged.customer||''),String(merged.phone||''),String(merged.email||''),
            String(merged.description||''),String(merged.source||''),String(merged.attachments_json||'[]'),nowIso,by]
@@ -11557,7 +11575,8 @@ async function tryDirectPostgresWrite(action,body){
       const secondaryIds=offerIds.filter(id=>id!==primary);
       if(secondaryIds.length){
         await client.query(
-          `UPDATE time_entries_shadow SET offer_id=$1,offer_changed_at_text=$3,offer_changed_by=$4,shadow_updated_at=now()
+          `UPDATE time_entries_shadow SET offer_id=$1,job_status='Angebot zu erstellen',
+             offer_changed_at_text=$3,offer_changed_by=$4,shadow_updated_at=now()
             WHERE offer_id=ANY($2::text[])`,
           [primary,secondaryIds,nowIso,by]
         );
