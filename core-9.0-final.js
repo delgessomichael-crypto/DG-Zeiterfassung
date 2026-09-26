@@ -4693,7 +4693,7 @@ window.dg70ShopSpeech=function(){
 };
 
 function editorHtml70(){
-  const title=shopMode==='new'?'Neue Einkaufsliste':'Einkaufsliste erweitern / bearbeiten';
+  const title=shopMode==='new'?'Neue Einkaufsliste':shopMode==='replace'?'Einkaufsliste bearbeiten':'Einkaufsliste erweitern';
   return '<div class="dg70-shop-head"><h2>'+title+'</h2><button type="button" class="dg70-shop-close" data-shop-close>×</button></div>'+
     '<div class="dg70-shop-form">'+
       '<label for="dg70ShopCustomer">Kunde / Baustelle</label><input id="dg70ShopCustomer" placeholder="z. B. Müller – Badumbau Fürth">'+
@@ -4712,8 +4712,7 @@ function renderEditor70(){
   const rows=read70(),row=rows.find(x=>x.id===shopEditId);
   q('dg70ShopCustomer').value=row?row.customer:'';
   q('dg70ShopDate').value=row?row.needDate:today70();
-  q('dg70ShopText').value=row?'- ': '- ';
-  if(shopMode==='edit'&&row)q('dg70ShopText').value='- ';
+  q('dg70ShopText').value=(shopMode==='replace'&&row)?lineText70(row.items):'- ';
   q('dg70ShopText').focus();
 }
 
@@ -4724,7 +4723,7 @@ function listHtml70(){
     return '<div class="dg70-shop-card">'+
       '<div class="dg70-shop-card-head"><div class="dg70-shop-customer">'+esc70(row.customer)+'</div><div class="dg70-shop-date'+dueClass70(row.needDate)+'">Benötigt: '+esc70(fmtDate70(row.needDate))+'</div></div>'+
       '<div class="dg70-shop-items">'+(items||'<div class="muted">Keine Materialien mehr auf der Liste.</div>')+'</div>'+
-      '<div class="dg70-shop-actions"><button type="button" class="btn danger" data-shop-delete="'+esc70(row.id)+'">Löschen</button><button type="button" class="btn success" data-shop-add="'+esc70(row.id)+'">Hinzufügen</button></div>'+
+      '<div class="dg70-shop-actions"><button type="button" class="btn danger" data-shop-delete="'+esc70(row.id)+'">Löschen</button><button type="button" class="btn secondary" data-shop-edit="'+esc70(row.id)+'">Bearbeiten</button><button type="button" class="btn success" data-shop-add="'+esc70(row.id)+'">Hinzufügen</button></div>'+
     '</div>';
   }).join(''):'<div class="dg70-shop-empty">Noch keine Einkaufslisten vorhanden.</div>';
   return '<div class="dg70-shop-head"><h2>Einkauf</h2><button type="button" class="dg70-shop-close" data-shop-close>×</button></div>'+
@@ -4743,7 +4742,7 @@ function openShell70(){
     document.body.appendChild(o);
     o.addEventListener('click',e=>{
       if(e.target===o){window.dg70ShoppingClose();return;}
-      const t=e.target.closest('[data-shop-close],[data-shop-new],[data-shop-save],[data-shop-back],[data-shop-speech],[data-shop-normalize],[data-shop-delete],[data-shop-add],[data-shop-remove]');
+      const t=e.target.closest('[data-shop-close],[data-shop-new],[data-shop-save],[data-shop-back],[data-shop-speech],[data-shop-normalize],[data-shop-delete],[data-shop-edit],[data-shop-add],[data-shop-remove]');
       if(!t)return;
       if(t.hasAttribute('data-shop-close'))return window.dg70ShoppingClose();
       if(t.hasAttribute('data-shop-new')){shopMode='new';shopEditId='';renderEditor70();return;}
@@ -4752,6 +4751,7 @@ function openShell70(){
       if(t.hasAttribute('data-shop-normalize')){normalizeTextarea70(q('dg70ShopText'));return;}
       if(t.hasAttribute('data-shop-save'))return saveEditor70();
       if(t.hasAttribute('data-shop-delete'))return deleteList70(t.dataset.shopDelete);
+      if(t.hasAttribute('data-shop-edit')){shopMode='replace';shopEditId=t.dataset.shopEdit;renderEditor70();return;}
       if(t.hasAttribute('data-shop-add')){shopMode='edit';shopEditId=t.dataset.shopAdd;renderEditor70();return;}
       if(t.hasAttribute('data-shop-remove'))return removeItem70(t.dataset.shopRemove,t.dataset.itemRemove);
     });
@@ -4781,11 +4781,16 @@ function saveEditor70(){
   if(!needDate){if(status)status.textContent='Bitte angeben, wann das Material benötigt wird.';return;}
   if(!add.length){if(status)status.textContent='Bitte mindestens ein Material eintragen.';return;}
   const rows=read70();
-  if(shopMode==='edit'&&shopEditId){
+  if((shopMode==='edit'||shopMode==='replace')&&shopEditId){
     const row=rows.find(x=>x.id===shopEditId);
     if(!row){if(status)status.textContent='Einkaufsliste wurde nicht gefunden.';return;}
-    row.customer=customer;row.needDate=needDate;row.items=row.items||[];
-    add.forEach(text=>row.items.push({id:uid70(),text}));
+    row.customer=customer;row.needDate=needDate;
+    if(shopMode==='replace'){
+      row.items=add.map(text=>({id:uid70(),text}));
+    }else{
+      row.items=row.items||[];
+      add.forEach(text=>row.items.push({id:uid70(),text}));
+    }
     row.updatedAt=new Date().toISOString();
   }else{
     rows.push({id:uid70(),customer,needDate,items:add.map(text=>({id:uid70(),text})),createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
