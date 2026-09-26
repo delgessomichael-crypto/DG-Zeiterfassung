@@ -9117,7 +9117,7 @@ async function postgresOfferReportsNative(body){
     'Archiv':['Angebot Angenommen','Angebot Abgelehnt']
   };
   if(!allowed[stage])return null;
-  const [tq,iq]=await Promise.all([
+  const [tq,iq,hiddenQ]=await Promise.all([
     pool.query(
       `SELECT id,employee_name,entry_date,customer,start_time,end_time,hours,activity,
               transmitted_at_text,material_used,material,customer_signature_url,photo_count,
@@ -9130,15 +9130,20 @@ async function postgresOfferReportsNative(body){
     pool.query(
       `SELECT offer_id,inquiry_id,customer,phone,email,description,source,created_at_text,status,
               changed_at_text,changed_by,attachments_json,shadow_updated_at FROM inquiry_offers_shadow`
+    ),
+    pool.query(
+      `SELECT DISTINCT offer_id FROM offer_trash_v10
+        WHERE restored_at IS NULL`
     )
   ]);
+  const hiddenOffers=new Set(hiddenQ.rows.map(r=>String(r.offer_id||'').trim()).filter(Boolean));
 
   // One offer ID has exactly one canonical status. For offers with time entries,
   // the latest active time-entry status is authoritative. This prevents a single
   // offer from appearing in two stages when one mirror row is older than another.
   const timeStatus=new Map();
   for(const r of tq.rows){
-    const offerId=String(r.offer_id||'').trim();if(!offerId)continue;
+    const offerId=String(r.offer_id||'').trim();if(!offerId||hiddenOffers.has(offerId))continue;
     const updated=r.shadow_updated_at?new Date(r.shadow_updated_at).getTime():0;
     const prev=timeStatus.get(offerId);
     if(!prev||updated>=prev.updated)timeStatus.set(offerId,{status:String(r.job_status||'Abgeschlossen'),updated});
@@ -9146,7 +9151,7 @@ async function postgresOfferReportsNative(body){
 
   const groups=new Map();
   for(const r of tq.rows){
-    const offerId=String(r.offer_id||'').trim();if(!offerId)continue;
+    const offerId=String(r.offer_id||'').trim();if(!offerId||hiddenOffers.has(offerId))continue;
     const canonical=String(timeStatus.get(offerId)?.status||r.job_status||'Abgeschlossen');
     if(!allowed[stage].includes(canonical))continue;
     const date=berlinDateOnly(r.entry_date);
@@ -9184,7 +9189,7 @@ async function postgresOfferReportsNative(body){
   // Inquiry/inspection metadata enriches an existing offer instead of creating
   // a second zero-hour card with the same offer ID.
   for(const r of iq.rows){
-    const offerId=String(r.offer_id||'').trim();if(!offerId)continue;
+    const offerId=String(r.offer_id||'').trim();if(!offerId||hiddenOffers.has(offerId))continue;
     const st=String(r.status||'Offen');
     const inquiryStatus=st==='Angenommen'?'Angebot Angenommen':st==='Abgelehnt'?'Angebot Abgelehnt':
       st==='Zu erstellen'?'Angebot zu erstellen':'Offenes Angebot';
@@ -11515,11 +11520,6 @@ async function tryDirectPostgresWrite(action,body){
         const trashId='TRASH-'+crypto.randomUUID();
         if(!iq.rowCount&&!tq.rowCount)throw new Error('Auftrag wurde nicht gefunden.');
 
-        const badTime=tq.rows.find(r=>String(r.job_status||'')!=='Angebot zu erstellen');
-        if(badTime)throw new Error('Nur noch nicht erstellte Angebote können in den Papierkorb verschoben werden.');
-        if(iq.rowCount&&!['Zu erstellen','Offen'].includes(String(iq.rows[0].status||'')))
-          throw new Error('Nur noch nicht erstellte Angebote können in den Papierkorb verschoben werden.');
-
         const ids=tq.rows.map(r=>String(r.id||'')).filter(Boolean);
         let customer=iq.rowCount?String(iq.rows[0].customer||''):'';
         let description=iq.rowCount?String(iq.rows[0].description||''):'';
@@ -11539,69 +11539,38 @@ async function tryDirectPostgresWrite(action,body){
           [trashId,offerId,customer,description,sourceType,JSON.stringify(ids),by]
         );
 
-        if(iq.rowCount){
-          await client.query(
-            `UPDATE inquiry_offers_shadow SET status='Verworfen',changed_at_text=$2,changed_by=$3,shadow_updated_at=now() WHERE offer_id=$1`,
-            [offerId,nowIso,by]
-          );
-        }
-        if(ids.length){
-          await client.query(
-            `UPDATE time_entries_shadow SET job_status='Verworfen',offer_changed_at_text=$2,offer_changed_by=$3,shadow_updated_at=now()
-              WHERE id=ANY($1::text[])`,
-            [ids,nowIso,by]
-          );
-        }
-        result={ok:true,count:Math.max(1,ids.length),trashId};
+        // Wichtig: zugrunde liegende Berichte/Aufträge bleiben unverändert.
+        // Der Papierkorb steuert ausschließlich die Sichtbarkeit im Angebotsbereich.
+        result={ok:true,count:1,trashId,offerId,hiddenOnly:true};
       }else if(action==='restoreDiscardedOfferV10'){
         const trashQ=await client.query(
-          `SELECT trash_id,source_type,entry_ids_json FROM offer_trash_v10
+          `SELECT trash_id FROM offer_trash_v10
             WHERE offer_id=$1 AND restored_at IS NULL AND purged_at IS NULL
             ORDER BY deleted_at DESC LIMIT 1 FOR UPDATE`,[offerId]
         );
-        if(iq.rowCount&&String(iq.rows[0].status||'')==='Verworfen'){
-          await client.query(
-            `UPDATE inquiry_offers_shadow SET status='Zu erstellen',changed_at_text=$2,changed_by=$3,shadow_updated_at=now() WHERE offer_id=$1`,
-            [offerId,nowIso,by]
-          );
-        }
-        let entryIds=[];
-        if(trashQ.rowCount&&Array.isArray(trashQ.rows[0].entry_ids_json))entryIds=trashQ.rows[0].entry_ids_json.map(String).filter(Boolean);
-        if(entryIds.length){
-          await client.query(
-            `UPDATE time_entries_shadow SET job_status='Angebot zu erstellen',offer_id=$2,
-               offer_changed_at_text=$3,offer_changed_by=$4,shadow_updated_at=now()
-             WHERE id=ANY($1::text[])`,[entryIds,offerId,nowIso,by]
-          );
-        }else if(tq.rowCount){
-          await client.query(
-            `UPDATE time_entries_shadow SET job_status='Angebot zu erstellen',offer_changed_at_text=$2,offer_changed_by=$3,shadow_updated_at=now()
-             WHERE offer_id=$1 AND job_status='Verworfen'`,[offerId,nowIso,by]
-          );
-        }
-        if(!iq.rowCount&&!entryIds.length&&!tq.rowCount)throw new Error('Gelöschtes Angebot wurde nicht gefunden.');
+        if(!trashQ.rowCount)throw new Error('Gelöschtes Angebot wurde nicht gefunden.');
         await client.query(
-          `UPDATE offer_trash_v10 SET restored_at=now(),restored_by=$2 WHERE offer_id=$1 AND restored_at IS NULL AND purged_at IS NULL`,
-          [offerId,by]
+          `UPDATE offer_trash_v10 SET restored_at=now(),restored_by=$2
+            WHERE trash_id=$1`,
+          [String(trashQ.rows[0].trash_id||''),by]
         );
         result={ok:true,offerId,status:'Angebot zu erstellen',restored:true};
       }else if(action==='purgeDiscardedOfferV10'){
         const trashQ=await client.query(
-          `SELECT trash_id,entry_ids_json FROM offer_trash_v10
+          `SELECT trash_id FROM offer_trash_v10
             WHERE offer_id=$1 AND restored_at IS NULL AND purged_at IS NULL
             ORDER BY deleted_at DESC LIMIT 1 FOR UPDATE`,[offerId]
         );
-        if(iq.rowCount&&String(iq.rows[0].status||'')==='Verworfen'){
-          await client.query('DELETE FROM inquiry_offers_shadow WHERE offer_id=$1',[offerId]);
-        }
-        let entryIds=[];
-        if(trashQ.rowCount&&Array.isArray(trashQ.rows[0].entry_ids_json))entryIds=trashQ.rows[0].entry_ids_json.map(String).filter(Boolean);
-        if(entryIds.length){
-          await client.query(
-            `UPDATE time_entries_shadow SET offer_id='',offer_changed_at_text='',offer_changed_by='',shadow_updated_at=now()
-             WHERE id=ANY($1::text[]) AND job_status='Verworfen'`,[entryIds]
-          );
-        }else{
+        if(!trashQ.rowCount)throw new Error('Gelöschtes Angebot wurde nicht gefunden.');
+        await client.query(
+          `UPDATE offer_trash_v10 SET purged_at=now(),purged_by=$2
+            WHERE trash_id=$1`,
+          [String(trashQ.rows[0].trash_id||''),by]
+        );
+        // Auch beim endgültigen Löschen bleibt der ursprüngliche Bericht erhalten;
+        // nur der Angebotsbereich blendet diesen Vorgang dauerhaft aus.
+        result={ok:true,offerId,purged:true};
+      }else{
           await client.query(
             `UPDATE time_entries_shadow SET offer_id='',offer_changed_at_text='',offer_changed_by='',shadow_updated_at=now()
              WHERE offer_id=$1 AND job_status='Verworfen'`,[offerId]
