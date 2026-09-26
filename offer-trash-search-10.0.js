@@ -230,6 +230,88 @@ function install(){
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();
 
+/* DG App 10 - Angebotsvorgaenge in "Zu erstellende Angebote" zusammenfuegen. */
+(function(){
+'use strict';
+const S=window.DG10_OFFER_MERGE=window.DG10_OFFER_MERGE||{selected:new Set(),wrapped:false};
+
+function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function root(){return document.getElementById('d3OfferCreateList');}
+function rows(){try{return Array.isArray(window.DG3&&DG3.offers&&DG3.offers['Zu erstellen'])?DG3.offers['Zu erstellen']:[];}catch(_e){return [];}}
+function updateBar(){
+  const b=document.getElementById('dg10OfferMergeBtn'),n=document.getElementById('dg10OfferMergeCount');
+  const count=S.selected.size;
+  if(b)b.disabled=count<2;
+  if(n)n.textContent=String(count);
+}
+function decorate(){
+  const r=root();if(!r)return;
+  let bar=document.getElementById('dg10OfferMergeBar');
+  if(!bar){
+    bar=document.createElement('div');
+    bar.id='dg10OfferMergeBar';
+    bar.className='report-actions';
+    bar.style.margin='0 0 14px 0';
+    bar.innerHTML='<button type="button" class="btn success" id="dg10OfferMergeBtn" disabled>Ausgewählte zusammenfügen (<span id="dg10OfferMergeCount">0</span>)</button><span class="muted small">Mindestens zwei Angebotskarten markieren.</span>';
+    r.parentElement.insertBefore(bar,r);
+    document.getElementById('dg10OfferMergeBtn').onclick=merge;
+  }
+  const data=rows();
+  [...r.querySelectorAll(':scope > .report-card')].forEach((card,i)=>{
+    const row=data[i],id=String(row&&row.offerId||'').trim();if(!id)return;
+    card.dataset.offerId=id;
+    if(card.querySelector('.dg10-offer-merge-select'))return;
+    const lab=document.createElement('label');
+    lab.className='d3-selection dg10-offer-merge-select';
+    lab.style.marginBottom='10px';
+    lab.innerHTML='<input type="checkbox"> Zum Zusammenfügen markieren';
+    const cb=lab.querySelector('input');
+    cb.checked=S.selected.has(id);
+    cb.addEventListener('change',()=>{
+      if(cb.checked)S.selected.add(id);else S.selected.delete(id);
+      updateBar();
+    });
+    card.insertBefore(lab,card.firstChild);
+  });
+  for(const id of [...S.selected])if(!data.some(x=>String(x&&x.offerId||'')===id))S.selected.delete(id);
+  updateBar();
+}
+async function merge(){
+  const ids=[...S.selected];
+  if(ids.length<2)return;
+  const data=rows(),names=ids.map(id=>data.find(x=>String(x&&x.offerId||'')===id)?.customer||id);
+  if(!confirm('Diese '+ids.length+' Angebotsvorgänge zusammenfügen?\n\n'+names.join('\n')+'\n\nDie Einzelberichte bleiben erhalten.'))return;
+  const btn=document.getElementById('dg10OfferMergeBtn');if(btn)btn.disabled=true;
+  try{
+    await window.api(window.chefPayload({action:'mergeOffersV10',offerIds:ids,primaryOfferId:ids[0]}));
+    S.selected.clear();
+    if(typeof window.loadOffers==='function')await window.loadOffers('Zu erstellen');
+    if(typeof window.dg10RefreshDashboardCounters==='function')await window.dg10RefreshDashboardCounters(true);
+  }catch(e){alert('Zusammenführen fehlgeschlagen: '+(e&&e.message?e.message:String(e)));}
+  finally{decorate();}
+}
+function wrap(){
+  if(S.wrapped)return;
+  const base=window.loadOffers;
+  if(typeof base!=='function')return;
+  S.wrapped=true;
+  const wrapped=async function(){
+    const stage=arguments.length?arguments[0]:'Offen';
+    const out=await base.apply(this,arguments);
+    if(stage==='Zu erstellen')setTimeout(decorate,0);
+    return out;
+  };
+  window.loadOffers=wrapped;
+  try{loadOffers=wrapped;}catch(_e){}
+}
+function install(){
+  wrap();decorate();
+  const mo=new MutationObserver(()=>{if(root())setTimeout(decorate,0);});
+  mo.observe(document.body,{childList:true,subtree:true});
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else setTimeout(install,0);
+})();
+
 /* DG App 10 - autoritative dashboard counter audit.
    One backend refresh per hour; DOM repaint is local only so older UI hotfixes cannot overwrite counts. */
 (function(){
