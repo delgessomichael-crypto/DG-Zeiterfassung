@@ -83,8 +83,8 @@
 <div class="radio-row"><strong>Material verbaut?</strong><label><input checked="" name="materialUsed" onchange="toggleMaterial()" type="radio" value="no"/>Nein</label><label><input name="materialUsed" onchange="toggleMaterial()" type="radio" value="yes"/>Ja</label></div>
 <div class="hidden" id="materialBox"><label for="material">Verbautes Material</label><textarea id="material" placeholder="Menge und Bezeichnung"></textarea></div>
 <div class="radio-row"><strong>Auftrag abgeschlossen?</strong><label><input name="jobCompleted" type="radio" value="no"/>Nein</label><label><input checked="" name="jobCompleted" type="radio" value="yes"/>Ja</label></div>
-<h3 style="margin-top:20px">Kundenunterschrift</h3><div class="muted small">Die Kundenunterschrift ist optional. Zum Unterschreiben das Feld zweimal antippen.</div>
-<div class="signature-wrap" id="customerSignatureWrap"><canvas id="customerSignature"></canvas><div class="signature-lock">Zum Unterschreiben zweimal tippen</div></div><div class="signature-hint">Beim Scrollen bleibt das Feld gesperrt. Zum Unterschreiben zweimal tippen.</div>
+<h3 style="margin-top:20px">Kundenunterschrift</h3><div class="muted small">Die Kundenunterschrift ist optional. Zum Unterschreiben das Feld einmal antippen.</div>
+<div class="signature-wrap" id="customerSignatureWrap"><canvas id="customerSignature"></canvas><div class="signature-lock">Zum Unterschreiben einmal tippen</div></div><div class="signature-hint">Beim Scrollen bleibt das Feld gesperrt. Zum Unterschreiben einmal tippen.</div>
 <button class="btn danger" id="clearCustomerSignatureBtn" type="button" style="width:100%">Unterschrift löschen</button>
 <button class="btn primary" data-enter-default="" id="transferToOfficeBtn" type="button" style="width:100%;margin-top:14px">An Büro übertragen</button><div id="entryStatus"></div><div class="hidden" id="officeTransferConfirm"></div>
 </div>
@@ -243,7 +243,7 @@
 <script src="./customerflow-9.0-final.js"></script>
 <script src="./payroll-9.0-final.js"></script>
 <script src="./ui-9.0-final.js?v=20260925-1925-count1"></script>
-<script src="./employee-controls-10.0.js"></script>
+<script src="./employee-controls-10.0.js?v=20260926-1455-signature2"></script>
 <script>
 (function(){
 'use strict';
