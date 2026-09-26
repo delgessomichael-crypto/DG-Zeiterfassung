@@ -10855,7 +10855,7 @@ function directMinimumWageRead(body){
 
 const DIRECT_POSTGRES_WRITE_ACTIONS=new Set([
   'createOwnReminder','saveOwnReminderInternalNote','rescheduleOwnReminder','completeOwnReminder','deleteOwnReminder',
-  'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','restoreDiscardedOfferV10','purgeDiscardedOfferV10','setRegieReportsOfferStatus','saveOfferCreatedWithReminder','createInspectionOffer','createEmployeeInspectionRequestV10',
+  'moveOfferBackToCreate','declineOfferFromReminder','acceptOfferFromReminder','acceptOfferAsRunning','discardOfferPermanently','restoreDiscardedOfferV10','purgeDiscardedOfferV10','setRegieReportsOfferStatus','saveOfferCreatedWithReminder','createInspectionOffer','createEmployeeInspectionRequestV10','mergeOffersV10',
   'mergeRegieObjects','saveObjectInternalNote','markPayrollIssueReviewed','markConflictReviewed','setMonthClosureStatus','setPayrollMonthStatus','completePayrollCycle','forceCompletePayrollCycle',
   'saveManualOrderNote','setManualOrderStatus','deleteManualOrder',
   'markFinancePaidV10','markTaxMailAsInvoiceV10','archiveTaxAdvisorMailV10','deleteFinanceMailV10','markFinanceSpamV10','moveFinanceMailV10',
