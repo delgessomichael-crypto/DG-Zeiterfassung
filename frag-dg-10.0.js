@@ -174,9 +174,10 @@ function quickAskFragDG(prompt,surface){
   var target=surface||'bottom';
   var ui=fragSurface(target);
   if(!ui.input)return;
+  var sx=window.scrollX||0,sy=window.scrollY||0;
   ui.input.value=String(prompt||'');
-  try{ui.input.focus({preventScroll:true});}catch(_e){ui.input.focus();}
   askFragDG(target);
+  requestAnimationFrame(function(){window.scrollTo(sx,sy);});
 }
 
 function showPlannedFeature(title,text){
@@ -343,7 +344,7 @@ function ensureSection(){
       '</div>';
 
     archive.insertAdjacentElement('afterend',sec);
-    sec.dataset.dg10HubVersion='3';
+    sec.dataset.dg10HubVersion='4';
 
     var title=sec.querySelector(':scope > .dg80-final-section-title');
     title.addEventListener('click',function(ev){
@@ -403,16 +404,16 @@ function ensureSection(){
       ev.preventDefault();ev.stopPropagation();
       var ui=fragSurface('bottom');
       if(ui.input)ui.input.value='Google Business';
-      showBottomInfo('Google Business ist für Del Gesso über Windsor.ai mit ChatGPT verbunden. Der Arbeitsbereich ist vorbereitet: 5-Sterne-Bewertungen beantworten und Beiträge aus freigegebenen Referenzbaustellen erstellen. Wichtig: Die Windsor-Verbindung von ChatGPT ist technisch nicht automatisch im Railway-App-Backend verfügbar; echte Live-Aktionen aus dieser App benötigen noch die separate Windsor-Bridge. Bis dahin werden keine externen Änderungen ausgelöst.','info');
+      showBottomInfo('Google Business ist für Del Gesso eingerichtet: Das Unternehmensprofil ist über Windsor.ai in ChatGPT verbunden. Hier im Frag-DG-Bereich bleiben wir an derselben Stelle. 5-Sterne-Antworten und Google-Beiträge können vorbereitet werden; das direkte Veröffentlichen aus der App selbst folgt erst mit der separaten Windsor-Bridge.','info');
     };
   }else{
-    if(sec.dataset.dg10HubVersion!=='3'){
+    if(sec.dataset.dg10HubVersion!=='4'){
       sec.remove();
       return ensureSection();
     }
     if(sec.previousElementSibling!==archive)archive.insertAdjacentElement('afterend',sec);
   }
-  sec.dataset.dg10HubVersion='3';
+  sec.dataset.dg10HubVersion='4';
 }
 
 function mount(){
