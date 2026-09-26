@@ -10410,13 +10410,13 @@ async function directAiAssistantV10(body){
   const prompt=String(body&&body.prompt||'').trim();if(!prompt)throw new Error('Bitte eine Frage oder Aufgabe eingeben.');
   const apiKey=String(process.env.OPENAI_API_KEY||'').trim(),model=fragDgModelForPrompt(prompt);
   if(!apiKey)return {configured:false,text:'KI-Integration ist vorbereitet. Für die Aktivierung fehlt noch OPENAI_API_KEY auf Railway.'};
-  const inq=await pool.query("SELECT customer,source,subject,description,status,received_at_text FROM customer_inquiries_shadow WHERE COALESCE(status,'Offen') NOT IN ('Archiviert','Gelöscht') ORDER BY received_at_text DESC NULLS LAST LIMIT 25");
-  const orders=await pool.query("SELECT customer,address,description,status,changed_at_text FROM manual_orders_shadow WHERE COALESCE(status,'') NOT IN ('Abgeschlossen','Abgerechnet') ORDER BY changed_at_text DESC NULLS LAST LIMIT 25");
-  const offers=await pool.query("SELECT customer,description,status,created_at_text FROM inquiry_offers_shadow ORDER BY created_at_text DESC NULLS LAST LIMIT 25");
+  const inq=await pool.query("SELECT id AS \"sourceId\",'inquiry' AS \"sourceType\",customer,source,subject,description,status,received_at_text FROM customer_inquiries_shadow WHERE COALESCE(status,'Offen') NOT IN ('Archiviert','Gelöscht') ORDER BY received_at_text DESC NULLS LAST LIMIT 25");
+  const orders=await pool.query("SELECT id AS \"sourceId\",'order' AS \"sourceType\",customer,address,description,status,changed_at_text FROM manual_orders_shadow WHERE COALESCE(status,'') NOT IN ('Abgeschlossen','Abgerechnet') ORDER BY changed_at_text DESC NULLS LAST LIMIT 25");
+  const offers=await pool.query("SELECT offer_id AS \"sourceId\",'offer' AS \"sourceType\",inquiry_id,customer,description,status,created_at_text FROM inquiry_offers_shadow ORDER BY created_at_text DESC NULLS LAST LIMIT 25");
   const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
   const context={today,timeZone:'Europe/Berlin',inquiries:inq.rows,orders:orders.rows,offers:offers.rows};
   const upstream=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+apiKey},body:JSON.stringify({model,input:[
-    {role:'system',content:[{type:'input_text',text:'Du bist Frag DG, der interne Büro-Assistent der Del Gesso Gebäudetechnik. Nutze nur den bereitgestellten App-Kontext für betriebsinterne Fakten. Unterstütze bei Überblick, Priorisierung, Übersetzung, Textentwürfen und Vorbereitung. Führe keine externen oder irreversiblen Aktionen aus. Antworte standardmäßig auf Deutsch; wenn der Nutzer ausdrücklich eine andere Sprache verlangt, antworte in dieser Sprache. Sei klar, knapp und praxisnah.'}]},
+    {role:'system',content:[{type:'input_text',text:'Du bist Frag DG, der interne Büro-Assistent der Del Gesso Gebäudetechnik. Nutze nur den bereitgestellten App-Kontext für betriebsinterne Fakten. Unterstütze bei Überblick, Priorisierung, Übersetzung, Textentwürfen und Vorbereitung. Führe keine externen oder irreversiblen Aktionen aus. Antworte standardmäßig auf Deutsch; wenn der Nutzer ausdrücklich eine andere Sprache verlangt, antworte in dieser Sprache. Sei klar, knapp und praxisnah. Antworte AUSSCHLIESSLICH als gültiges JSON ohne Markdown im Format {"answer":"kurze Antwort oder Einleitung","tasks":[{"title":"konkretes To-do","detail":"kurzer Grund oder nächster Schritt","sourceType":"inquiry|offer|order","sourceId":"exakt aus dem App-Kontext","stage":"Status aus dem App-Kontext"}]}. Wenn du konkrete Vorgänge aus dem App-Kontext als To-dos nennst, führe sie in tasks auf und wiederhole die komplette Liste nicht zusätzlich in answer. Verwende sourceId nur exakt aus dem bereitgestellten Kontext und erfinde keine IDs. Maximal 12 tasks. Wenn keine direkt verknüpfbaren Vorgänge nötig sind, verwende tasks:[] und liefere die normale Antwort in answer.'}]},
     {role:'user',content:[{type:'input_text',text:'App-Kontext:\\n'+JSON.stringify(context)+'\\n\\nAufgabe:\\n'+prompt}]}
   ]})});
   const raw=await upstream.text();let data=null;try{data=JSON.parse(raw)}catch(_e){}
@@ -10428,7 +10428,32 @@ async function directAiAssistantV10(body){
     throw new Error('KI-Dienst meldet HTTP '+upstream.status+(msg?': '+msg:''));
   }
   let out=String(data&&data.output_text||'');if(!out&&data&&Array.isArray(data.output))for(const item of data.output||[])for(const c of item.content||[])if(c&&c.text)out+=String(c.text);
-  return {configured:true,modelUsed:model,text:out.trim()||'Keine Antwort erhalten.'};
+  const rawOut=out.trim();
+  let parsed=null;
+  try{
+    const cleaned=rawOut.replace(/^\`\`\`(?:json)?\\s*/i,'').replace(/\\s*\`\`\`$/,'').trim();
+    parsed=JSON.parse(cleaned);
+  }catch(_e){}
+  if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed)){
+    const allRows=[...inq.rows,...orders.rows,...offers.rows];
+    const sourceMap=new Map(allRows.map(r=>[String(r.sourceType||'')+'|'+String(r.sourceId||''),r]));
+    const tasks=(Array.isArray(parsed.tasks)?parsed.tasks:[]).slice(0,12).map(t=>{
+      const sourceType=String(t&&t.sourceType||'').trim();
+      const sourceId=String(t&&t.sourceId||'').trim();
+      const src=sourceMap.get(sourceType+'|'+sourceId);
+      if(!src)return null;
+      return {
+        title:String(t&&t.title||src.customer||'Vorgang').trim().slice(0,180),
+        detail:String(t&&t.detail||'').trim().slice(0,500),
+        sourceType,
+        sourceId,
+        stage:String(src.status||t&&t.stage||'').trim(),
+        customer:String(src.customer||'').trim()
+      };
+    }).filter(Boolean);
+    return {configured:true,modelUsed:model,text:String(parsed.answer||'').trim()||'Hier sind die passenden Vorgänge:',tasks};
+  }
+  return {configured:true,modelUsed:model,text:rawOut||'Keine Antwort erhalten.',tasks:[]};
 }
 
 
