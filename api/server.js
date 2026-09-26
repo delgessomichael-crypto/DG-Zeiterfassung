@@ -12672,7 +12672,7 @@ async function tryDirectPostgresWrite(action,body){
       const inquiryId=String(body.id||'').trim(),customer=String(body.customer||'').trim(),phone=String(body.phone||'').trim();
       if(!inquiryId)throw new Error('Anfrage nicht gefunden.');
       if(!customer)throw new Error('Kunde fehlt.');
-      if(phone.replace(/\D/g,'').length<6)throw new Error('Gültige Telefonnummer erforderlich.');
+      // Eine Telefonnummer ist für die Übernahme in "Zu erstellende Angebote" nicht erforderlich.
       const iq=await client.query(
         `SELECT id,customer,email,phone,description,subject,source,status,offer_id,attachments_json
            FROM customer_inquiries_shadow WHERE id=$1 FOR UPDATE`,[inquiryId]
@@ -12685,6 +12685,15 @@ async function tryDirectPostgresWrite(action,body){
           const rq=await client.query(
             `SELECT id,due_date_text FROM offer_reminders_shadow
               WHERE offer_id=$1 AND status='Offen' ORDER BY created_at_text DESC NULLS LAST LIMIT 1`,[existingOffer]
+          );
+          await client.query(
+            `UPDATE customer_inquiries_shadow
+                SET customer=CASE WHEN $2<>'' THEN $2 ELSE customer END,
+                    phone=CASE WHEN $3<>'' THEN $3 ELSE phone END,
+                    status='Übernommen',read_flag=true,done_reason='Angebot zu erstellen',
+                    changed_at_text=$4,changed_by=$5,shadow_updated_at=now()
+              WHERE id=$1`,
+            [inquiryId,customer,phone,nowIso,by]
           );
           gmailArchiveAfterCommit={inquiryId,actor:by};
           result={ok:true,existing:true,offerId:existingOffer,
@@ -12722,8 +12731,11 @@ async function tryDirectPostgresWrite(action,body){
           [reminderId,offerId,customer,phone,email,description,nowIso,due,by]
         );
         await client.query(
-          `UPDATE customer_inquiries_shadow SET customer=$2,phone=$3,status='Angebot erstellt',
-             read_flag=true,offer_id=$4,changed_at_text=$5,changed_by=$6,shadow_updated_at=now() WHERE id=$1`,
+          `UPDATE customer_inquiries_shadow
+              SET customer=$2,phone=$3,status='Übernommen',read_flag=true,
+                  done_reason='Angebot zu erstellen',offer_id=$4,
+                  changed_at_text=$5,changed_by=$6,shadow_updated_at=now()
+            WHERE id=$1`,
           [inquiryId,customer,phone,offerId,nowIso,by]
         );
         legacyPayload=Object.assign({},body,{offerId,reminderId});
