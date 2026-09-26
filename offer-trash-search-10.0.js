@@ -1,7 +1,7 @@
 /* DG App 10 - Angebots-Papierkorb + globale Kundensuche */
 (function(){
 'use strict';
-const VERSION='20260925-1815-dedupe-search2';
+const VERSION='20260926-1655-search-audit3';
 const q=id=>document.getElementById(id);
 const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function payload(x){
@@ -101,21 +101,32 @@ function ensureTrashButton(){
 
 let searchTimer=0;
 function searchTargets(){
+  // Kundensuche nur in fachlichen Kunden-/Auftragsbereichen.
+  // Reine Personal-, Lohn-, System-, Partner- und Lieferanten/Rechnungseingangsbereiche bleiben bewusst ohne Suchbutton.
   const explicit=[
-    'd3Inquiries','d3Running','d3Completed','d3OfferOpen','d3OfferCreate','d3OfferArchive',
-    'd3Reminder','d36Maintenance','dg62PlannerCard','regieCard','dg10AccountingSection',
-    'dg80WebsiteInquiries','dg80WhatsappInquiries','dg80CreatedOffersCenter','dg80ActionCenter',
-    'dg80EmployeeStats','dg10Partner'
+    'd3Inquiries','d3InquiryArchive','d34AqonInquiries',
+    'dg80WebsiteInquiries','dg80WhatsappInquiries',
+    'd3Running','d3Completed','regieCard',
+    'd3OfferOpen','d3OfferCreate','d3OfferArchive','dg80CreatedOffersCenter',
+    'd3Reminder','d36Maintenance','dg62PlannerCard',
+    'dg80ActionCenter'
   ];
   const out=new Set(explicit.map(q).filter(Boolean));
 
-  // Dynamische Bereiche nur dann ergänzen, wenn sie selbst ein echter Inhaltsbereich sind.
-  // Sammel-/Elterncontainer mit eigenen Unterpanels bekommen absichtlich keinen zweiten Suchbutton.
+  // Später oder dynamisch erzeugte Fachbereiche automatisch mitnehmen.
   document.querySelectorAll('#bossView .card[id],#bossView .d3-panel[id],#bossView section[id]').forEach(el=>{
     if(out.has(el))return;
     const h=el.querySelector(':scope > h2,:scope > h3,:scope > .dg48-head h2');
     const t=String(h&&h.textContent||'').trim();
-    if(!/Anfrag|Angebot|Auftrag|Rechnung|Wartung|Kalender|Reminder|WhatsApp|Kunde/i.test(t))return;
+    if(!t)return;
+
+    // Bereiche, in denen nach einem konkreten Kunden/Auftrag gesucht werden können soll.
+    if(!/(Kunde|Anfrag|Angebot|Auftrag|Rechnung zu erstellen|Abgerechnet|Wartung|Kalender|Reminder|WhatsApp|Webseite|Website|Einkauf)/i.test(t))return;
+
+    // Keine Kundensuche in Verwaltungs-/Lieferantenbereichen.
+    if(/Rechnungseingang|Steuerberater|Rechnungsarchiv|Mitarbeiter|Lohn|Urlaub|Abwesenheit|System|Partner|Statistik|Auffälligkeit/i.test(t))return;
+
+    // Sammelcontainer mit eigenen konkreten Unterbereichen nicht doppelt bestücken.
     const nestedBusiness=el.querySelector(':scope .d3-panel[id],:scope .card[id],:scope section[id]');
     if(nestedBusiness)return;
     out.add(el);
@@ -130,11 +141,7 @@ function cleanupSearchDuplicates(targets){
   // konkreter Zielbereich existiert. So gibt es pro geöffnetem Fachbereich exakt einen Button.
   all.forEach(b=>{
     const owner=b.closest('.d3-panel,.card,section');
-    if(!owner){b.remove();return;}
-    if(!wanted.has(owner)){
-      const hasWanted=[...wanted].some(x=>x!==owner&&owner.contains(x));
-      if(hasWanted)b.remove();
-    }
+    if(!owner||!wanted.has(owner)){b.remove();return;}
   });
 
   // Innerhalb desselben Bereichs ebenfalls strikt auf einen Button begrenzen.
