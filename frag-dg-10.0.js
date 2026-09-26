@@ -14,6 +14,7 @@ function ensureFragCss(){
   s.id='dg10FragCss';
   s.textContent=
     '#dg10FragTopBar{margin:0 0 11px;padding:12px;border:2px solid #405fa7;border-radius:15px;background:#f4f7ff;box-sizing:border-box}'+
+    '#dg10FragBottomBar{margin:12px 0 0;padding:12px;border:2px solid #405fa7;border-radius:15px;background:#f4f7ff;box-sizing:border-box}'+
     '.dg10-frag-answer{white-space:pre-wrap;line-height:1.45}'+
     '.dg10-frag-tasks{display:grid;gap:8px;margin-top:10px}'+
     '.dg10-frag-task{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 11px;border:1px solid #cbd5e1;border-radius:12px;background:#fff}'+
@@ -159,22 +160,43 @@ function renderFragResult(r,out){
   out.appendChild(list);
 }
 
-function quickAskFragDG(prompt){
-  var input=q('dg10FragTopInput');
-  if(!input)return;
-  input.value=String(prompt||'');
-  input.focus();
-  askFragDG();
+function fragSurface(surface){
+  var bottom=surface==='bottom';
+  return {
+    input:q(bottom?'dg10FragBottomInput':'dg10FragTopInput'),
+    out:q(bottom?'dg10FragBottomOut':'dg10FragTopOut'),
+    send:q(bottom?'dg10FragBottomSend':'dg10FragTopSend'),
+    mic:q(bottom?'dg10FragBottomMic':'dg10FragTopMic')
+  };
+}
+
+function quickAskFragDG(prompt,surface){
+  var target=surface||'bottom';
+  var ui=fragSurface(target);
+  if(!ui.input)return;
+  ui.input.value=String(prompt||'');
+  try{ui.input.focus({preventScroll:true});}catch(_e){ui.input.focus();}
+  askFragDG(target);
 }
 
 function showPlannedFeature(title,text){
   alert(title+'\n\n'+text);
 }
 
-async function askFragDG(){
-  var input=q('dg10FragTopInput');
-  var out=q('dg10FragTopOut');
-  var send=q('dg10FragTopSend');
+function showBottomInfo(text,type){
+  var ui=fragSurface('bottom');
+  if(!ui.out)return;
+  ui.out.className='status '+(type||'info');
+  ui.out.textContent=String(text||'');
+  if(ui.input)try{ui.input.focus({preventScroll:true});}catch(_e){ui.input.focus();}
+}
+
+async function askFragDG(surface){
+  var target=surface||'top';
+  var ui=fragSurface(target);
+  var input=ui.input;
+  var out=ui.out;
+  var send=ui.send;
   var prompt=String(input&&input.value||'').trim();
   if(!prompt||!out)return;
 
@@ -195,9 +217,10 @@ async function askFragDG(){
   }
 }
 
-function bindSpeech(){
-  var input=q('dg10FragTopInput');
-  var mic=q('dg10FragTopMic');
+function bindSpeech(surface){
+  var ui=fragSurface(surface||'top');
+  var input=ui.input;
+  var mic=ui.mic;
   if(!input||!mic||mic.dataset.bound==='1')return;
 
   mic.dataset.bound='1';
@@ -257,14 +280,14 @@ function ensureTop(){
     if(appRoot)appRoot.insertBefore(box,accessShell||appRoot.firstChild);
     else boss.insertBefore(box,boss.firstChild);
 
-    q('dg10FragTopSend').onclick=askFragDG;
+    q('dg10FragTopSend').onclick=function(){askFragDG('top');};
     q('dg10FragTopInput').onkeydown=function(e){
       if(e.key==='Enter'){
         e.preventDefault();
-        askFragDG();
+        askFragDG('top');
       }
     };
-    bindSpeech();
+    bindSpeech('top');
   }else{
     var appRoot2=q('mainScreen')&&q('mainScreen').querySelector(':scope > .app');
     var accessShell2=q('dg10AccessShell');
@@ -305,10 +328,22 @@ function ensureSection(){
         '<button type="button" id="dg10FragWeb" class="d3-tile dg80-final-tile"><span>Website & SEO</span><strong>⌂</strong></button>'+
         '<button type="button" id="dg10FragOwnRef" class="d3-tile dg80-final-tile"><span>Referenzbaustellen</span><strong>›</strong></button>'+
         '<button type="button" id="dg10FragGoogle" class="d3-tile dg80-final-tile"><span>Google Business</span><strong>G</strong></button>'+
+      '</div>'+
+      '<div id="dg10FragBottomBar">'+
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px">'+
+          '<strong style="font-size:18px;color:#31589e">Frag DG</strong>'+
+          '<span class="muted small">Bleibt im Frag-DG-Arbeitsbereich</span>'+
+        '</div>'+
+        '<div style="display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center">'+
+          '<input id="dg10FragBottomInput" type="text" placeholder="Frag DG – z. B. Was ist heute dringend?" style="margin:0;min-height:46px">'+
+          '<button type="button" class="btn secondary" id="dg10FragBottomMic" title="Spracheingabe">🎤</button>'+
+          '<button type="button" class="btn primary" id="dg10FragBottomSend">Frag DG</button>'+
+        '</div>'+
+        '<div id="dg10FragBottomOut" style="margin-top:8px;white-space:pre-wrap"></div>'+
       '</div>';
 
     archive.insertAdjacentElement('afterend',sec);
-    sec.dataset.dg10HubVersion='2';
+    sec.dataset.dg10HubVersion='3';
 
     var title=sec.querySelector(':scope > .dg80-final-section-title');
     title.addEventListener('click',function(ev){
@@ -324,23 +359,29 @@ function ensureSection(){
       toggleSection(sec,title);
     },true);
 
+    q('dg10FragBottomSend').onclick=function(){askFragDG('bottom');};
+    q('dg10FragBottomInput').onkeydown=function(e){
+      if(e.key==='Enter'){
+        e.preventDefault();
+        askFragDG('bottom');
+      }
+    };
+    bindSpeech('bottom');
+
     var daily=q('dg10FragDaily');
     if(daily)daily.onclick=function(ev){
       ev.preventDefault();ev.stopPropagation();
-      quickAskFragDG('Erstelle mein Tagesbriefing für heute. Ordne alle direkt bearbeitbaren offenen Vorgänge nach rot, gelb, grün. Zeige besonders: heute fällig, überfällig, wartet auf Kunde, Angebot zu erstellen und Auftrag ohne Termin. Gib mir die verknüpfbaren Vorgänge als Arbeitsliste.');
-      q('dg10FragTopBar')?.scrollIntoView({behavior:'smooth',block:'start'});
+      quickAskFragDG('Erstelle mein Tagesbriefing für heute. Ordne alle direkt bearbeitbaren offenen Vorgänge nach rot, gelb, grün. Zeige besonders: heute fällig, überfällig, wartet auf Kunde, Angebot zu erstellen und Auftrag ohne Termin. Gib mir die verknüpfbaren Vorgänge als Arbeitsliste.','bottom');
     };
     var priority=q('dg10FragPriority');
     if(priority)priority.onclick=function(ev){
       ev.preventDefault();ev.stopPropagation();
-      quickAskFragDG('Prüfe meine offenen Anfragen, Angebote und Aufträge auf Priorität. Kennzeichne rot nur bei echter Dringlichkeit oder Blockade, gelb für zeitnahe Bearbeitung, grün für normal. Zeige die nächsten sinnvollen Schritte und verknüpfe jeden konkreten Vorgang.');
-      q('dg10FragTopBar')?.scrollIntoView({behavior:'smooth',block:'start'});
+      quickAskFragDG('Prüfe meine offenen Anfragen, Angebote und Aufträge auf Priorität. Kennzeichne rot nur bei echter Dringlichkeit oder Blockade, gelb für zeitnahe Bearbeitung, grün für normal. Zeige die nächsten sinnvollen Schritte und verknüpfe jeden konkreten Vorgang.','bottom');
     };
     var app=q('dg10FragApp');
     if(app)app.onclick=function(ev){
       ev.preventDefault();ev.stopPropagation();
-      quickAskFragDG('Prüfe die aktuell verfügbaren App-Vorgänge auf offene Arbeit, Auffälligkeiten und sinnvolle nächste Schritte. Nenne nur Dinge, die aus den App-Daten ableitbar sind und verknüpfe konkrete Vorgänge.');
-      q('dg10FragTopBar')?.scrollIntoView({behavior:'smooth',block:'start'});
+      quickAskFragDG('Prüfe die aktuell verfügbaren App-Vorgänge auf offene Arbeit, Auffälligkeiten und sinnvolle nächste Schritte. Nenne nur Dinge, die aus den App-Daten ableitbar sind und verknüpfe konkrete Vorgänge.','bottom');
     };
     var web=q('dg10FragWeb');
     if(web)web.onclick=function(ev){
@@ -360,16 +401,18 @@ function ensureSection(){
     var google=q('dg10FragGoogle');
     if(google)google.onclick=function(ev){
       ev.preventDefault();ev.stopPropagation();
-      showPlannedFeature('Google Business','Die Kachel ist vorbereitet. Sobald Google Business verbunden ist, soll Frag DG hier 5-Sterne-Bewertungen zur Antwort vorlegen, Beiträge aus freigegebenen Referenzbaustellen erstellen und nach deiner Freigabe veröffentlichen.');
+      var ui=fragSurface('bottom');
+      if(ui.input)ui.input.value='Google Business';
+      showBottomInfo('Google Business ist für Del Gesso über Windsor.ai mit ChatGPT verbunden. Der Arbeitsbereich ist vorbereitet: 5-Sterne-Bewertungen beantworten und Beiträge aus freigegebenen Referenzbaustellen erstellen. Wichtig: Die Windsor-Verbindung von ChatGPT ist technisch nicht automatisch im Railway-App-Backend verfügbar; echte Live-Aktionen aus dieser App benötigen noch die separate Windsor-Bridge. Bis dahin werden keine externen Änderungen ausgelöst.','info');
     };
   }else{
-    if(sec.dataset.dg10HubVersion!=='2'){
+    if(sec.dataset.dg10HubVersion!=='3'){
       sec.remove();
       return ensureSection();
     }
     if(sec.previousElementSibling!==archive)archive.insertAdjacentElement('afterend',sec);
   }
-  sec.dataset.dg10HubVersion='2';
+  sec.dataset.dg10HubVersion='3';
 }
 
 function mount(){
