@@ -4098,7 +4098,7 @@ function startSpeech60(targetId,button){
 
   const original=String(target.value||'').trimEnd();
   const materialMode=targetId==='material';
-  const sessionBase=materialMode?(original?original+'\n':''):original;
+  const sessionBase=original?original+'\n\n- ':'- ';
   let hadFinal=false;
   const processed=new Set();
   let lastFinal='',lastFinalAt=0;
@@ -4129,8 +4129,8 @@ function startSpeech60(targetId,button){
 
   recognition.onstart=function(){
     button.classList.add('listening');button.textContent='⏹ Aufnahme stoppen';
-    if(materialMode&&target.value!==sessionBase)target.value=sessionBase;
-    status60(targetId,materialMode?'Aufnahme läuft – neuer Materialeintrag beginnt in einer neuen Zeile.':'Aufnahme läuft – sprich deutlich. Erkannter Text wird angehängt.','ok');
+    if(target.value!==sessionBase){target.value=sessionBase;target.dispatchEvent(new Event('input',{bubbles:true}));}
+    status60(targetId,'Aufnahme läuft – dieser Sprachblock wird als neuer Stichpunkt erfasst.','ok');
   };
 
   recognition.onresult=function(event){
@@ -4315,8 +4315,8 @@ function startSpeech(textarea,btn,status){
   const C=speechCtor();if(!C){status.textContent='Sprache-zu-Text wird von diesem Browser nicht unterstützt. Bitte Chrome oder Edge verwenden.';status.className='status warn';return;}
   if(ownSpeech){stopSpeech();return;}
   const rec=new C();ownSpeech=rec;rec.lang='de-DE';rec.continuous=true;rec.interimResults=true;rec.maxAlternatives=1;
-  const original=String(textarea.value||'').trimEnd(),prefix=original?original+'\n':'';let finalText='',hadFinal=false;
-  rec.onstart=()=>{btn.classList.add('listening');btn.textContent='⏹ Aufnahme stoppen';status.className='status ok';status.textContent='Aufnahme läuft – erkannter Text wird angehängt.';};
+  const original=String(textarea.value||'').trimEnd(),prefix=original?original+'\n\n- ':'- ';let finalText='',hadFinal=false;
+  rec.onstart=()=>{textarea.value=prefix;textarea.dispatchEvent(new Event('input',{bubbles:true}));btn.classList.add('listening');btn.textContent='⏹ Aufnahme stoppen';status.className='status ok';status.textContent='Aufnahme läuft – neuer Sprachblock als Stichpunkt.';};
   rec.onresult=e=>{let interim='';for(let i=e.resultIndex;i<e.results.length;i++){const t=String(e.results[i][0]?.transcript||'').trim();if(!t)continue;if(e.results[i].isFinal){finalText+=(finalText?' ':'')+t;hadFinal=true;}else interim+=(interim?' ':'')+t;}textarea.value=prefix+(finalText+(interim?(finalText?' ':'')+interim:'')).trim();textarea.dispatchEvent(new Event('input',{bubbles:true}));};
   rec.onerror=e=>{const msg=(e.error==='not-allowed'||e.error==='service-not-allowed')?'Mikrofonzugriff wurde nicht erlaubt.':e.error==='no-speech'?'Keine Sprache erkannt. Bitte erneut versuchen.':'Spracherkennung konnte nicht gestartet werden.';status.className='status error';status.textContent=msg;};
   rec.onend=()=>{if(!hadFinal&&textarea.value.trim()===prefix.trim())textarea.value=original;btn.classList.remove('listening');btn.textContent='🎤 Sprache zu Text';if(!status.classList.contains('error')){status.className='muted small';status.textContent=hadFinal?'Sprache übernommen.':'';}ownSpeech=null;};
@@ -4470,8 +4470,8 @@ function startSpeech(textarea,btn,status){
   if(!C){status.className='status warn';status.textContent='Sprache-zu-Text wird von diesem Browser nicht unterstützt. Bitte Chrome oder Edge verwenden.';return;}
   if(speech){stopSpeech();return;}
   const rec=new C();speech=rec;rec.lang='de-DE';rec.continuous=true;rec.interimResults=true;rec.maxAlternatives=1;
-  const original=String(textarea.value||'').trimEnd(),prefix=original?original+'\n':'';let finalText='',hadFinal=false;
-  rec.onstart=()=>{btn.classList.add('listening');btn.textContent='⏹ Aufnahme stoppen';status.className='status ok';status.textContent='Aufnahme läuft – erkannter Text wird angehängt.';};
+  const original=String(textarea.value||'').trimEnd(),prefix=original?original+'\n\n- ':'- ';let finalText='',hadFinal=false;
+  rec.onstart=()=>{textarea.value=prefix;textarea.dispatchEvent(new Event('input',{bubbles:true}));btn.classList.add('listening');btn.textContent='⏹ Aufnahme stoppen';status.className='status ok';status.textContent='Aufnahme läuft – neuer Sprachblock als Stichpunkt.';};
   rec.onresult=e=>{let interim='';for(let i=e.resultIndex;i<e.results.length;i++){const t=String(e.results[i][0]?.transcript||'').trim();if(!t)continue;if(e.results[i].isFinal){finalText+=(finalText?' ':'')+t;hadFinal=true;}else interim+=(interim?' ':'')+t;}textarea.value=prefix+(finalText+(interim?(finalText?' ':'')+interim:'')).trim();};
   rec.onerror=e=>{status.className='status error';status.textContent=(e.error==='not-allowed'||e.error==='service-not-allowed')?'Mikrofonzugriff wurde nicht erlaubt.':e.error==='no-speech'?'Keine Sprache erkannt. Bitte erneut versuchen.':'Spracherkennung konnte nicht gestartet werden.';};
   rec.onend=()=>{if(!hadFinal&&textarea.value.trim()===prefix.trim())textarea.value=original;btn.classList.remove('listening');btn.textContent='🎤 Sprache zu Text';if(!status.classList.contains('error')){status.className='muted small';status.textContent=hadFinal?'Sprache übernommen.':'';}speech=null;};
@@ -4670,19 +4670,19 @@ window.dg70ShopSpeech=function(){
   if(!ta)return;
   if(shopRecognition){stopSpeech70();setSpeechState70(false,'Aufnahme beendet.');return;}
   if(!C){setSpeechState70(false,'Spracheingabe wird von diesem Browser nicht unterstützt. Bitte Chrome oder Edge verwenden.');return;}
-  normalizeTextarea70(ta);
+  const original=String(ta.value||'').trimEnd();
+  const sessionBase=original?original+'\n\n- ':'- ';
   const rec=new C();shopRecognition=rec;rec.lang='de-DE';rec.continuous=true;rec.interimResults=false;rec.maxAlternatives=1;
-  const processed=new Set();let lastFinal='',lastFinalAt=0;
-  rec.onstart=()=>setSpeechState70(true,'Aufnahme läuft – für jeden Materialposten kurz eine Sprechpause machen.');
+  const processed=new Set();let lastFinal='',lastFinalAt=0,spoken='';
+  rec.onstart=()=>{ta.value=sessionBase;ta.dispatchEvent(new Event('input',{bubbles:true}));setSpeechState70(true,'Aufnahme läuft – neuer Sprachblock als Stichpunkt.');};
   rec.onresult=e=>{
     for(let i=e.resultIndex;i<e.results.length;i++){
       const result=e.results[i];if(!result||!result.isFinal)continue;
       const t=cleanLine70(result[0]&&result[0].transcript),n=String(t||'').toLowerCase().replace(/\s+/g,' ').trim(),key=String(i)+'|'+n;
       if(!n||processed.has(key))continue;processed.add(key);
       const now=Date.now();if(n===lastFinal&&now-lastFinalAt<3500)continue;lastFinal=n;lastFinalAt=now;
-      const existing=lines70(ta.value),last=String(existing[existing.length-1]||'').toLowerCase().replace(/\s+/g,' ').trim();
-      if(last===n)continue;
-      ta.value=existing.concat([t]).map(x=>'- '+x).join('\n');
+      spoken+=(spoken?' ':'')+t;
+      ta.value=sessionBase+spoken;
       ta.scrollTop=ta.scrollHeight;
       ta.dispatchEvent(new Event('input',{bubbles:true}));
     }
@@ -5923,8 +5923,8 @@ function addCss10(){if(q('dg10EnhanceCss'))return;const st=document.createElemen
 /* 1. Spracheingabe */
 const Speech10=window.SpeechRecognition||window.webkitSpeechRecognition;let rec10=null,btn10=null;
 function eligible10(el){if(!el||el.disabled||el.readOnly||el.dataset.dg10Speech==='1')return false;if(el.tagName==='TEXTAREA')return true;if(el.tagName!=='INPUT')return false;return ['text','search'].includes(String(el.type||'text').toLowerCase());}
-function stopRec10(el){if(btn10){btn10.textContent='🎤';btn10.classList.remove('danger')}if(el&&el.tagName==='TEXTAREA'){let v=String(el.value||'').replace(/\s+$/,'');el.value=v?(v+'\n- '):'- ';el.dispatchEvent(new Event('input',{bubbles:true}));}rec10=null;btn10=null;}
-function startRec10(el,b){if(!Speech10){alert('Spracheingabe wird von diesem Browser nicht unterstützt.');return;}if(rec10){try{rec10.stop()}catch(_e){}return;}const r=new Speech10();r.lang='de-DE';r.continuous=true;r.interimResults=false;r.onresult=e=>{let t='';for(let i=e.resultIndex;i<e.results.length;i++)if(e.results[i].isFinal)t+=e.results[i][0].transcript+' ';t=t.trim();if(!t)return;let v=String(el.value||'');if(el.tagName==='TEXTAREA'){if(!v.trim())v='- ';el.value=v+(v.endsWith('- ')?'':' ')+t;}else el.value=v+(v&& !/\s$/.test(v)?' ':'')+t;el.dispatchEvent(new Event('input',{bubbles:true}));};r.onend=()=>stopRec10(el);r.onerror=e=>{if(e.error!=='aborted')console.warn('speech',e.error)};rec10=r;btn10=b;b.textContent='■';b.classList.add('danger');r.start();}
+function stopRec10(){if(btn10){btn10.textContent='🎤';btn10.classList.remove('danger')}rec10=null;btn10=null;}
+function startRec10(el,b){if(!Speech10){alert('Spracheingabe wird von diesem Browser nicht unterstützt.');return;}if(rec10){try{rec10.stop()}catch(_e){}return;}const original=String(el.value||'').trimEnd(),isArea=el.tagName==='TEXTAREA',base=isArea?(original?original+'\n\n- ':'- '):(original?original+' ':'');let spoken='';const r=new Speech10();r.lang='de-DE';r.continuous=true;r.interimResults=false;r.onstart=()=>{if(isArea){el.value=base;el.dispatchEvent(new Event('input',{bubbles:true}));}};r.onresult=e=>{let t='';for(let i=e.resultIndex;i<e.results.length;i++)if(e.results[i].isFinal)t+=e.results[i][0].transcript+' ';t=t.trim();if(!t)return;spoken+=(spoken?' ':'')+t;el.value=base+spoken;el.dispatchEvent(new Event('input',{bubbles:true}));};r.onend=()=>stopRec10();r.onerror=e=>{if(e.error!=='aborted')console.warn('speech',e.error)};rec10=r;btn10=b;b.textContent='■';b.classList.add('danger');r.start();}
 function speech10(root=document){root.querySelectorAll('input,textarea').forEach(el=>{if(!eligible10(el))return;el.dataset.dg10Speech='1';const p=el.parentElement;if(!p)return;const wrap=document.createElement('div');wrap.className='dg10-speech-wrap';p.insertBefore(wrap,el);wrap.appendChild(el);const b=document.createElement('button');b.type='button';b.className='btn secondary dg10-mic';b.textContent='🎤';b.title='Spracheingabe';b.onclick=e=>{e.preventDefault();startRec10(el,b)};wrap.appendChild(b);});}
 
 /* 10 + 11. Zeitkonto ausblenden / Abwesenheit ergänzen */
