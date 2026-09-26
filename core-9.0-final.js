@@ -56,7 +56,7 @@ function logout(){localStorage.removeItem('dg_employee');sessionStorage.removeIt
 
 function openMain(){const a=auth();$('loginScreen')?.classList.add('hidden');$('mainScreen')?.classList.remove('hidden');if($('employeeLabel'))$('employeeLabel').textContent='Angemeldet: '+a.employee;if($('date'))$('date').value=localDate();const bossAllowed=canAccessBoss();$('bossTab')?.classList.toggle('hidden',!bossAllowed);let savedView='';try{savedView=sessionStorage.getItem('dg60_view')||localStorage.getItem('dg60_view')||sessionStorage.getItem('dg530_view')||localStorage.getItem('dg530_view')||'';}catch(_e){}const openingBoss=bossAllowed&&savedView==='boss';if(openingBoss)showBoss();else showEmployee();DG3.reports={};DG3.inquiries=[];DG3.orders=[];$('regieResult')?.replaceChildren();$('d3RunningList')?.replaceChildren();if(!openingBoss)d3CheckBackend();if(!Array.isArray(employeeDirectory)||!employeeDirectory.length)loadEmployeeDirectory();requestAnimationFrame(()=>{if(customerPad)customerPad.resize();if(employeePad)employeePad.resize()});updateConnection();if(!openingBoss){loadDay();loadCalendarEvents();}setTimeout(d35InstallInspectionButton,0);}
 
-function showEmployee(){const wasBoss=!$('bossView').classList.contains('hidden');$('employeeView').classList.remove('hidden');$('bossView').classList.add('hidden');$('employeeTab').classList.add('active');$('bossTab').classList.remove('active');if(wasBoss&&navigator.onLine){loadDay();loadCalendarEvents();}setTimeout(d35InstallInspectionButton,0);}
+function showEmployee(){const wasBoss=!$('bossView').classList.contains('hidden');$('employeeView').classList.remove('hidden');$('bossView').classList.add('hidden');$('employeeTab').classList.add('active');$('bossTab').classList.remove('active');requestAnimationFrame(()=>{if(customerPad)customerPad.resize();if(employeePad)employeePad.resize();});if(wasBoss&&navigator.onLine){loadDay();loadCalendarEvents();}setTimeout(d35InstallInspectionButton,0);}
 
 function showBoss(){if(!canAccessBoss()){showEmployee();setMessage('entryStatus','Kein Zugriff auf Buero.','error');return;}$('employeeView').classList.add('hidden');$('bossView').classList.remove('hidden');$('employeeTab').classList.remove('active');$('bossTab').classList.add('active');if(navigator.onLine){d3CheckBackend();d3Dashboard();}}
 
@@ -444,8 +444,21 @@ function initPad(id){
   }
   if(wrap){
     const lock=wrap.querySelector('.signature-lock');
-    const unlock=ev=>{setActive(true);if(ev&&ev.preventDefault)ev.preventDefault();};
-    if(lock){lock.addEventListener('pointerup',unlock,{passive:false});lock.addEventListener('click',unlock);}
+    const unlock=ev=>{
+      resize();
+      setActive(true);
+      try{canvas.focus({preventScroll:true});}catch(_e){}
+      if(ev&&ev.preventDefault)ev.preventDefault();
+      if(ev&&ev.stopPropagation)ev.stopPropagation();
+    };
+    if(lock){
+      if(window.PointerEvent)lock.addEventListener('pointerdown',unlock,{passive:false});
+      else{
+        lock.addEventListener('touchstart',unlock,{passive:false});
+        lock.addEventListener('mousedown',unlock);
+      }
+      lock.addEventListener('click',unlock,{passive:false});
+    }
   }
   resize();setActive(false);
   return{
