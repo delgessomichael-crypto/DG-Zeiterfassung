@@ -234,11 +234,15 @@ function bindSpeech(surface){
 
   mic.onclick=function(ev){
     ev.preventDefault();
+    var original=String(input.value||'').trimEnd();
+    var base=original?original+'\n\n- ':'- ';
     var rec=new SR();
     rec.lang='de-DE';
     rec.interimResults=false;
     rec.continuous=false;
     mic.textContent='■';
+    input.value=base;
+    input.dispatchEvent(new Event('input',{bubbles:true}));
 
     rec.onresult=function(e){
       var text='';
@@ -246,7 +250,10 @@ function bindSpeech(surface){
         if(e.results[i][0])text+=e.results[i][0].transcript+' ';
       }
       text=text.trim();
-      if(text)input.value=(input.value?input.value.trim()+' ':'')+text;
+      if(text){
+        input.value=base+text;
+        input.dispatchEvent(new Event('input',{bubbles:true}));
+      }
     };
 
     rec.onend=function(){mic.textContent='🎤';};
@@ -270,7 +277,7 @@ function ensureTop(){
         '<span class="muted small">Intelligente Unterstützung für den Büroalltag</span>'+
       '</div>'+
       '<div style="display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center">'+
-        '<input id="dg10FragTopInput" type="text" placeholder="Frag DG – z. B. Was ist heute dringend?" style="margin:0;min-height:46px">'+
+        '<textarea id="dg10FragTopInput" rows="3" placeholder="Frag DG – z. B. Was ist heute dringend?" style="margin:0;min-height:70px;resize:vertical"></textarea>'+
         '<button type="button" class="btn secondary" id="dg10FragTopMic" title="Spracheingabe">🎤</button>'+
         '<button type="button" class="btn primary" id="dg10FragTopSend">Frag DG</button>'+
       '</div>'+
@@ -283,7 +290,7 @@ function ensureTop(){
 
     q('dg10FragTopSend').onclick=function(){askFragDG('top');};
     q('dg10FragTopInput').onkeydown=function(e){
-      if(e.key==='Enter'){
+      if(e.key==='Enter'&&!e.shiftKey){
         e.preventDefault();
         askFragDG('top');
       }
@@ -336,7 +343,7 @@ function ensureSection(){
           '<span class="muted small">Bleibt im Frag-DG-Arbeitsbereich</span>'+
         '</div>'+
         '<div style="display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center">'+
-          '<input id="dg10FragBottomInput" type="text" placeholder="Frag DG – z. B. Was ist heute dringend?" style="margin:0;min-height:46px">'+
+          '<textarea id="dg10FragBottomInput" rows="3" placeholder="Frag DG – z. B. Was ist heute dringend?" style="margin:0;min-height:70px;resize:vertical"></textarea>'+
           '<button type="button" class="btn secondary" id="dg10FragBottomMic" title="Spracheingabe">🎤</button>'+
           '<button type="button" class="btn primary" id="dg10FragBottomSend">Frag DG</button>'+
         '</div>'+
@@ -362,7 +369,7 @@ function ensureSection(){
 
     q('dg10FragBottomSend').onclick=function(){askFragDG('bottom');};
     q('dg10FragBottomInput').onkeydown=function(e){
-      if(e.key==='Enter'){
+      if(e.key==='Enter'&&!e.shiftKey){
         e.preventDefault();
         askFragDG('bottom');
       }
