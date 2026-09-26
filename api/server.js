@@ -11439,7 +11439,7 @@ async function tryDirectPostgresWrite(action,body){
       if(!customer)throw new Error('Kunde fehlt.');
       if(!offerNumber)throw new Error('Angebotsnummer fehlt.');
       if(!(reminderDays>=1&&reminderDays<=90))throw new Error('Bitte 1 bis 90 Tage für den Reminder eintragen.');
-      if(email&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email))throw new Error('E-Mail-Adresse ist ungültig.');
+      if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new Error('E-Mail-Adresse ist ungültig.');
       const iq=await client.query('SELECT status FROM inquiry_offers_shadow WHERE offer_id=$1 FOR UPDATE',[offerId]);
       const tq=await client.query('SELECT id FROM time_entries_shadow WHERE offer_id=$1 FOR UPDATE',[offerId]);
       if(!iq.rowCount&&!tq.rowCount)throw new Error('Angebot wurde nicht gefunden.');
