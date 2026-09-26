@@ -10606,12 +10606,12 @@ async function directRegieReportZipV24(body){
     for(const id of sigIds){const r=fm.get(id);if(!r)throw new Error('Eine Kundenunterschrift wurde noch nicht nach Railway übertragen.');sn++;const ext=(String(r.file_name||'').match(/\.[A-Za-z0-9]{2,5}$/)||['.png'])[0];zip.file('Kundenunterschrift_'+String(sn).padStart(2,'0')+ext,Buffer.from(r.file_data));}
     for(const id of selectedPhotoIds){const r=fm.get(id);if(!r)throw new Error('Ein ausgewähltes Bild wurde noch nicht nach Railway übertragen.');pn++;const ext=(String(r.file_name||'').match(/\.[A-Za-z0-9]{2,5}$/)||['.jpg'])[0];zip.file('Bild_'+String(pn).padStart(2,'0')+ext,Buffer.from(r.file_data));}
   }
-  const aq=await pool.query("SELECT file_id,name FROM regie_attachments_shadow WHERE object_ids_text<>'' AND object_ids_text IS NOT NULL");
+  const aq=await pool.query("SELECT file_id,file_name FROM regie_attachments_shadow WHERE object_ids_text<>'' AND object_ids_text IS NOT NULL");
   let an=0;
   for(const a of aq.rows){
     const parts=String(a.object_ids_text||'').split(',').map(x=>x.trim());if(!parts.some(x=>objectIds.includes(x)))continue;
     const fq=await pool.query('SELECT file_name,file_data FROM binary_files_v10 WHERE id=$1 LIMIT 1',[String(a.file_id||'')]);if(!fq.rowCount)continue;
-    an++;zip.file('Zusatzdatei_'+String(an).padStart(2,'0')+'_'+cleanFileNameV24(a.name||fq.rows[0].file_name,'Datei'),Buffer.from(fq.rows[0].file_data));
+    an++;zip.file('Zusatzdatei_'+String(an).padStart(2,'0')+'_'+cleanFileNameV24(a.file_name||fq.rows[0].file_name,'Datei'),Buffer.from(fq.rows[0].file_data));
   }
   const buf=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE'});
   return {fileName:'Regiebericht_'+safe+'_'+berlinDateOnly(q.rows[0].entry_date).replace(/-/g,'')+'.zip',reportCount:q.rowCount,signatureCount:sigIds.length,photoCount:selectedPhotoIds.length,attachmentCount:an,base64:buf.toString('base64'),railway:true};
