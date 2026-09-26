@@ -2,7 +2,7 @@
 (function(){
 'use strict';
 
-const VERSION='20260924-employee-controls-final1';
+const VERSION='20260926-employee-controls-signature2';
 const state=window.DGEmployeeControls=window.DGEmployeeControls||{installed:false,pad:null,version:VERSION};
 
 function el(id){return document.getElementById(id);}
@@ -46,13 +46,13 @@ function installPad(){
     lock.className='signature-lock';
     wrap.appendChild(lock);
   }
-  lock.textContent='Zum Unterschreiben zweimal tippen';
+  lock.textContent='Zum Unterschreiben einmal tippen';
   wrap.classList.remove('active');
   wrap.classList.add('dg-final-signature');
 
   const hint=wrap.nextElementSibling;
   if(hint&&hint.classList&&hint.classList.contains('signature-hint')){
-    hint.textContent='Beim Scrollen bleibt das Feld gesperrt. Zum Unterschreiben zweimal tippen.';
+    hint.textContent='Beim Scrollen bleibt das Feld gesperrt. Zum Unterschreiben einmal tippen.';
   }
 
   const ctx=canvas.getContext('2d');
@@ -70,12 +70,12 @@ function installPad(){
     if(hint&&hint.classList&&hint.classList.contains('signature-hint')){
       hint.textContent=active
         ?'Unterschrift aktiv – jetzt unterschreiben.'
-        :'Beim Scrollen bleibt das Feld gesperrt. Zum Unterschreiben zweimal tippen.';
+        :'Beim Scrollen bleibt das Feld gesperrt. Zum Unterschreiben einmal tippen.';
     }
   }
   function scheduleRelock(){
     clearTimeout(relockTimer);
-    relockTimer=setTimeout(()=>setActive(false),2500);
+    relockTimer=setTimeout(()=>setActive(false),10000);
   }
   function paintConfig(){
     const ratio=window.devicePixelRatio||1;
@@ -131,24 +131,34 @@ function installPad(){
 
   const unlock=ev=>{
     if(ev){ev.preventDefault();ev.stopPropagation();}
-    const now=Date.now();
-    if(now-lastTap<550){
-      lastTap=0;
-      setActive(true);
-    }else{
-      lastTap=now;
-    }
+    lastTap=0;
+    clearTimeout(relockTimer);
+    setActive(true);
   };
-  lock.addEventListener('pointerup',unlock,{passive:false});
-  lock.addEventListener('click',ev=>{ev.preventDefault();ev.stopPropagation();});
-
   if(window.PointerEvent){
+    lock.addEventListener('pointerup',unlock,{passive:false});
     canvas.addEventListener('pointerdown',begin,{passive:false});
     canvas.addEventListener('pointermove',move,{passive:false});
     canvas.addEventListener('pointerup',finish,{passive:false});
     canvas.addEventListener('pointercancel',finish,{passive:false});
+  }else{
+    lock.addEventListener('click',unlock);
+    const touchPoint=ev=>{
+      const p=ev.touches&&ev.touches[0]?ev.touches[0]:(ev.changedTouches&&ev.changedTouches[0]?ev.changedTouches[0]:ev);
+      return {clientX:p.clientX,clientY:p.clientY,pointerId:1,isPrimary:true,preventDefault:()=>ev.preventDefault(),stopPropagation:()=>ev.stopPropagation()};
+    };
+    canvas.addEventListener('mousedown',ev=>begin({clientX:ev.clientX,clientY:ev.clientY,pointerId:1,isPrimary:true,preventDefault:()=>ev.preventDefault(),stopPropagation:()=>ev.stopPropagation()}),{passive:false});
+    canvas.addEventListener('mousemove',ev=>move({clientX:ev.clientX,clientY:ev.clientY,pointerId:1,preventDefault:()=>ev.preventDefault(),stopPropagation:()=>ev.stopPropagation()}),{passive:false});
+    window.addEventListener('mouseup',ev=>finish({pointerId:1,preventDefault:()=>ev.preventDefault(),stopPropagation:()=>ev.stopPropagation()}),{passive:false});
+    canvas.addEventListener('touchstart',ev=>begin(touchPoint(ev)),{passive:false});
+    canvas.addEventListener('touchmove',ev=>move(touchPoint(ev)),{passive:false});
+    canvas.addEventListener('touchend',ev=>finish(touchPoint(ev)),{passive:false});
   }
+  lock.addEventListener('click',ev=>{if(!active)unlock(ev);else{ev.preventDefault();ev.stopPropagation();}});
 
+  document.addEventListener('pointerdown',ev=>{
+    if(active&&!wrap.contains(ev.target))setActive(false);
+  },true);
   canvas.addEventListener('contextmenu',ev=>ev.preventDefault());
   resize(false);
   setActive(false);
