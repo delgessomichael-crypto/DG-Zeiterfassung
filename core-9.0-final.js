@@ -1962,9 +1962,14 @@ function d34AqonLinks(r){
 }
 function d80WhatsappAttachmentHtml(r){
   const a=Array.isArray(r&&r.attachments)?r.attachments:[];if(!a.length)return '';
-  return '<div class="d80-wa-att"><strong>WhatsApp-Anhänge</strong><div class="report-actions">'+a.map(x=>{
-    const label=/^image\//i.test(String(x.mime||''))?'🖼 Bild öffnen':(/pdf/i.test(String(x.mime||''))?'📄 PDF öffnen':'📎 '+esc(x.name||x.type||'Anhang'));
-    return '<button type="button" class="btn secondary" onclick="return dg80WhatsappOpenMedia(\''+esc(x.mediaId||'')+'\',\''+esc(x.name||'')+'\')">'+label+'</button>';
+  const isWhatsapp=String(r&&r.source||'').toLowerCase().includes('whatsapp');
+  const title=isWhatsapp?'WhatsApp-Anhänge':'Anhänge';
+  return '<div class="d80-wa-att"><strong>'+title+'</strong><div class="report-actions">'+a.map(x=>{
+    const mime=String(x&&x.mime||''),name=String(x&&x.name||x&&x.type||'Anhang'),url=String(x&&x.url||'');
+    const label=/^image\//i.test(mime)?'🖼 Bild öffnen':(/pdf/i.test(mime)?'📄 PDF öffnen':'📎 '+esc(name));
+    if(url)return '<a class="btn secondary" target="_blank" rel="noopener noreferrer" href="'+esc(url)+'">'+label+'</a>';
+    if(isWhatsapp&&x&&x.mediaId)return '<button type="button" class="btn secondary" onclick="return dg80WhatsappOpenMedia(\''+esc(x.mediaId)+'\',\''+esc(name)+'\')">'+label+'</button>';
+    return '<span class="btn secondary" style="opacity:.65;cursor:default" title="Anhang noch nicht lokal verfügbar">'+label+'</span>';
   }).join('')+'</div></div>';
 }
 function d32InquiryCard(r,i,archive=false){
