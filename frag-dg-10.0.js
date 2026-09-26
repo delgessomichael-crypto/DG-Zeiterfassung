@@ -8,6 +8,142 @@ function payload(extra){
   return extra||{};
 }
 
+function ensureFragCss(){
+  if(q('dg10FragCss'))return;
+  var s=document.createElement('style');
+  s.id='dg10FragCss';
+  s.textContent=
+    '#dg10FragTopBar{margin:0 0 11px;padding:12px;border:2px solid #405fa7;border-radius:15px;background:#f4f7ff;box-sizing:border-box}'+
+    '.dg10-frag-answer{white-space:pre-wrap;line-height:1.45}'+
+    '.dg10-frag-tasks{display:grid;gap:8px;margin-top:10px}'+
+    '.dg10-frag-task{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 11px;border:1px solid #cbd5e1;border-radius:12px;background:#fff}'+
+    '.dg10-frag-task input[type="checkbox"]{width:20px!important;height:20px!important;margin:0!important}'+
+    '.dg10-frag-task-title{font-weight:800;color:#1f2937}'+
+    '.dg10-frag-task-detail{font-size:13px;color:#64748b;margin-top:2px}'+
+    '.dg10-frag-task-meta{font-size:12px;color:#31589e;margin-top:4px;font-weight:700}'+
+    '.dg10-frag-task.done{opacity:.58;background:#f8fafc}'+
+    '.dg10-frag-task.done .dg10-frag-task-title{text-decoration:line-through}'+
+    '.dg10-frag-highlight{outline:4px solid rgba(49,88,158,.35)!important;outline-offset:3px!important;transition:outline-color .4s ease}'+
+    '@media(max-width:700px){.dg10-frag-task{grid-template-columns:auto minmax(0,1fr)}.dg10-frag-task .dg10-frag-open{grid-column:1/-1;width:100%}}';
+  document.head.appendChild(s);
+}
+
+function recordCardHasId(card,id){
+  if(!card||!id)return false;
+  var els=card.querySelectorAll('[data-d3-args]');
+  for(var i=0;i<els.length;i++){
+    var raw=String(els[i].getAttribute('data-d3-args')||'');
+    try{
+      var args=JSON.parse(raw);
+      if(Array.isArray(args)&&args.some(function(v){return String(v)===String(id);} ))return true;
+    }catch(_e){
+      if(raw.indexOf(String(id))!==-1)return true;
+    }
+  }
+  return false;
+}
+
+function waitForTaskCard(selector,id,tries){
+  return new Promise(function(resolve){
+    var left=Number(tries||35);
+    (function tick(){
+      var root=document.querySelector(selector);
+      if(root){
+        var cards=root.querySelectorAll('.report-card');
+        for(var i=0;i<cards.length;i++)if(recordCardHasId(cards[i],id))return resolve(cards[i]);
+      }
+      if(--left<=0)return resolve(null);
+      setTimeout(tick,120);
+    })();
+  });
+}
+
+async function openFragTask(task){
+  if(!task||typeof window.d3Open!=='function')throw new Error('Der Zielbereich ist noch nicht bereit.');
+  var type=String(task.sourceType||''),id=String(task.sourceId||''),stage=String(task.stage||'');
+  var selector='',fallback=null;
+  if(type==='inquiry'){
+    window.d3Open('d3InquiriesGroup','d3Inquiries');
+    selector='#d3InquiryList';
+    fallback=q('d3InquiriesGroup')||q('d3Inquiries');
+  }else if(type==='offer'){
+    var child=stage==='Zu erstellen'?'d3OfferCreate':(stage==='Offen'?'d3OfferOpen':'d3OfferArchive');
+    window.d3Open('d3Offers',child);
+    selector='#'+child+'List';
+    fallback=q('d3Offers');
+  }else if(type==='order'){
+    window.d3Open('d3Running');
+    selector='#d3OrderPlan';
+    fallback=q('d3Running');
+  }else{
+    throw new Error('Für diesen Punkt ist kein direkter App-Bereich hinterlegt.');
+  }
+  var card=await waitForTaskCard(selector,id,40);
+  var target=card||fallback;
+  if(target&&target.scrollIntoView)target.scrollIntoView({behavior:'smooth',block:card?'center':'start'});
+  if(card){
+    card.classList.add('dg10-frag-highlight');
+    setTimeout(function(){card.classList.remove('dg10-frag-highlight');},3500);
+  }
+}
+
+function renderFragResult(r,out){
+  out.replaceChildren();
+  var answer=document.createElement('div');
+  answer.className='dg10-frag-answer';
+  answer.textContent=String(r&&r.text||'Keine Antwort erhalten.');
+  out.appendChild(answer);
+
+  var tasks=Array.isArray(r&&r.tasks)?r.tasks:[];
+  if(!tasks.length)return;
+
+  var list=document.createElement('div');
+  list.className='dg10-frag-tasks';
+  tasks.forEach(function(task){
+    var row=document.createElement('div');
+    row.className='dg10-frag-task';
+
+    var done=document.createElement('input');
+    done.type='checkbox';
+    done.title='Nach Erledigung abhaken';
+
+    var body=document.createElement('div');
+    var title=document.createElement('div');
+    title.className='dg10-frag-task-title';
+    title.textContent=String(task.title||task.customer||'Vorgang');
+    var detail=document.createElement('div');
+    detail.className='dg10-frag-task-detail';
+    detail.textContent=String(task.detail||'');
+    var meta=document.createElement('div');
+    meta.className='dg10-frag-task-meta';
+    meta.textContent=[task.customer,task.stage].filter(Boolean).join(' · ');
+    body.appendChild(title);
+    if(detail.textContent)body.appendChild(detail);
+    if(meta.textContent)body.appendChild(meta);
+
+    var open=document.createElement('button');
+    open.type='button';
+    open.className='btn secondary dg10-frag-open';
+    open.textContent='Vorgang öffnen';
+    open.onclick=async function(ev){
+      ev.preventDefault();
+      open.disabled=true;
+      var old=open.textContent;
+      open.textContent='Öffne ...';
+      try{await openFragTask(task);}
+      catch(e){alert(String(e&&e.message||e));}
+      finally{open.disabled=false;open.textContent=old;}
+    };
+
+    done.onchange=function(){row.classList.toggle('done',done.checked);};
+    row.appendChild(done);
+    row.appendChild(body);
+    row.appendChild(open);
+    list.appendChild(row);
+  });
+  out.appendChild(list);
+}
+
 async function askFragDG(){
   var input=q('dg10FragTopInput');
   var out=q('dg10FragTopOut');
@@ -23,7 +159,7 @@ async function askFragDG(){
     if(typeof window.api!=='function')throw new Error('App-Schnittstelle ist noch nicht bereit.');
     var r=await window.api(payload({action:'getAiAssistantV10',prompt:prompt}));
     out.className=(r&&(r.configured===false||r.billingRequired))?'status warn':'status ok';
-    out.textContent=String(r&&r.text||'Keine Antwort erhalten.');
+    renderFragResult(r,out);
   }catch(e){
     out.className='status error';
     out.textContent=String(e&&e.message||e);
@@ -76,7 +212,7 @@ function ensureTop(){
   if(!box){
     box=document.createElement('section');
     box.id='dg10FragTopBar';
-    box.style.cssText='margin:0 0 11px;padding:12px;border:2px solid #405fa7;border-radius:15px;background:#f4f7ff;box-sizing:border-box;';
+    box.style.cssText='';
     box.innerHTML=
       '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px">'+
         '<strong style="font-size:18px;color:#31589e">Frag DG</strong>'+
@@ -89,8 +225,10 @@ function ensureTop(){
       '</div>'+
       '<div id="dg10FragTopOut" style="margin-top:8px;white-space:pre-wrap"></div>';
 
-    var appShell=q('dg10AppShell');
-    boss.insertBefore(box,appShell||boss.firstChild);
+    var appRoot=q('mainScreen')&&q('mainScreen').querySelector(':scope > .app');
+    var accessShell=q('dg10AccessShell');
+    if(appRoot)appRoot.insertBefore(box,accessShell||appRoot.firstChild);
+    else boss.insertBefore(box,boss.firstChild);
 
     q('dg10FragTopSend').onclick=askFragDG;
     q('dg10FragTopInput').onkeydown=function(e){
@@ -101,9 +239,12 @@ function ensureTop(){
     };
     bindSpeech();
   }else{
-    var app=q('dg10AppShell');
-    if(app&&box.nextElementSibling!==app)boss.insertBefore(box,app);
+    var appRoot2=q('mainScreen')&&q('mainScreen').querySelector(':scope > .app');
+    var accessShell2=q('dg10AccessShell');
+    if(appRoot2&&box.parentElement!==appRoot2)appRoot2.insertBefore(box,accessShell2||appRoot2.firstChild);
+    else if(appRoot2&&accessShell2&&box.nextElementSibling!==accessShell2)appRoot2.insertBefore(box,accessShell2);
   }
+  box.style.display='';
 }
 
 function toggleSection(sec,title){
@@ -168,8 +309,13 @@ function ensureSection(){
 }
 
 function mount(){
+  ensureFragCss();
   var boss=q('bossView');
-  if(!boss||boss.classList.contains('hidden'))return;
+  var box=q('dg10FragTopBar');
+  if(!boss||boss.classList.contains('hidden')){
+    if(box)box.style.display='none';
+    return;
+  }
   ensureTop();
   ensureSection();
 }
