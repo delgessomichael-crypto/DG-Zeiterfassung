@@ -1393,6 +1393,43 @@ async function restoreTodayDiscardedOffersOnceV10(){
   return {today,inquiryOffers,regieGroups,regieEntries};
 }
 
+async function cleanupGeorgDresselDuplicateOfferV31(){
+  if(!pool)return;
+  const marker='cleanup_georg_dressel_duplicate_offer_v31';
+  const done=await pool.query('SELECT 1 FROM app_meta WHERE key=$1 LIMIT 1',[marker]);
+  if(done.rowCount)return;
+
+  const q=await pool.query(
+    `SELECT o.offer_id,o.customer,o.email,o.source,o.status,
+            EXISTS(SELECT 1 FROM offer_reminders_shadow r
+                    WHERE r.offer_id=o.offer_id AND r.status='Offen') AS has_open_reminder
+       FROM inquiry_offers_shadow o
+      WHERE lower(COALESCE(o.email,''))='georg.dressel@gmail.com'
+         OR lower(COALESCE(o.customer,'')) IN ('georg dreßel','georg dressel')
+      ORDER BY o.shadow_updated_at DESC NULLS LAST,o.created_at_text DESC NULLS LAST,o.offer_id`
+  );
+  const rows=q.rows||[];
+  const keep=rows.find(r=>r.has_open_reminder&&['Offen','Zu erstellen'].includes(String(r.status||'')));
+  const removed=[];
+  if(keep){
+    for(const r of rows){
+      const id=String(r.offer_id||'');
+      if(!id||id===String(keep.offer_id||'')||r.has_open_reminder)continue;
+      if(!['Offen','Zu erstellen'].includes(String(r.status||'')))continue;
+      const tq=await pool.query('SELECT COUNT(*)::int AS n FROM time_entries_shadow WHERE offer_id=$1',[id]);
+      if(Number(tq.rows[0]?.n||0)>0)continue;
+      await pool.query('DELETE FROM inquiry_offers_shadow WHERE offer_id=$1',[id]);
+      removed.push(id);
+    }
+  }
+  await pool.query(
+    `INSERT INTO app_meta(key,value) VALUES($1,$2::jsonb)
+      ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
+    [marker,JSON.stringify({at:new Date().toISOString(),keptOfferId:keep?String(keep.offer_id||''):'',removed})]
+  );
+  console.log('CLEANUP_GEORG_DRESSEL_DUPLICATE kept='+(keep?String(keep.offer_id||''):'none')+' removed='+removed.join(','));
+}
+
 async function initDb() {
   if (!pool) return;
   await pool.query(schema);
@@ -1407,6 +1444,7 @@ async function initDb() {
   await initOwnRemindersShadow();
   await initOfferRemindersShadow();
   await initInquiryOffersShadow();
+  await cleanupGeorgDresselDuplicateOfferV31();
   await initCustomerInquiriesShadow();
   await initInquiryRemindersShadow();
   await initPlannerWorkersShadow();
