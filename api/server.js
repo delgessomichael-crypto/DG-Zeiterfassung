@@ -11435,6 +11435,107 @@ async function tryDirectPostgresWrite(action,body){
         result={ok:true,existing:false,offerId,timeEntryId,customer,hoursBooked:hours,activity,
           transferredAt:nowIso,transferredBy:by,sourceCalendarEventId:sourceEventId};
       }
+    }else if(action==='mergeOffersV10'){
+      const offerIds=[...new Set((Array.isArray(body.offerIds)?body.offerIds:[]).map(x=>String(x||'').trim()).filter(Boolean))];
+      if(offerIds.length<2)throw new Error('Bitte mindestens zwei Angebote auswählen.');
+      const primary=String(body.primaryOfferId||offerIds[0]||'').trim();
+      if(!primary||!offerIds.includes(primary))throw new Error('Hauptangebot fehlt.');
+
+      const iq=await client.query(
+        `SELECT offer_id,inquiry_id,customer,phone,email,description,source,status,attachments_json
+           FROM inquiry_offers_shadow WHERE offer_id=ANY($1::text[]) FOR UPDATE`,[offerIds]
+      );
+      const tq=await client.query(
+        `SELECT id,offer_id,job_status FROM time_entries_shadow WHERE offer_id=ANY($1::text[]) FOR UPDATE`,[offerIds]
+      );
+      const found=new Set([...iq.rows.map(r=>String(r.offer_id||'')),...tq.rows.map(r=>String(r.offer_id||''))]);
+      const missing=offerIds.filter(id=>!found.has(id));
+      if(missing.length)throw new Error('Mindestens ein Angebot wurde nicht mehr gefunden. Bitte Liste neu laden.');
+      const badInquiry=iq.rows.find(r=>!['Zu erstellen','Offen'].includes(String(r.status||'')));
+      const badTime=tq.rows.find(r=>String(r.job_status||'')!=='Angebot zu erstellen');
+      if(badInquiry||badTime)throw new Error('Zusammenführen ist nur bei „Zu erstellende Angebote“ möglich.');
+
+      const primaryIq=iq.rows.find(r=>String(r.offer_id||'')===primary)||null;
+      const secondaryIq=iq.rows.filter(r=>String(r.offer_id||'')!==primary);
+      const mergeText=(a,b)=>{
+        a=String(a||'').trim();b=String(b||'').trim();
+        if(!a)return b;if(!b||a===b)return a;
+        return a+'\n\n---\n\n'+b;
+      };
+      const mergeAttachments=(a,b)=>{
+        const parse=v=>{try{const x=JSON.parse(String(v||'[]'));return Array.isArray(x)?x:[];}catch(_e){return [];}};
+        const out=[],seen=new Set();
+        for(const x of [...parse(a),...parse(b)]){
+          const key=JSON.stringify(x||{});
+          if(!seen.has(key)){seen.add(key);out.push(x);}
+        }
+        return JSON.stringify(out);
+      };
+
+      if(primaryIq){
+        let merged={...primaryIq};
+        for(const s of secondaryIq){
+          merged.customer=merged.customer||s.customer;
+          merged.phone=merged.phone||s.phone;
+          merged.email=merged.email||s.email;
+          merged.description=mergeText(merged.description,s.description);
+          merged.source=merged.source||s.source;
+          merged.attachments_json=mergeAttachments(merged.attachments_json,s.attachments_json);
+        }
+        await client.query(
+          `UPDATE inquiry_offers_shadow SET customer=$2,phone=$3,email=$4,description=$5,source=$6,
+             attachments_json=$7,changed_at_text=$8,changed_by=$9,shadow_updated_at=now()
+           WHERE offer_id=$1`,
+          [primary,String(merged.customer||''),String(merged.phone||''),String(merged.email||''),
+           String(merged.description||''),String(merged.source||''),String(merged.attachments_json||'[]'),nowIso,by]
+        );
+        if(secondaryIq.length){
+          await client.query('DELETE FROM inquiry_offers_shadow WHERE offer_id=ANY($1::text[])',
+            [secondaryIq.map(r=>String(r.offer_id||''))]);
+        }
+      }else if(secondaryIq.length){
+        const keep=secondaryIq[0],keepId=String(keep.offer_id||'');
+        await client.query('UPDATE inquiry_offers_shadow SET offer_id=$2,changed_at_text=$3,changed_by=$4,shadow_updated_at=now() WHERE offer_id=$1',
+          [keepId,primary,nowIso,by]);
+        const rest=secondaryIq.slice(1);
+        if(rest.length){
+          let merged={...keep};
+          for(const s of rest){
+            merged.phone=merged.phone||s.phone;merged.email=merged.email||s.email;
+            merged.description=mergeText(merged.description,s.description);
+            merged.attachments_json=mergeAttachments(merged.attachments_json,s.attachments_json);
+          }
+          await client.query(
+            `UPDATE inquiry_offers_shadow SET phone=$2,email=$3,description=$4,attachments_json=$5,
+               changed_at_text=$6,changed_by=$7,shadow_updated_at=now() WHERE offer_id=$1`,
+            [primary,String(merged.phone||''),String(merged.email||''),String(merged.description||''),
+             String(merged.attachments_json||'[]'),nowIso,by]
+          );
+          await client.query('DELETE FROM inquiry_offers_shadow WHERE offer_id=ANY($1::text[])',
+            [rest.map(r=>String(r.offer_id||''))]);
+        }
+      }
+
+      const secondaryIds=offerIds.filter(id=>id!==primary);
+      if(secondaryIds.length){
+        await client.query(
+          `UPDATE time_entries_shadow SET offer_id=$1,offer_changed_at_text=$3,offer_changed_by=$4,shadow_updated_at=now()
+            WHERE offer_id=ANY($2::text[])`,
+          [primary,secondaryIds,nowIso,by]
+        );
+        await client.query(
+          `UPDATE customer_inquiries_shadow SET offer_id=$1,changed_at_text=$3,changed_by=$4,shadow_updated_at=now()
+            WHERE offer_id=ANY($2::text[])`,
+          [primary,secondaryIds,nowIso,by]
+        );
+        await client.query(
+          `UPDATE offer_reminders_shadow SET offer_id=$1,changed_at_text=$3,changed_by=$4,shadow_updated_at=now()
+            WHERE offer_id=ANY($2::text[])`,
+          [primary,secondaryIds,nowIso,by]
+        );
+      }
+      skipLegacySync=true;
+      result={ok:true,offerId:primary,mergedCount:offerIds.length};
     }else if(action==='saveOfferCreatedWithReminder'){
       const offerId=String(body.offerId||'').trim(),item=body.item||{};
       const customer=String(item.customer||'').trim(),offerNumber=String(item.offerNumber||'').trim();
