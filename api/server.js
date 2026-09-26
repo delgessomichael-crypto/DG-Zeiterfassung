@@ -6246,7 +6246,7 @@ async function postgresCustomerInquiryView(status){
     attachments:(()=>{try{const a=JSON.parse(String(r.attachments_json||'[]'));return Array.isArray(a)?a:[];}catch(_e){return [];}})(),
     _receivedSort:String(r.received_at_text||'')
   }));
-  const grouped=await mergeInquiryRowsV10(base),excluded=new Set(['Erledigt','Gelöscht','Übernommen','Archiviert','Reminder']);
+  const grouped=await mergeInquiryRowsV10(base),excluded=new Set(['Erledigt','Gelöscht','Übernommen','Archiviert','Reminder','Angebot erstellt']);
   return grouped.filter(r=>{
     const st=String(r.status||'Neu');
     if(status==='Offen')return !excluded.has(st);
@@ -6411,8 +6411,8 @@ async function mirrorInquiryWrite(action,body,parsed){
   }else if(action==='inquiryToOffer'){
     if(data.existing)return;
     await pool.query(
-      `UPDATE customer_inquiries_shadow SET customer=$2,phone=$3,status='Angebot erstellt',
-        read_flag=true,offer_id=$4,changed_at_text=$5,changed_by=$6,shadow_updated_at=now() WHERE id=$1`,
+      `UPDATE customer_inquiries_shadow SET customer=$2,phone=$3,status='Übernommen',
+        read_flag=true,done_reason='Angebot zu erstellen',offer_id=$4,changed_at_text=$5,changed_by=$6,shadow_updated_at=now() WHERE id=$1`,
       [id,String(body.customer||''),String(body.phone||''),String(data.offerId||''),now,by]
     );
   }else if(action==='saveManualOrder'){
