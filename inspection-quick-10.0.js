@@ -232,9 +232,10 @@ function toggleSpeech(){
   // Nur bestätigte Ergebnisse übernehmen. Android/Samsung liefert Zwischenresultate
   // mehrfach; diese dürfen nicht dauerhaft in den Text geschrieben werden.
   recognition.interimResults=false;
-  const initial=String($('inspectionDescription')?.value||'').trim();
+  const initial=String($('inspectionDescription')?.value||'').trimEnd();
+  const sessionBase=initial?initial+'\n\n- ':'- ';
   const committed=new Map();
-  recognition.onstart=()=>{speechActive=true;if($('inspectionSpeechBtn'))$('inspectionSpeechBtn').textContent='⏹ Spracheingabe stoppen';notice('Spracheingabe läuft …','info');};
+  recognition.onstart=()=>{speechActive=true;const ta=$('inspectionDescription');if(ta){ta.value=sessionBase;ta.dispatchEvent(new Event('input',{bubbles:true}));}if($('inspectionSpeechBtn'))$('inspectionSpeechBtn').textContent='⏹ Spracheingabe stoppen';notice('Spracheingabe läuft – neuer Sprachblock als Stichpunkt.','info');};
   recognition.onresult=ev=>{
     for(let i=ev.resultIndex;i<ev.results.length;i++){
       if(!ev.results[i].isFinal)continue;
@@ -243,7 +244,7 @@ function toggleSpeech(){
     }
     const spoken=[...committed.keys()].sort((a,b)=>a-b).map(i=>committed.get(i)).filter(Boolean).join(' ');
     const ta=$('inspectionDescription');
-    if(ta)ta.value=[initial,spoken].filter(Boolean).join(initial&&spoken?' ':'').trim();
+    if(ta){ta.value=sessionBase+spoken;ta.dispatchEvent(new Event('input',{bubbles:true}));}
   };
   recognition.onerror=ev=>{notice('Spracheingabe: '+String(ev.error||'Fehler'),'warn');stopSpeech();};
   recognition.onend=()=>{speechActive=false;recognition=null;const b=$('inspectionSpeechBtn');if(b)b.textContent='🎤 Spracheingabe';};
