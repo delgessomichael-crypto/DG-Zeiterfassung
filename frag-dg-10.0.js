@@ -20,7 +20,12 @@ function ensureFragCss(){
     '.dg10-frag-task input[type="checkbox"]{width:20px!important;height:20px!important;margin:0!important}'+
     '.dg10-frag-task-title{font-weight:800;color:#1f2937}'+
     '.dg10-frag-task-detail{font-size:13px;color:#64748b;margin-top:2px}'+
-    '.dg10-frag-task-meta{font-size:12px;color:#31589e;margin-top:4px;font-weight:700}'+
+    '.dg10-frag-task-meta{font-size:12px;color:#31589e;margin-top:4px;font-weight:700;display:flex;gap:6px;flex-wrap:wrap;align-items:center}'+
+    '.dg10-frag-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 7px;border-radius:999px;background:#eef4ff;color:#31589e}'+
+    '.dg10-frag-priority{display:inline-flex;align-items:center;gap:5px;padding:3px 7px;border-radius:999px;font-weight:900}'+
+    '.dg10-frag-priority.rot{background:#fee2e2;color:#991b1b}'+
+    '.dg10-frag-priority.gelb{background:#fef3c7;color:#92400e}'+
+    '.dg10-frag-priority.grün{background:#dcfce7;color:#166534}'+
     '.dg10-frag-task.done{opacity:.58;background:#f8fafc}'+
     '.dg10-frag-task.done .dg10-frag-task-title{text-decoration:line-through}'+
     '.dg10-frag-highlight{outline:4px solid rgba(49,88,158,.35)!important;outline-offset:3px!important;transition:outline-color .4s ease}'+
@@ -116,10 +121,20 @@ function renderFragResult(r,out){
     detail.textContent=String(task.detail||'');
     var meta=document.createElement('div');
     meta.className='dg10-frag-task-meta';
-    meta.textContent=[task.customer,task.stage].filter(Boolean).join(' · ');
+    var pr=document.createElement('span');
+    var priority=String(task.priority||'grün').toLowerCase();
+    pr.className='dg10-frag-priority '+priority;
+    pr.textContent=(priority==='rot'?'🔴':priority==='gelb'?'🟡':'🟢')+' '+priority.toUpperCase();
+    meta.appendChild(pr);
+    [task.category,task.customer,task.stage].filter(Boolean).forEach(function(v){
+      var chip=document.createElement('span');
+      chip.className='dg10-frag-chip';
+      chip.textContent=String(v);
+      meta.appendChild(chip);
+    });
     body.appendChild(title);
     if(detail.textContent)body.appendChild(detail);
-    if(meta.textContent)body.appendChild(meta);
+    body.appendChild(meta);
 
     var open=document.createElement('button');
     open.type='button';
@@ -142,6 +157,18 @@ function renderFragResult(r,out){
     list.appendChild(row);
   });
   out.appendChild(list);
+}
+
+function quickAskFragDG(prompt){
+  var input=q('dg10FragTopInput');
+  if(!input)return;
+  input.value=String(prompt||'');
+  input.focus();
+  askFragDG();
+}
+
+function showPlannedFeature(title,text){
+  alert(title+'\n\n'+text);
 }
 
 async function askFragDG(){
@@ -272,12 +299,16 @@ function ensureSection(){
         '<span>Frag DG</span><span class="dg10-section-chevron" aria-hidden="true">▾</span>'+
       '</div>'+
       '<div class="dg80-final-grid">'+
-        '<button type="button" id="dg10FragOwnRef" class="d3-tile dg80-final-tile">'+
-          '<span>Referenzbaustellen</span><strong>›</strong>'+
-        '</button>'+
+        '<button type="button" id="dg10FragDaily" class="d3-tile dg80-final-tile"><span>Tagesbriefing</span><strong>☀</strong></button>'+
+        '<button type="button" id="dg10FragPriority" class="d3-tile dg80-final-tile"><span>Prioritäten & offene Punkte</span><strong>!</strong></button>'+
+        '<button type="button" id="dg10FragApp" class="d3-tile dg80-final-tile"><span>App-Verwaltung</span><strong>⚙</strong></button>'+
+        '<button type="button" id="dg10FragWeb" class="d3-tile dg80-final-tile"><span>Website & SEO</span><strong>⌂</strong></button>'+
+        '<button type="button" id="dg10FragOwnRef" class="d3-tile dg80-final-tile"><span>Referenzbaustellen</span><strong>›</strong></button>'+
+        '<button type="button" id="dg10FragGoogle" class="d3-tile dg80-final-tile"><span>Google Business</span><strong>G</strong></button>'+
       '</div>';
 
     archive.insertAdjacentElement('afterend',sec);
+    sec.dataset.dg10HubVersion='2';
 
     var title=sec.querySelector(':scope > .dg80-final-section-title');
     title.addEventListener('click',function(ev){
@@ -293,6 +324,29 @@ function ensureSection(){
       toggleSection(sec,title);
     },true);
 
+    var daily=q('dg10FragDaily');
+    if(daily)daily.onclick=function(ev){
+      ev.preventDefault();ev.stopPropagation();
+      quickAskFragDG('Erstelle mein Tagesbriefing für heute. Ordne alle direkt bearbeitbaren offenen Vorgänge nach rot, gelb, grün. Zeige besonders: heute fällig, überfällig, wartet auf Kunde, Angebot zu erstellen und Auftrag ohne Termin. Gib mir die verknüpfbaren Vorgänge als Arbeitsliste.');
+      q('dg10FragTopBar')?.scrollIntoView({behavior:'smooth',block:'start'});
+    };
+    var priority=q('dg10FragPriority');
+    if(priority)priority.onclick=function(ev){
+      ev.preventDefault();ev.stopPropagation();
+      quickAskFragDG('Prüfe meine offenen Anfragen, Angebote und Aufträge auf Priorität. Kennzeichne rot nur bei echter Dringlichkeit oder Blockade, gelb für zeitnahe Bearbeitung, grün für normal. Zeige die nächsten sinnvollen Schritte und verknüpfe jeden konkreten Vorgang.');
+      q('dg10FragTopBar')?.scrollIntoView({behavior:'smooth',block:'start'});
+    };
+    var app=q('dg10FragApp');
+    if(app)app.onclick=function(ev){
+      ev.preventDefault();ev.stopPropagation();
+      quickAskFragDG('Prüfe die aktuell verfügbaren App-Vorgänge auf offene Arbeit, Auffälligkeiten und sinnvolle nächste Schritte. Nenne nur Dinge, die aus den App-Daten ableitbar sind und verknüpfe konkrete Vorgänge.');
+      q('dg10FragTopBar')?.scrollIntoView({behavior:'smooth',block:'start'});
+    };
+    var web=q('dg10FragWeb');
+    if(web)web.onclick=function(ev){
+      ev.preventDefault();ev.stopPropagation();
+      showPlannedFeature('Website & SEO','Diese Steuerung ist vorbereitet. Für direkte Änderungen an delgesso.info verbinden wir als nächsten Schritt die Website mit Frag DG. Danach kann Frag DG Seiten prüfen, Inhalte aktualisieren, SEO-/KI-Optimierungen vorbereiten und nach Freigabe veröffentlichen.');
+    };
     var b=q('dg10FragOwnRef');
     if(b)b.onclick=function(ev){
       ev.preventDefault();
@@ -303,9 +357,19 @@ function ensureSection(){
         alert('Referenzbaustellen werden noch geladen. Bitte die App einmal aktualisieren.');
       }
     };
-  }else if(sec.previousElementSibling!==archive){
-    archive.insertAdjacentElement('afterend',sec);
+    var google=q('dg10FragGoogle');
+    if(google)google.onclick=function(ev){
+      ev.preventDefault();ev.stopPropagation();
+      showPlannedFeature('Google Business','Die Kachel ist vorbereitet. Sobald Google Business verbunden ist, soll Frag DG hier 5-Sterne-Bewertungen zur Antwort vorlegen, Beiträge aus freigegebenen Referenzbaustellen erstellen und nach deiner Freigabe veröffentlichen.');
+    };
+  }else{
+    if(sec.dataset.dg10HubVersion!=='2'){
+      sec.remove();
+      return ensureSection();
+    }
+    if(sec.previousElementSibling!==archive)archive.insertAdjacentElement('afterend',sec);
   }
+  sec.dataset.dg10HubVersion='2';
 }
 
 function mount(){
